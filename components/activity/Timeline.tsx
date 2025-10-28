@@ -1,11 +1,12 @@
 "use client";
 
+import { CalendarClock, CheckCircle2, Users } from "lucide-react";
+
 export default function Timeline() {
   return (
     <section className="mt-4">
       <h2 className="sr-only">Timeline</h2>
       <div className="relative">
-        <div className="absolute left-6 top-0 bottom-0 w-px bg-border" />
         <ul className="space-y-4">
           {[
             {
@@ -24,18 +25,38 @@ export default function Timeline() {
               title: "Pool Party Crew – guest list",
               type: "planned",
             },
-          ].map((item, idx) => (
-            <li key={idx} className="flex gap-3">
-              <div className="relative z-10 mt-1 ml-4 h-3 w-3 rounded-full bg-primary ring-2 ring-background" />
-              <div className="rounded-xl border bg-card text-card-foreground p-3 flex-1">
-                <div className="text-xs text-muted-foreground">{item.when}</div>
-                <div className="mt-1 font-medium">{item.title}</div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  {item.type === "past" ? "Completed" : "Scheduled"}
+          ].map((item, idx, arr) => {
+            const isPast = item.type === "past";
+            const Icon = isPast ? Users : CalendarClock;
+            return (
+              <li key={idx} className="relative flex gap-3">
+                {idx < arr.length - 1 && (
+                  <div
+                    className="absolute left-[22px] top-5 w-px bg-border"
+                    style={{ bottom: "-36px" }}
+                  />
+                )}
+                <div className="relative ml-2.5 mt-3.5 z-10">
+                  <div className="flex h-6 w-6 items-center justify-center rounded-full ring-2 ring-background bg-card shadow-sm">
+                    <Icon
+                      className={`h-3.5 w-3.5 ${
+                        isPast ? "text-blue-500" : "text-primary"
+                      }`}
+                    />
+                  </div>
                 </div>
-              </div>
-            </li>
-          ))}
+                <div className="rounded-xl bg-card text-card-foreground p-3 flex-1">
+                  <div className="text-xs text-muted-foreground">
+                    {item.when}
+                  </div>
+                  <div className="mt-1 font-medium">{item.title}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {item.type === "past" ? "You attended" : "Scheduled"}
+                  </div>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       </div>
     </section>
