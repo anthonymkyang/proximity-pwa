@@ -17,20 +17,20 @@ export default function AppBar() {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-20 border-t bg-card/95 backdrop-blur supports-backdrop-filter:bg-card/80 text-card-foreground">
-      <ul className="flex justify-around items-center py-2">
+      <ul className="flex justify-between items-center py-2">
         {navItems.map(({ name, href, icon: Icon }) => {
           const active = pathname === href;
           return (
-            <li key={href}>
+            <li key={href} className="flex-1 text-center">
               <Link
                 href={href}
-                className={`flex flex-col items-center text-xs transition-colors ${
+                className={`flex flex-col items-center text-[10px] transition-colors ${
                   active
                     ? "text-primary"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <Icon className="h-5 w-5 mb-1" />
+                <Icon className="h-5 w-5 mb-0.5" />
                 {name}
               </Link>
             </li>

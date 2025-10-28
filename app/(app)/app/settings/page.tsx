@@ -79,10 +79,12 @@ export default function SettingsPage() {
         </div>
         <div className="absolute inset-0 bg-linear-to-br from-background/20 via-transparent to-background/30 opacity-40" />
       </div>
-      <ul className="divide-y border rounded-xl overflow-hidden bg-card text-card-foreground text-sm mt-1">
-        <li className="flex items-center justify-between p-3 text-sm">
+      <ul className="divide-y -mx-4 text-sm mt-1">
+        <li className="flex items-center justify-between px-4 py-3 text-sm">
           <div className="flex items-center gap-3">
-            <Crown className="h-4 w-4 text-muted-foreground" />
+            <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+              <Crown className="h-4 w-4 text-muted-foreground" />
+            </div>
             <div>
               <p className="font-medium leading-tight">Upgrade to Max</p>
               <p className="text-xs text-muted-foreground">
@@ -92,9 +94,11 @@ export default function SettingsPage() {
           </div>
           <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
         </li>
-        <li className="flex items-center justify-between p-3 text-sm">
+        <li className="flex items-center justify-between px-4 py-3 text-sm">
           <div className="flex items-center gap-3">
-            <CreditCard className="h-4 w-4 text-muted-foreground" />
+            <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+              <CreditCard className="h-4 w-4 text-muted-foreground" />
+            </div>
             <div>
               <p className="font-medium leading-tight">Payment details</p>
               <p className="text-xs text-muted-foreground">
@@ -110,25 +114,46 @@ export default function SettingsPage() {
         <p className="text-xs font-semibold tracking-wider text-muted-foreground mb-3 uppercase">
           My profile
         </p>
-        <ul className="divide-y border rounded-xl overflow-hidden bg-card text-card-foreground text-sm">
-          <li className="flex items-center justify-between p-3">
+        <ul className="divide-y -mx-4 text-sm">
+          <li className="flex items-center justify-between px-4 py-3">
             <div className="flex items-center gap-3">
-              <User className="h-4 w-4 text-muted-foreground" />
-              <span className="font-medium">Edit profile</span>
+              <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+                <User className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <div>
+                <p className="font-medium">Edit profile</p>
+                <p className="text-xs text-muted-foreground">
+                  Update your personal information and bio.
+                </p>
+              </div>
             </div>
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
           </li>
-          <li className="flex items-center justify-between p-3">
+          <li className="flex items-center justify-between px-4 py-3">
             <div className="flex items-center gap-3">
-              <BarChart3 className="h-4 w-4 text-muted-foreground" />
-              <span className="font-medium">My stats</span>
+              <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+                <BarChart3 className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <div>
+                <p className="font-medium">My stats</p>
+                <p className="text-xs text-muted-foreground">
+                  View your engagement and activity insights.
+                </p>
+              </div>
             </div>
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
           </li>
-          <li className="flex items-center justify-between p-3">
+          <li className="flex items-center justify-between px-4 py-3">
             <div className="flex items-center gap-3">
-              <Heart className="h-4 w-4 text-muted-foreground" />
-              <span className="font-medium">My interests</span>
+              <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+                <Heart className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <div>
+                <p className="font-medium">My interests</p>
+                <p className="text-xs text-muted-foreground">
+                  Edit your hobbies and attraction preferences.
+                </p>
+              </div>
             </div>
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
           </li>
@@ -139,10 +164,12 @@ export default function SettingsPage() {
         <p className="text-xs font-semibold tracking-wider text-muted-foreground mb-3 uppercase">
           Appearance
         </p>
-        <ul className="divide-y border rounded-xl overflow-hidden bg-card text-card-foreground">
-          <li className="flex items-center justify-between p-3 text-sm">
+        <ul className="divide-y -mx-4">
+          <li className="flex items-center justify-between px-4 py-3 text-sm">
             <div className="flex items-center gap-3">
-              <Moon className="h-4 w-4 text-muted-foreground" />
+              <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+                <Moon className="h-4 w-4 text-muted-foreground" />
+              </div>
               <div>
                 <p className="font-medium leading-tight">Dark mode</p>
                 <p className="text-xs text-muted-foreground">
@@ -167,11 +194,18 @@ export default function SettingsPage() {
         <p className="text-xs font-semibold tracking-wider text-muted-foreground mb-3 uppercase">
           Notifications
         </p>
-        <ul className="divide-y border rounded-xl overflow-hidden bg-card text-card-foreground">
-          <li className="flex items-center justify-between p-4">
+        <ul className="divide-y -mx-4">
+          <li className="flex items-center justify-between px-4 py-4">
             <div className="flex items-center gap-3">
-              <Bell className="h-5 w-5 text-muted-foreground" />
-              <Label htmlFor="push">Enable push notifications</Label>
+              <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+                <Bell className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <div>
+                <Label htmlFor="push">Enable push notifications</Label>
+                <p className="text-xs text-muted-foreground">
+                  Stay updated with live app notifications.
+                </p>
+              </div>
             </div>
             <Switch
               id="push"
@@ -179,10 +213,17 @@ export default function SettingsPage() {
               onCheckedChange={setPushEnabled}
             />
           </li>
-          <li className="flex items-center justify-between p-4">
+          <li className="flex items-center justify-between px-4 py-4">
             <div className="flex items-center gap-3">
-              <Bell className="h-5 w-5 text-muted-foreground" />
-              <Label htmlFor="messages">Message alerts</Label>
+              <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+                <Bell className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <div>
+                <Label htmlFor="messages">Message alerts</Label>
+                <p className="text-xs text-muted-foreground">
+                  Receive alerts for new messages.
+                </p>
+              </div>
             </div>
             <Switch
               id="messages"
@@ -190,10 +231,17 @@ export default function SettingsPage() {
               onCheckedChange={setMessageAlerts}
             />
           </li>
-          <li className="flex items-center justify-between p-4">
+          <li className="flex items-center justify-between px-4 py-4">
             <div className="flex items-center gap-3">
-              <Wifi className="h-5 w-5 text-muted-foreground" />
-              <Label htmlFor="nearby">Nearby activity</Label>
+              <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+                <Wifi className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <div>
+                <Label htmlFor="nearby">Nearby activity</Label>
+                <p className="text-xs text-muted-foreground">
+                  Be notified when users are near you.
+                </p>
+              </div>
             </div>
             <Switch
               id="nearby"
@@ -209,11 +257,18 @@ export default function SettingsPage() {
         <p className="text-xs font-semibold tracking-wider text-muted-foreground mb-3 uppercase">
           Privacy
         </p>
-        <ul className="divide-y border rounded-xl overflow-hidden bg-card text-card-foreground">
-          <li className="flex items-center justify-between p-4">
+        <ul className="divide-y -mx-4">
+          <li className="flex items-center justify-between px-4 py-4">
             <div className="flex items-center gap-3">
-              <Eye className="h-5 w-5 text-muted-foreground" />
-              <Label htmlFor="distance">Show my distance</Label>
+              <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+                <Eye className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <div>
+                <Label htmlFor="distance">Show my distance</Label>
+                <p className="text-xs text-muted-foreground">
+                  Display how far you are from other users.
+                </p>
+              </div>
             </div>
             <Switch
               id="distance"
@@ -221,10 +276,17 @@ export default function SettingsPage() {
               onCheckedChange={setShowDistance}
             />
           </li>
-          <li className="flex items-center justify-between p-4">
+          <li className="flex items-center justify-between px-4 py-4">
             <div className="flex items-center gap-3">
-              <Eye className="h-5 w-5 text-muted-foreground" />
-              <Label htmlFor="online">Appear online</Label>
+              <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+                <Eye className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <div>
+                <Label htmlFor="online">Appear online</Label>
+                <p className="text-xs text-muted-foreground">
+                  Control whether you appear active to others.
+                </p>
+              </div>
             </div>
             <Switch
               id="online"
