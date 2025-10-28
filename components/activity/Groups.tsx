@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { MoreHorizontal, ChevronRight } from "lucide-react";
+import Link from "next/link";
 
 export default function Groups() {
   return (
@@ -18,7 +19,11 @@ export default function Groups() {
             { name: "After Hours", fallback: "AH" },
             { name: "Sunday Funday", fallback: "SF" },
           ].map((group) => (
-            <div key={group.name} className="flex flex-col items-start gap-2">
+            <Link
+              key={group.name}
+              href="/app/activity/group"
+              className="flex flex-col items-start gap-2"
+            >
               <div className="relative w-36 aspect-4/3 rounded-xl bg-muted flex items-center justify-center text-sm font-medium text-muted-foreground shrink-0">
                 {group.fallback}
 
@@ -47,7 +52,7 @@ export default function Groups() {
               <p className="text-xs text-muted-foreground w-28 truncate">
                 {group.name}
               </p>
-            </div>
+            </Link>
           ))}
         </div>
       </section>
@@ -196,8 +201,9 @@ export default function Groups() {
             const colorClass = categoryColors[g.category] ?? "bg-muted";
             const distNum = g.distance.split(" ")[0];
             return (
-              <div
+              <Link
                 key={g.name}
+                href="/app/activity/group"
                 className="rounded-xl border bg-card text-card-foreground px-3 py-3 flex items-center gap-3"
               >
                 {/* Left circular distance badge */}
@@ -252,7 +258,7 @@ export default function Groups() {
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
                 </div>
-              </div>
+              </Link>
             );
           })}
         </div>

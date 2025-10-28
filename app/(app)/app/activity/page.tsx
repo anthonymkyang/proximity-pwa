@@ -12,8 +12,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-// Sheet imports removed, now handled in Notifications component
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 // Notification icon imports removed, now handled in Notifications component
 import Notifications from "@/components/activity/Notifications";
 import Groups from "@/components/activity/Groups";
@@ -30,7 +28,7 @@ export default function ActivityPage() {
   return (
     <div
       className={`mx-auto w-full max-w-xl px-4 pb-[calc(72px+env(safe-area-inset-bottom))] transition-transform duration-300 ${
-        notifOpen ? "-translate-x-[80vw]" : ""
+        notifOpen ? "-translate-x-[90vw]" : ""
       }`}
     >
       <TopBar
