@@ -5,7 +5,84 @@ import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { MoreHorizontal, ChevronRight } from "lucide-react";
 import Link from "next/link";
 
+type GroupEvent = {
+  month: string;
+  day: string;
+  title: string;
+  subtitle?: string;
+  lock?: boolean;
+  color?: string;
+};
+
 export default function Groups() {
+  const upcomingDays = Array.from({ length: 14 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    return d;
+  });
+
+  const [selectedDayIndex, setSelectedDayIndex] = React.useState(0);
+
+  const eventsByDay: GroupEvent[][] = [
+    [
+      {
+        month: "Apr",
+        day: "14",
+        title: "Queer Hikers Meetup",
+        subtitle: "Outdoor Social",
+        lock: true,
+        color: "bg-emerald-200",
+      },
+      {
+        month: "Apr",
+        day: "18",
+        title: "Sunday Brunch Boys",
+        subtitle: "Community Hangout",
+        lock: false,
+        color: "bg-amber-200",
+      },
+      {
+        month: "Apr",
+        day: "25",
+        title: "Drag Trivia Sunday",
+        subtitle: "Evening Fun",
+        lock: true,
+        color: "bg-pink-200",
+      },
+    ],
+    [
+      {
+        month: "Apr",
+        day: "15",
+        title: "Mountain Biking Group",
+        subtitle: "Adventure Ride",
+        lock: false,
+        color: "bg-blue-200",
+      },
+      {
+        month: "Apr",
+        day: "15",
+        title: "Evening Yoga",
+        subtitle: "Relax and Stretch",
+        lock: true,
+        color: "bg-purple-200",
+      },
+    ],
+    ...Array(12).fill([
+      {
+        month: "Apr",
+        day: "TBD",
+        title: "No scheduled events",
+        subtitle: "",
+        lock: false,
+        color: "bg-gray-200",
+      },
+    ]),
+  ];
+
+  const eventsForSelectedDay: GroupEvent[] =
+    eventsByDay[selectedDayIndex] ?? [];
+
   return (
     <>
       {/* Your groups section */}
@@ -74,48 +151,27 @@ export default function Groups() {
             </button>
           </div>
           {/* Calendar dots row */}
-          <div className="mt-6 flex gap-2 flex-wrap">
-            {[8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21].map((d) => (
-              <div
-                key={d}
-                className={`flex h-8 w-8 items-center justify-center rounded-full bg-background/10 text-background/80 ${
-                  d === 12 ? "ring-2 ring-background/80" : ""
+          <div className="mt-6 grid grid-cols-7 gap-2">
+            {upcomingDays.map((date, index) => (
+              <button
+                key={date.toISOString()}
+                onClick={() => setSelectedDayIndex(index)}
+                className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium ${
+                  index === selectedDayIndex
+                    ? "bg-background text-foreground ring-2 ring-background/80"
+                    : "bg-background/10 text-background/80"
                 }`}
+                aria-pressed={index === selectedDayIndex}
               >
-                <span className="text-xs font-medium">{d}</span>
-              </div>
+                {date.getDate()}
+              </button>
             ))}
           </div>
         </div>
 
         {/* List below with soft cards */}
         <div className="mt-4 space-y-3">
-          {[
-            {
-              month: "Apr",
-              day: "14",
-              title: "Queer Hikers Meetup",
-              subtitle: "Outdoor Social",
-              lock: true,
-              color: "bg-emerald-200",
-            },
-            {
-              month: "Apr",
-              day: "18",
-              title: "Sunday Brunch Boys",
-              subtitle: "Community Hangout",
-              lock: false,
-              color: "bg-amber-200",
-            },
-            {
-              month: "Apr",
-              day: "25",
-              title: "Drag Trivia Sunday",
-              subtitle: "Evening Fun",
-              lock: true,
-              color: "bg-pink-200",
-            },
-          ].map((e) => (
+          {eventsForSelectedDay.map((e: GroupEvent) => (
             <div
               key={`${e.month}-${e.day}-${e.title}`}
               className="rounded-2xl bg-card text-card-foreground border shadow-sm"

@@ -16,7 +16,7 @@ export default function TopBar({
   className,
 }: TopBarProps) {
   return (
-    <div className={`sticky top-0 z-10 bg-background ${className ?? ""}`}>
+    <div className={`bg-background ${className ?? ""}`}>
       <div className="flex items-center justify-between py-3">
         <div className="shrink-0 flex items-center gap-2">{leftContent}</div>
         <div className="shrink-0 flex items-center gap-2">{rightContent}</div>

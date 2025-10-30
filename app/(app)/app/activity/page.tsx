@@ -52,27 +52,26 @@ export default function ActivityPage() {
         rightContent={
           <Notifications open={notifOpen} onOpenChange={setNotifOpen} />
         }
-      >
-        <h1 className="px-1 pb-2 text-4xl font-extrabold tracking-tight">
-          Activity
-        </h1>
+      ></TopBar>
 
-        {/* Filter chips */}
-        <div className="flex gap-2 overflow-x-auto pb-3 -mx-4 px-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          {["Groups", "Calendar", "Timeline", "Events"].map((label) => (
-            <Button
-              key={label}
-              size="sm"
-              variant={activeTab === label ? "default" : "outline"}
-              className="rounded-full whitespace-nowrap"
-              onClick={() => setActiveTab(label as typeof activeTab)}
-            >
-              {label}
-            </Button>
-          ))}
-        </div>
-      </TopBar>
+      <h1 className="px-1 pb-2 text-4xl font-extrabold tracking-tight">
+        Activity
+      </h1>
 
+      {/* Filter chips */}
+      <div className="flex gap-2 overflow-x-auto pb-3 -mx-4 px-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        {["Groups", "Calendar", "Timeline", "Events"].map((label) => (
+          <Button
+            key={label}
+            size="sm"
+            variant={activeTab === label ? "default" : "outline"}
+            className="rounded-full whitespace-nowrap"
+            onClick={() => setActiveTab(label as typeof activeTab)}
+          >
+            {label}
+          </Button>
+        ))}
+      </div>
       {activeTab === "Groups" && <Groups />}
 
       {activeTab === "Calendar" && <Calendar />}

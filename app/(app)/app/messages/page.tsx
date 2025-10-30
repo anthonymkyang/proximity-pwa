@@ -281,37 +281,37 @@ export default function MessagesPage() {
             </Button>
           </>
         }
-      >
-        {/* Title under top bar */}
-        <h1 className="px-1 pb-2 text-4xl font-extrabold tracking-tight">
-          Messages
-        </h1>
+      ></TopBar>
 
-        {/* Search */}
-        <div className="pb-5">
-          <InputGroup>
-            <InputGroupInput placeholder="Ask or search messages" />
-            <InputGroupAddon>
-              <Search className="h-4 w-4 text-muted-foreground" />
-            </InputGroupAddon>
-          </InputGroup>
-        </div>
+      {/* Title under top bar */}
+      <h1 className="px-1 pb-2 text-4xl font-extrabold tracking-tight">
+        Messages
+      </h1>
 
-        {/* Filter chips */}
-        <div className="flex gap-2 overflow-x-auto pb-3 -mx-4 px-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          {filters.map((f) => (
-            <Button
-              key={f}
-              size="sm"
-              variant={activeFilter === f ? "default" : "outline"}
-              className="rounded-full"
-              onClick={() => setActiveFilter(f)}
-            >
-              {f}
-            </Button>
-          ))}
-        </div>
-      </TopBar>
+      {/* Search */}
+      <div className="pb-5">
+        <InputGroup>
+          <InputGroupInput placeholder="Ask or search messages" />
+          <InputGroupAddon>
+            <Search className="h-4 w-4 text-muted-foreground" />
+          </InputGroupAddon>
+        </InputGroup>
+      </div>
+
+      {/* Filter chips */}
+      <div className="flex gap-2 overflow-x-auto pb-3 -mx-4 px-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        {filters.map((f) => (
+          <Button
+            key={f}
+            size="sm"
+            variant={activeFilter === f ? "default" : "outline"}
+            className="rounded-full"
+            onClick={() => setActiveFilter(f)}
+          >
+            {f}
+          </Button>
+        ))}
+      </div>
 
       {/* Archived row */}
       <button className="flex w-full items-center gap-3 py-3 text-left">

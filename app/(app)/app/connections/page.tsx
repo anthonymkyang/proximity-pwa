@@ -119,37 +119,36 @@ export default function ConnectionsPage() {
             </Button>
           </>
         }
-      >
-        {/* Title under top bar */}
-        <h1 className="px-1 pb-2 text-4xl font-extrabold tracking-tight">
-          Connections
-        </h1>
+      ></TopBar>
+      {/* Title under top bar */}
+      <h1 className="px-1 pb-2 text-4xl font-extrabold tracking-tight">
+        Connections
+      </h1>
 
-        {/* Search */}
-        <div className="pb-5">
-          <InputGroup>
-            <InputGroupInput placeholder="Search connections" />
-            <InputGroupAddon>
-              <Search className="h-4 w-4 text-muted-foreground" />
-            </InputGroupAddon>
-          </InputGroup>
-        </div>
+      {/* Search */}
+      <div className="pb-5">
+        <InputGroup>
+          <InputGroupInput placeholder="Search connections" />
+          <InputGroupAddon>
+            <Search className="h-4 w-4 text-muted-foreground" />
+          </InputGroupAddon>
+        </InputGroup>
+      </div>
 
-        {/* Filter chips */}
-        <div className="flex gap-2 overflow-x-auto pb-3 -mx-4 px-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          {filters.map((f) => (
-            <Button
-              key={f}
-              size="sm"
-              variant={activeFilter === f ? "default" : "outline"}
-              className="rounded-full"
-              onClick={() => setActiveFilter(f)}
-            >
-              {f}
-            </Button>
-          ))}
-        </div>
-      </TopBar>
+      {/* Filter chips */}
+      <div className="flex gap-2 overflow-x-auto pb-3 -mx-4 px-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        {filters.map((f) => (
+          <Button
+            key={f}
+            size="sm"
+            variant={activeFilter === f ? "default" : "outline"}
+            className="rounded-full"
+            onClick={() => setActiveFilter(f)}
+          >
+            {f}
+          </Button>
+        ))}
+      </div>
 
       {/* List header separator */}
       <Separator className="-mx-4" />

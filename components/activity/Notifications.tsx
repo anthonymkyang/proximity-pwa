@@ -118,8 +118,13 @@ export default function Notifications({
 
       <SheetContent
         side="right"
-        className="h-full w-[90%] overflow-y-auto border-l bg-card text-card-foreground shadow-xl px-4 pb-6"
+        className="h-full w-[90%] overflow-y-auto scrollbar-none border-l bg-card text-card-foreground shadow-xl px-4 pb-6"
       >
+        <style>{`
+          .scrollbar-none::-webkit-scrollbar {
+            display: none;
+          }
+        `}</style>
         <SheetHeader>
           <SheetTitle>Notifications</SheetTitle>
         </SheetHeader>

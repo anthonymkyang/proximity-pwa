@@ -1,50 +1,9 @@
 "use client";
 
-import mapboxgl from "mapbox-gl";
-import { useEffect, useRef } from "react";
-
-export default function RealMap() {
-  const mapContainer = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN!;
-
-    const initializeMap = (lng: number, lat: number) => {
-      const map = new mapboxgl.Map({
-        container: mapContainer.current!,
-        style: "mapbox://styles/mapbox/standard",
-        center: [lng, lat],
-        zoom: 15,
-        pitch: 60,
-        config: {
-          basemap: {
-            lightPreset: "night",
-            showPointOfInterestLabels: false,
-          },
-        },
-      });
-
-      return map;
-    };
-
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const { longitude, latitude } = pos.coords;
-          const map = initializeMap(longitude, latitude);
-          return () => map.remove();
-        },
-        () => {
-          const map = initializeMap(-0.1276, 51.5072); // fallback to London
-          return () => map.remove();
-        },
-        { enableHighAccuracy: true }
-      );
-    } else {
-      const map = initializeMap(-0.1276, 51.5072); // fallback to London
-      return () => map.remove();
-    }
-  }, []);
-
-  return <div ref={mapContainer} className="absolute inset-0" />;
+export default function RealMap({ className = "" }: { className?: string }) {
+  return (
+    <div
+      className={`min-h-[calc(100dvh-(--spacing(14)))] w-full bg-[linear-gradient(135deg,#a8d5ba_0%,#c7e4d0_50%,#9ac7d0_100%),repeating-linear-gradient(0deg,rgba(0,0,0,0.05)_0,rgba(0,0,0,0.05)_1px,transparent_1px,transparent_100%),repeating-linear-gradient(90deg,rgba(0,0,0,0.05)_0,rgba(0,0,0,0.05)_1px,transparent_1px,transparent_100%)] bg-size-[100%_100%,40px_40px,40px_40px] ${className}`}
+    />
+  );
 }

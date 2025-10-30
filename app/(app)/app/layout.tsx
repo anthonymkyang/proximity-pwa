@@ -16,21 +16,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     { name: "Me", href: "/app/settings", icon: User },
   ];
 
-  return (
-    <div className="min-h-screen flex flex-col bg-background">
-      <main className="relative flex-1 overflow-hidden min-h-[calc(100dvh-56px)] supports-[height:100svh]:min-h-[calc(100svh-56px)]">
-        {/* Mock map background */}
-        <MapCanvas />
+  const isMapPage = pathname === "/app";
 
-        {/* Page content overlay */}
-        <div
-          className={`relative z-10 h-full w-full overflow-auto pb-[calc(56px+env(safe-area-inset-bottom))] ${
-            pathname !== "/app" ? "bg-background" : ""
-          }`}
-        >
-          {children}
-        </div>
-      </main>
+  return (
+    <div className="relative min-h-dvh">
+      <div className="relative">
+        {isMapPage ? (
+          <>
+            <MapCanvas className="absolute inset-0 z-0" />
+
+            <div className="relative z-10">{children}</div>
+          </>
+        ) : (
+          <div className="relative z-10 bg-background min-h-dvh">
+            {children}
+          </div>
+        )}
+      </div>
       <AppBar />
     </div>
   );
