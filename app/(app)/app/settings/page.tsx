@@ -32,6 +32,9 @@ import {
   Mail,
   Bug,
   Sparkles,
+  LogOut,
+  Image as ImageIcon,
+  Images as ImagesIcon,
 } from "lucide-react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
@@ -314,6 +317,45 @@ export default function SettingsPage() {
                 <ItemTitle>Safer sex</ItemTitle>
                 <ItemDescription>
                   PrEP, testing, condoms, and consent.
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+              </ItemActions>
+            </Item>
+          </Link>
+        </ItemGroup>
+      </section>
+      {/* Media centre */}
+      <section>
+        <p className="text-xs font-semibold tracking-wider text-muted-foreground mb-3 uppercase">
+          Media centre
+        </p>
+        <ItemGroup className="border-y border-border -mx-4">
+          <Link href="/app/settings/media/photos" className="block">
+            <Item className="px-4 py-3">
+              <ItemMedia variant="icon">
+                <ImageIcon className="h-4 w-4" />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>Profile photos</ItemTitle>
+                <ItemDescription>Manage your profile pictures.</ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+              </ItemActions>
+            </Item>
+          </Link>
+          <ItemSeparator />
+          <Link href="/app/settings/media/albums" className="block">
+            <Item className="px-4 py-3">
+              <ItemMedia variant="icon">
+                <ImagesIcon className="h-4 w-4" />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>Albums</ItemTitle>
+                <ItemDescription>
+                  Create and organize photo albums.
                 </ItemDescription>
               </ItemContent>
               <ItemActions>
@@ -658,6 +700,18 @@ export default function SettingsPage() {
           </Link>
         </ItemGroup>
       </section>
+      {/* Logout */}
+      <div className="pt-2">
+        <Button asChild variant="outline" className="w-full">
+          <Link href="/auth" aria-label="Log out">
+            <LogOut className="mr-2 h-4 w-4" />
+            Log out
+          </Link>
+        </Button>
+        <p className="mt-2 text-center text-xs text-muted-foreground">
+          Proximity v0.1.0-alpha
+        </p>
+      </div>
     </div>
   );
 }

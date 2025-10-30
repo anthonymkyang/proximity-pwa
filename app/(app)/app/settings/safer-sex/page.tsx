@@ -58,6 +58,13 @@ import {
   FieldContent,
   FieldTitle,
 } from "@/components/ui/field";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from "@/components/ui/card";
 
 function useDebouncedValue<T>(value: T, delay = 250) {
   const [debounced, setDebounced] = React.useState(value);
@@ -253,7 +260,7 @@ export default function SaferSexPage() {
 
       <div className="mt-2">
         <Link href="/app/settings/safer-sex/guide" className="block">
-          <div className="rounded-xl border border-border bg-card p-4">
+          <div className="rounded-xl bg-card p-4">
             <div className="flex items-center gap-3">
               <BookOpen className="h-5 w-5" />
               <div className="flex-1">
@@ -292,194 +299,300 @@ export default function SaferSexPage() {
                 </DrawerHeader>
                 <div className="flex-1 overflow-y-auto pb-[env(safe-area-inset-bottom)]">
                   {row.kind === "status" ? (
-                    <div className="px-4 pb-4 space-y-8">
+                    <div className="px-4 pb-4 space-y-4">
                       {/* HIV Status */}
-                      <FieldGroup>
-                        <FieldSet>
-                          <FieldLabel htmlFor="rg-hiv">HIV status</FieldLabel>
-                          <FieldDescription>
+                      <Card className="bg-card/60 backdrop-blur-sm">
+                        <CardHeader className="pb-1">
+                          <CardTitle className="text-base">
+                            HIV status
+                          </CardTitle>
+                          <CardDescription>
                             Select your HIV status.
-                          </FieldDescription>
-                          <RadioGroup
-                            id="rg-hiv"
-                            value={hivSel ?? ""}
-                            onValueChange={(v) => setHivSel(v || null)}
-                          >
-                            {hivStatusOpts.map((opt) => {
-                              const id = `hiv-${opt}`;
-                              return (
-                                <FieldLabel key={opt} htmlFor={id}>
-                                  <Field orientation="horizontal">
-                                    <FieldContent>
-                                      <FieldTitle>{opt}</FieldTitle>
-                                    </FieldContent>
-                                    <RadioGroupItem value={opt} id={id} />
-                                  </Field>
-                                </FieldLabel>
-                              );
-                            })}
-                          </RadioGroup>
-                        </FieldSet>
-                      </FieldGroup>
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent className="pt-1 pb-2">
+                          <FieldGroup>
+                            <FieldSet>
+                              <RadioGroup
+                                id="rg-hiv"
+                                value={hivSel ?? ""}
+                                onValueChange={(v) => setHivSel(v || null)}
+                              >
+                                {hivStatusOpts.map((opt) => {
+                                  const id = `hiv-${opt}`;
+                                  let desc = "";
+                                  if (opt === "HIV+ (Positive)")
+                                    desc =
+                                      "Your most recent test returned positive.";
+                                  else if (opt === "HIV- (Negative)")
+                                    desc =
+                                      "Your most recent test returned negative.";
+                                  else if (opt === "HIV Undetectable (U=U)")
+                                    desc = "Undetectable = Untransmissable.";
+                                  // Unknown stays blank
+                                  return (
+                                    <FieldLabel key={opt} htmlFor={id}>
+                                      <Field orientation="horizontal">
+                                        <FieldContent>
+                                          <FieldTitle>{opt}</FieldTitle>
+                                          {desc && (
+                                            <p className="text-xs text-muted-foreground mt-0.5">
+                                              {desc}
+                                            </p>
+                                          )}
+                                        </FieldContent>
+                                        <RadioGroupItem value={opt} id={id} />
+                                      </Field>
+                                    </FieldLabel>
+                                  );
+                                })}
+                              </RadioGroup>
+                            </FieldSet>
+                          </FieldGroup>
+                        </CardContent>
+                      </Card>
 
                       {/* Hep C Status */}
-                      <FieldGroup>
-                        <FieldSet>
-                          <FieldLabel htmlFor="rg-hepc">
+                      <Card className="bg-card/60 backdrop-blur-sm">
+                        <CardHeader className="pb-1">
+                          <CardTitle className="text-base">
                             Hep C status
-                          </FieldLabel>
-                          <FieldDescription>
+                          </CardTitle>
+                          <CardDescription>
                             Select your Hep C status.
-                          </FieldDescription>
-                          <RadioGroup
-                            id="rg-hepc"
-                            value={hepCSel ?? ""}
-                            onValueChange={(v) => setHepCSel(v || null)}
-                          >
-                            {hepCStatusOpts.map((opt) => {
-                              const id = `hepc-${opt}`;
-                              return (
-                                <FieldLabel key={opt} htmlFor={id}>
-                                  <Field orientation="horizontal">
-                                    <FieldContent>
-                                      <FieldTitle>{opt}</FieldTitle>
-                                    </FieldContent>
-                                    <RadioGroupItem value={opt} id={id} />
-                                  </Field>
-                                </FieldLabel>
-                              );
-                            })}
-                          </RadioGroup>
-                        </FieldSet>
-                      </FieldGroup>
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent className="pt-1 pb-2">
+                          <FieldGroup>
+                            <FieldSet>
+                              <RadioGroup
+                                id="rg-hepc"
+                                value={hepCSel ?? ""}
+                                onValueChange={(v) => setHepCSel(v || null)}
+                              >
+                                {hepCStatusOpts.map((opt) => {
+                                  const id = `hepc-${opt}`;
+                                  let desc = "";
+                                  if (opt === "Hep C positive")
+                                    desc =
+                                      "Your most recent test returned positive.";
+                                  else if (opt === "Hep C negative")
+                                    desc =
+                                      "Your most recent test returned negative.";
+                                  // Unknown stays blank
+                                  return (
+                                    <FieldLabel key={opt} htmlFor={id}>
+                                      <Field orientation="horizontal">
+                                        <FieldContent>
+                                          <FieldTitle>{opt}</FieldTitle>
+                                          {desc && (
+                                            <p className="text-xs text-muted-foreground mt-0.5">
+                                              {desc}
+                                            </p>
+                                          )}
+                                        </FieldContent>
+                                        <RadioGroupItem value={opt} id={id} />
+                                      </Field>
+                                    </FieldLabel>
+                                  );
+                                })}
+                              </RadioGroup>
+                            </FieldSet>
+                          </FieldGroup>
+                        </CardContent>
+                      </Card>
 
                       {/* HPV Status */}
-                      <FieldGroup>
-                        <FieldSet>
-                          <FieldLabel htmlFor="rg-hpv">HPV status</FieldLabel>
-                          <FieldDescription>
+                      <Card className="bg-card/60 backdrop-blur-sm">
+                        <CardHeader className="pb-1">
+                          <CardTitle className="text-base">
+                            HPV status
+                          </CardTitle>
+                          <CardDescription>
                             Select your HPV status.
-                          </FieldDescription>
-                          <RadioGroup
-                            id="rg-hpv"
-                            value={hpvSel ?? ""}
-                            onValueChange={(v) => setHpvSel(v || null)}
-                          >
-                            {hpvStatusOpts.map((opt) => {
-                              const id = `hpv-${opt}`;
-                              return (
-                                <FieldLabel key={opt} htmlFor={id}>
-                                  <Field orientation="horizontal">
-                                    <FieldContent>
-                                      <FieldTitle>{opt}</FieldTitle>
-                                    </FieldContent>
-                                    <RadioGroupItem value={opt} id={id} />
-                                  </Field>
-                                </FieldLabel>
-                              );
-                            })}
-                          </RadioGroup>
-                        </FieldSet>
-                      </FieldGroup>
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent className="pt-1 pb-2">
+                          <FieldGroup>
+                            <FieldSet>
+                              <RadioGroup
+                                id="rg-hpv"
+                                value={hpvSel ?? ""}
+                                onValueChange={(v) => setHpvSel(v || null)}
+                              >
+                                {hpvStatusOpts.map((opt) => {
+                                  const id = `hpv-${opt}`;
+                                  let desc = "";
+                                  if (opt === "HPV positive")
+                                    desc =
+                                      "Your most recent test returned positive.";
+                                  else if (opt === "HPV negative")
+                                    desc =
+                                      "Your most recent test returned negative.";
+                                  // Unknown stays blank
+                                  return (
+                                    <FieldLabel key={opt} htmlFor={id}>
+                                      <Field orientation="horizontal">
+                                        <FieldContent>
+                                          <FieldTitle>{opt}</FieldTitle>
+                                          {desc && (
+                                            <p className="text-xs text-muted-foreground mt-0.5">
+                                              {desc}
+                                            </p>
+                                          )}
+                                        </FieldContent>
+                                        <RadioGroupItem value={opt} id={id} />
+                                      </Field>
+                                    </FieldLabel>
+                                  );
+                                })}
+                              </RadioGroup>
+                            </FieldSet>
+                          </FieldGroup>
+                        </CardContent>
+                      </Card>
                     </div>
                   ) : row.kind === "vaccines" ? (
-                    <div className="px-4 pb-4 space-y-2">
-                      {vaccineOpts.map((opt) => {
-                        const checked = vaxSel.includes(opt);
-                        const id = `vax-${opt}`;
-                        return (
-                          <div
-                            key={opt}
-                            className="flex items-center space-x-2 py-1.5"
-                          >
-                            <Checkbox
-                              id={id}
-                              checked={checked}
-                              onCheckedChange={(c) => {
-                                const on = Boolean(c);
-                                setVaxSel(
-                                  on
-                                    ? [...vaxSel, opt]
-                                    : vaxSel.filter((v) => v !== opt)
-                                );
-                              }}
-                            />
-                            <Label htmlFor={id} className="text-sm">
-                              {opt}
-                            </Label>
-                          </div>
-                        );
-                      })}
+                    <div className="px-4 pb-4">
+                      <Card className="bg-card/60 backdrop-blur-sm">
+                        <CardHeader className="pb-1">
+                          <CardTitle className="text-base">Vaccines</CardTitle>
+                          <CardDescription>What you’ve had.</CardDescription>
+                        </CardHeader>
+                        <CardContent className="pt-1 pb-2 space-y-3">
+                          {vaccineOpts.map((opt) => {
+                            const checked = vaxSel.includes(opt);
+                            const id = `vax-${opt}`;
+                            let desc = "";
+                            if (opt === "Mpox") {
+                              desc = "Reduce risk of Mpox infection.";
+                            } else if (opt === "Gonorrhea") {
+                              desc = "Reduce risk of gonorrhea infection.";
+                            } else if (opt === "HPV") {
+                              desc = "Reduce risk of HPV infection.";
+                            }
+                            return (
+                              <Label
+                                key={opt}
+                                htmlFor={id}
+                                className="hover:bg-accent/50 flex items-start gap-3 rounded-lg p-3 has-aria-checked:border-blue-600 has-aria-checked:bg-blue-50 dark:has-aria-checked:border-blue-900 dark:has-aria-checked:bg-blue-950"
+                              >
+                                <Checkbox
+                                  id={id}
+                                  checked={checked}
+                                  onCheckedChange={(c) => {
+                                    const on = Boolean(c);
+                                    setVaxSel(
+                                      on
+                                        ? [...vaxSel, opt]
+                                        : vaxSel.filter((v) => v !== opt)
+                                    );
+                                  }}
+                                  className="data-[state=checked]:border-blue-600 data-[state=checked]:bg-blue-600 data-[state=checked]:text-white dark:data-[state=checked]:border-blue-700 dark:data-[state=checked]:bg-blue-700"
+                                />
+                                <div className="grid gap-1.5 font-normal">
+                                  <p className="text-sm leading-none font-medium">
+                                    {opt}
+                                  </p>
+                                  {desc ? (
+                                    <p className="text-muted-foreground text-sm">
+                                      {desc}
+                                    </p>
+                                  ) : null}
+                                </div>
+                              </Label>
+                            );
+                          })}
+                        </CardContent>
+                      </Card>
                     </div>
                   ) : row.kind === "prepPep" ? (
-                    <div className="px-4 pb-4 space-y-3">
-                      {prepPepOpts.map((opt) => {
-                        const checked = prepPepSel.includes(opt);
-                        const id = `prep-${opt}`;
-                        return (
-                          <Label
-                            key={opt}
-                            htmlFor={id}
-                            className="hover:bg-accent/50 flex items-start gap-3 rounded-lg border p-3 has-[[aria-checked=true]]:border-blue-600 has-[[aria-checked=true]]:bg-blue-50 dark:has-[[aria-checked=true]]:border-blue-900 dark:has-[[aria-checked=true]]:bg-blue-950"
-                          >
-                            <Checkbox
-                              id={id}
-                              checked={checked}
-                              onCheckedChange={(c) => {
-                                const on = Boolean(c);
-                                setPrepPepSel(
-                                  on
-                                    ? [...prepPepSel, opt]
-                                    : prepPepSel.filter((v) => v !== opt)
-                                );
-                              }}
-                              className="data-[state=checked]:border-blue-600 data-[state=checked]:bg-blue-600 data-[state=checked]:text-white dark:data-[state=checked]:border-blue-700 dark:data-[state=checked]:bg-blue-700"
-                            />
-                            <div className="grid gap-1.5 font-normal">
-                              <p className="text-sm leading-none font-medium">
-                                {opt}
-                              </p>
-                              <p className="text-muted-foreground text-sm">
-                                {opt === "PrEP"
-                                  ? "Taken to prevent HIV infection."
-                                  : "An antibiotic used after sex to prevent STIs."}
-                              </p>
-                            </div>
-                          </Label>
-                        );
-                      })}
+                    <div className="px-4 pb-4">
+                      <Card className="bg-card/60 backdrop-blur-sm">
+                        <CardHeader className="pb-1">
+                          <CardTitle className="text-base">
+                            PrEP & PEP
+                          </CardTitle>
+                          <CardDescription>
+                            Prevention meds, on-demand or daily.
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent className="pt-1 pb-2 space-y-3">
+                          {prepPepOpts.map((opt) => {
+                            const checked = prepPepSel.includes(opt);
+                            const id = `prep-${opt}`;
+                            return (
+                              <Label
+                                key={opt}
+                                htmlFor={id}
+                                className="hover:bg-accent/50 flex items-start gap-3 rounded-lg p-3 has-aria-checked:border-blue-600 has-aria-checked:bg-blue-50 dark:has-aria-checked:border-blue-900 dark:has-aria-checked:bg-blue-950"
+                              >
+                                <Checkbox
+                                  id={id}
+                                  checked={checked}
+                                  onCheckedChange={(c) => {
+                                    const on = Boolean(c);
+                                    setPrepPepSel(
+                                      on
+                                        ? [...prepPepSel, opt]
+                                        : prepPepSel.filter((v) => v !== opt)
+                                    );
+                                  }}
+                                  className="data-[state=checked]:border-blue-600 data-[state=checked]:bg-blue-600 data-[state=checked]:text-white dark:data-[state=checked]:border-blue-700 dark:data-[state=checked]:bg-blue-700"
+                                />
+                                <div className="grid gap-1.5 font-normal">
+                                  <p className="text-sm leading-none font-medium">
+                                    {opt}
+                                  </p>
+                                  <p className="text-muted-foreground text-sm">
+                                    {opt === "PrEP"
+                                      ? "Taken to prevent HIV infection."
+                                      : "Antibiotic after sex to prevent STIs."}
+                                  </p>
+                                </div>
+                              </Label>
+                            );
+                          })}
+                        </CardContent>
+                      </Card>
                     </div>
                   ) : row.kind === "barrier" ? (
                     <div className="px-4 pb-4">
-                      <FieldGroup>
-                        <FieldSet>
-                          <FieldLabel htmlFor="rg-barrier">
-                            Bareback & Condoms
-                          </FieldLabel>
-                          <FieldDescription>
+                      <Card className="bg-card/60 backdrop-blur-sm">
+                        <CardHeader className="pb-1">
+                          <CardTitle className="text-base">
+                            Bareback & condoms
+                          </CardTitle>
+                          <CardDescription>
                             Select your usual practice.
-                          </FieldDescription>
-                          <RadioGroup
-                            id="rg-barrier"
-                            value={barrierSel ?? ""}
-                            onValueChange={(v) => setBarrierSel(v || null)}
-                          >
-                            {barrierOpts.map((opt) => {
-                              const id = `barrier-${opt}`;
-                              return (
-                                <FieldLabel key={opt} htmlFor={id}>
-                                  <Field orientation="horizontal">
-                                    <FieldContent>
-                                      <FieldTitle>{opt}</FieldTitle>
-                                    </FieldContent>
-                                    <RadioGroupItem value={opt} id={id} />
-                                  </Field>
-                                </FieldLabel>
-                              );
-                            })}
-                          </RadioGroup>
-                        </FieldSet>
-                      </FieldGroup>
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent className="pt-1 pb-2">
+                          <FieldGroup>
+                            <FieldSet>
+                              <RadioGroup
+                                id="rg-barrier"
+                                value={barrierSel ?? ""}
+                                onValueChange={(v) => setBarrierSel(v || null)}
+                              >
+                                {barrierOpts.map((opt) => {
+                                  const id = `barrier-${opt}`;
+                                  return (
+                                    <FieldLabel key={opt} htmlFor={id}>
+                                      <Field orientation="horizontal">
+                                        <FieldContent>
+                                          <FieldTitle>{opt}</FieldTitle>
+                                        </FieldContent>
+                                        <RadioGroupItem value={opt} id={id} />
+                                      </Field>
+                                    </FieldLabel>
+                                  );
+                                })}
+                              </RadioGroup>
+                            </FieldSet>
+                          </FieldGroup>
+                        </CardContent>
+                      </Card>
                     </div>
                   ) : null}
                 </div>
