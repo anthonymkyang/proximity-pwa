@@ -42,12 +42,12 @@ export default function MapCanvas({
       return;
     }
 
-    console.log("Initializing new map instance");
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
       style: "https://demotiles.maplibre.org/style.json", // public demo style
       center,
       zoom,
+      attributionControl: false, // removes “MapLibre” + info icon
     });
 
     map.addControl(

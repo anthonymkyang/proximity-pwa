@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import { AnimatePresence, motion } from "framer-motion";
 import MapCanvas from "@/components/map/MapCanvas";
 import AppBar from "@/components/nav/AppBar";
 
@@ -23,8 +24,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             : "bg-background"
         }`}
       >
-        {/* re-enable pointers for actual UI on /app */}
-        <div className={isMapPage ? "pointer-events-auto" : ""}>{children}</div>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={pathname}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.14, ease: "easeOut" }}
+            className={isMapPage ? "pointer-events-auto" : ""}
+          >
+            {children}
+          </motion.div>
+        </AnimatePresence>
       </main>
 
       {/* bottom nav */}
