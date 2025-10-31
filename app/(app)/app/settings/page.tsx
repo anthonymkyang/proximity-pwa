@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
+import { createClient } from "@/utils/supabase/client";
 import Link from "next/link";
 import { useTheme } from "next-themes";
 import { Label } from "@/components/ui/label";
@@ -58,8 +59,50 @@ export default function SettingsPage() {
   // Greeting state
   const [greeting, setGreeting] = useState("Welcome back");
 
-  const [name, setName] = useState("Anthony");
+  const [name, setName] = useState("Cruiser");
+  const [nameLoading, setNameLoading] = useState(true);
   const [editingName, setEditingName] = useState(false);
+  const nameRef = React.useRef<HTMLSpanElement | null>(null);
+  const [savingName, setSavingName] = useState(false);
+  const handleNameToggle = React.useCallback(async () => {
+    // entering edit mode
+    if (!editingName) {
+      setEditingName(true);
+      setTimeout(() => {
+        if (nameRef.current) {
+          const el = nameRef.current;
+          el.focus();
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          range.collapse(false);
+          const sel = window.getSelection();
+          sel?.removeAllRanges();
+          sel?.addRange(range);
+        }
+      }, 0);
+      return;
+    }
+    // saving
+    if (savingName) return;
+    setSavingName(true);
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const newNameRaw = nameRef.current?.textContent ?? "";
+    const newName =
+      newNameRaw.trim().length > 0 ? newNameRaw.trim() : "Cruiser";
+    if (user) {
+      await supabase.from("profiles").upsert({
+        id: user.id,
+        name: newName,
+        updated_at: new Date().toISOString(),
+      });
+    }
+    setName(newName);
+    setSavingName(false);
+    setEditingName(false);
+  }, [editingName, savingName, setName]);
 
   useEffect(() => {
     setIsDark((resolvedTheme ?? theme) === "dark");
@@ -71,6 +114,29 @@ export default function SettingsPage() {
     const g =
       h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
     setGreeting(g);
+  }, []);
+
+  useEffect(() => {
+    const loadProfileName = async () => {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        setNameLoading(false);
+        return;
+      }
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("name")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (profile?.name && profile.name.trim().length > 0) {
+        setName(profile.name);
+      }
+      setNameLoading(false);
+    };
+    loadProfileName();
   }, []);
 
   // Notifications (local UI state only — wire to real services later)
@@ -101,24 +167,30 @@ export default function SettingsPage() {
           <div className="flex items-center gap-1">
             {editingName ? (
               <span
+                ref={nameRef}
                 contentEditable
                 suppressContentEditableWarning
-                onBlur={(e) => setName(e.currentTarget.textContent || name)}
                 className="text-lg font-semibold outline-none border-none bg-transparent focus:ring-0"
               >
                 {name}
               </span>
+            ) : nameLoading ? (
+              <div className="h-5 w-28 rounded bg-muted animate-pulse" />
             ) : (
               <p className="text-lg font-semibold">{name}</p>
             )}
             <button
               type="button"
-              onClick={() => setEditingName((v) => !v)}
+              onClick={handleNameToggle}
               aria-label={editingName ? "Save name" : "Edit name"}
               className="ml-1 rounded p-1 hover:bg-muted transition text-muted-foreground"
             >
               {editingName ? (
-                <Save className="h-4 w-4" />
+                savingName ? (
+                  <span className="h-4 w-4 rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground animate-spin inline-block" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )
               ) : (
                 <Pencil className="h-4 w-4" />
               )}

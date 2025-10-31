@@ -1,78 +1,76 @@
+// components/map/MapCanvas.tsx
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import maplibregl, { Map } from "maplibre-gl";
 
-type MapCanvasProps = {
-  className?: string;
-  center?: [number, number];
-  zoom?: number;
-};
-
-// allow re-use across fast refresh / route changes in dev
-declare global {
-  // eslint-disable-next-line no-var
-  var __PROXIMITY_MAP__: Map | undefined;
-}
-
-export default function MapCanvas({
-  className = "",
-  center = [-0.1276, 51.5072], // London
-  zoom = 12,
-}: MapCanvasProps) {
-  const mapContainerRef = useRef<HTMLDivElement | null>(null);
+export default function MapCanvas() {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    console.log("MapCanvas mounted");
+    let aborted = false;
 
-    if (!mapContainerRef.current) return;
+    async function init() {
+      // 1. fetch the local style from public/
+      const res = await fetch("/maps/proximity-dark.json", {
+        cache: "no-cache",
+      });
+      if (!res.ok) {
+        console.error("failed to load style:", res.status);
+        return;
+      }
+      const style = await res.json();
 
-    // re-use existing map in dev / fast-refresh
-    if (typeof window !== "undefined" && window.__PROXIMITY_MAP__) {
-      console.log("Reusing existing global map instance");
-      mapRef.current = window.__PROXIMITY_MAP__;
-      mapRef.current.resize();
-      return;
+      if (aborted) return;
+      if (!containerRef.current) return;
+
+      // 2. create map with THAT style
+      const map = new maplibregl.Map({
+        container: containerRef.current,
+        style, // <- our local file, not the tileserver UI style
+        center: [-0.1276, 51.5072],
+        zoom: 11,
+        attributionControl: false,
+      });
+
+      mapRef.current = map;
+
+      // optional controls
+      map.addControl(
+        new maplibregl.NavigationControl({ showCompass: false }),
+        "top-right"
+      );
+
+      map.on("load", () => {
+        if (!aborted) setLoading(false);
+      });
     }
 
-    const map = new maplibregl.Map({
-      container: mapContainerRef.current,
-      // 🔥 point to your running tileserver-gl (v3.1.1) inside Docker
-      style: "/maps/proximity-dark.json",
-      center,
-      zoom,
-      pixelRatio: 1,
-      attributionControl: false,
-    });
-
-    map.addControl(
-      new maplibregl.NavigationControl({ showCompass: false }),
-      "top-right"
-    );
-
-    mapRef.current = map;
-
-    if (typeof window !== "undefined") {
-      window.__PROXIMITY_MAP__ = map;
-    }
+    init();
 
     return () => {
-      console.log("MapCanvas unmounted");
-      // keep it alive in dev
-      if (process.env.NODE_ENV === "production") {
-        map.remove();
-        if (typeof window !== "undefined") {
-          window.__PROXIMITY_MAP__ = undefined;
-        }
+      aborted = true;
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
       }
     };
-  }, [center, zoom]);
+  }, []);
 
   return (
-    <div
-      ref={mapContainerRef}
-      className={`absolute inset-0 min-h-[calc(100dvh-3.5rem)] w-full ${className}`}
-    />
+    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+      <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
+      {loading ? (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            pointerEvents: "none",
+          }}
+        />
+      ) : null}
+    </div>
   );
 }

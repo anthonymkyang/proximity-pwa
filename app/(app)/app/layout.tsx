@@ -1,45 +1,25 @@
-"use client";
+// app/(app)/app/layout.tsx  <-- make this a SERVER component (no "use client")
+import { createClient } from "@/utils/supabase/server";
+import AppShell from "./AppShell"; // a client shell that contains your current code
 
-import { usePathname } from "next/navigation";
-import { AnimatePresence, motion } from "framer-motion";
-import MapCanvas from "@/components/map/MapCanvas";
-import AppBar from "@/components/nav/AppBar";
+export default async function ProtectedAppLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
-  const isMapPage = pathname === "/app";
+  if (!user) {
+    // force server redirect
+    return Response.redirect(
+      new URL("/login", process.env.NEXT_PUBLIC_SITE_URL),
+      302
+    );
+    // or: redirect("/login") if you're using next/navigation in server comp
+  }
 
-  return (
-    <div className="relative min-h-screen">
-      {/* fixed, always mounted map */}
-      <div className="fixed inset-0 z-0">
-        <MapCanvas />
-      </div>
-
-      {/* content layer */}
-      <main
-        className={`relative z-10 min-h-screen pb-[calc(56px+env(safe-area-inset-bottom,0px))] ${
-          isMapPage
-            ? "bg-transparent pointer-events-none" // don't block the map
-            : "bg-background"
-        }`}
-      >
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={pathname}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.14, ease: "easeOut" }}
-            className={isMapPage ? "pointer-events-auto" : ""}
-          >
-            {children}
-          </motion.div>
-        </AnimatePresence>
-      </main>
-
-      {/* bottom nav */}
-      <AppBar />
-    </div>
-  );
+  return <AppShell>{children}</AppShell>;
 }
