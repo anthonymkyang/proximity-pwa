@@ -1,0 +1,121 @@
+{
+  "version": 8,
+  "name": "Proximity Dark",
+  "sources": {
+    "openmaptiles": {
+      "type": "vector",
+      "url": "http://127.0.0.1:8080/data/v3.json"
+    }
+  },
+  "glyphs": "http://127.0.0.1:8080/fonts/{fontstack}/{range}.pbf",
+  "center": [-0.1276, 51.5072],
+  "zoom": 11,
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#0b1020"
+      }
+    },
+    {
+      "id": "land-overlay",
+      "type": "fill",
+      "source": "openmaptiles",
+      "source-layer": "landuse",
+      "filter": [
+        "in",
+        "class",
+        "residential",
+        "suburb",
+        "neighbourhood",
+        "industrial",
+        "commercial"
+      ],
+      "paint": {
+        "fill-color": "rgba(6,11,24,0.35)"
+      }
+    },
+    {
+      "id": "water-fill",
+      "type": "fill",
+      "source": "openmaptiles",
+      "source-layer": "water",
+      "paint": {
+        "fill-color": "#0f172a"
+      }
+    },
+
+    {
+      "id": "landuse",
+      "type": "fill",
+      "source": "openmaptiles",
+      "source-layer": "landuse",
+      "paint": {
+        "fill-color": "#0e1525",
+        "fill-opacity": 0.35
+      }
+    },
+
+    {
+      "id": "park",
+      "type": "fill",
+      "source": "openmaptiles",
+      "source-layer": "park",
+      "paint": {
+        "fill-color": "#064e3b",
+        "fill-opacity": 0.4
+      }
+    },
+
+    {
+      "id": "roads",
+      "type": "line",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "paint": {
+        "line-color": "#b9cfff",
+        "line-width": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          5,
+          0.4,
+          10,
+          1.2,
+          14,
+          3
+        ],
+        "line-opacity": 0.7
+      }
+    },
+
+    {
+      "id": "buildings",
+      "type": "fill",
+      "source": "openmaptiles",
+      "source-layer": "building",
+      "paint": {
+        "fill-color": "#1f2937",
+        "fill-opacity": 0.85
+      }
+    },
+
+    {
+      "id": "place-labels",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "place",
+      "layout": {
+        "text-field": "{name:en}",
+        "text-font": ["Noto Sans Regular"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 5, 10, 10, 14]
+      },
+      "paint": {
+        "text-color": "#e2e8f0",
+        "text-halo-color": "#0b1020",
+        "text-halo-width": 1.4
+      }
+    }
+  ]
+}
