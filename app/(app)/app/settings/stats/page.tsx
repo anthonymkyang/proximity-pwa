@@ -25,6 +25,7 @@ import {
   ChevronDown,
   Check,
   ChevronsUpDown,
+  Eye,
 } from "lucide-react";
 import {
   Drawer,
@@ -36,7 +37,17 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import {
   Popover,
   PopoverTrigger,
@@ -51,7 +62,6 @@ import {
   CommandEmpty,
 } from "@/components/ui/command";
 import { Switch } from "@/components/ui/switch";
-import countries from "@/lib/data/countries.json";
 
 /* -------------------------------------------------------------------------- */
 /*  MY DICK DRAWER – patched to load from DB + save to Supabase               */
@@ -130,6 +140,17 @@ function MyDickDrawerContent({
     setUnit(u);
     const rounded = roundVal(clamped);
     setValue(rounded);
+    // auto-update size label when unit changes because the effective length changed
+    const inchVal = u === "in" ? rounded : toIn(rounded);
+    let autoLabel = "Average";
+    if (inchVal < 3.5) autoLabel = "XS";
+    else if (inchVal < 5) autoLabel = "Small";
+    else if (inchVal < 7) autoLabel = "Average";
+    else if (inchVal < 8) autoLabel = "Large";
+    else if (inchVal < 9) autoLabel = "XL";
+    else autoLabel = "XXL";
+    setSelectedChip(autoLabel);
+    if (onSizeChange) onSizeChange(autoLabel);
     if (onLengthChange) {
       onLengthChange(rounded, u);
     }
@@ -138,6 +159,17 @@ function MyDickDrawerContent({
   const handleSlide = (vals: number[]) => {
     const v = roundVal(vals[0]);
     setValue(v);
+    // derive category from the *new* inches value
+    const inchVal = unit === "in" ? v : toIn(v);
+    let autoLabel = "Average";
+    if (inchVal < 3.5) autoLabel = "XS";
+    else if (inchVal < 5) autoLabel = "Small";
+    else if (inchVal < 7) autoLabel = "Average";
+    else if (inchVal < 8) autoLabel = "Large";
+    else if (inchVal < 9) autoLabel = "XL";
+    else autoLabel = "XXL";
+    setSelectedChip(autoLabel);
+    if (onSizeChange) onSizeChange(autoLabel);
     if (onLengthChange) {
       onLengthChange(v, unit);
     }
@@ -164,166 +196,181 @@ function MyDickDrawerContent({
     : ["Cut", "Uncut"];
 
   return (
-    <div className="px-4 pb-4">
-      <Tabs
-        value={unit}
-        onValueChange={(v) => handleUnitChange(v as "in" | "cm")}
-        className="w-full"
-      >
-        <TabsList className="grid grid-cols-2 w-full">
-          <TabsTrigger value="in">Inches</TabsTrigger>
-          <TabsTrigger value="cm">Centimeters</TabsTrigger>
-        </TabsList>
-        <TabsContent value="in" className="mt-4">
-          <div className="mb-1 text-center text-lg font-bold">
-            {roundVal(inchesVal)} in
-          </div>
-          <div className="mb-2 text-xs text-muted-foreground text-center">
-            Average (6 in / 15 cm)
-          </div>
-          <Slider
-            step={0.5}
-            min={0}
-            max={14}
-            value={[inchesVal]}
-            onValueChange={handleSlide}
-          />
-          <div className="mt-2 flex justify-between text-[10px] text-muted-foreground px-0">
-            {marksIn.map((m) => (
-              <span key={m}>{m}</span>
-            ))}
-          </div>
-          <div className="mt-3 flex items-center justify-center gap-2">
-            <span className="text-sm text-muted-foreground">
-              Show dick size on profile
-            </span>
-            <Switch
-              checked={showOnProfile}
-              onCheckedChange={(val) => {
-                setShowOnProfile(val);
-                if (onShowChange) onShowChange(val);
-              }}
-              aria-label="Show dick size on profile"
-            />
-          </div>
-        </TabsContent>
-        <TabsContent value="cm" className="mt-4">
-          <div className="mb-1 text-center text-lg font-bold">
-            {roundVal(cmVal)} cm
-          </div>
-          <div className="mb-2 text-xs text-muted-foreground text-center">
-            Average (6 in / 15 cm)
-          </div>
-          <Slider
-            step={1}
-            min={0}
-            max={36}
-            value={[cmVal]}
-            onValueChange={handleSlide}
-          />
-          <div className="mt-2 flex justify-between text-[10px] text-muted-foreground px-0">
-            {marksCm.map((m) => (
-              <span key={m}>{m}</span>
-            ))}
-          </div>
-          <div className="mt-3 flex items-center justify-center gap-2">
-            <span className="text-sm text-muted-foreground">
-              Show dick measurment on profile
-            </span>
-            <Switch
-              checked={showOnProfile}
-              onCheckedChange={(val) => {
-                setShowOnProfile(val);
-                if (onShowChange) onShowChange(val);
-              }}
-              aria-label="Show dick size on profile"
-            />
-          </div>
-        </TabsContent>
-      </Tabs>
+    <div className="pb-4">
+      {/* top: length + units + slider + show */}
+      <div className="px-4 pt-2 pb-4">
+        {" "}
+        <h3 className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
+          Length
+        </h3>
+        <Card className="border-0 space-y-6">
+          <CardContent>
+            <div className="flex items-start justify-between">
+              <div>
+                <div className="text-2xl font-semibold tracking-tight">
+                  {unit === "in"
+                    ? `${roundVal(inchesVal)} in`
+                    : `${roundVal(cmVal)} cm`}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Avg. {unit === "in" ? "5.16 in" : "13.1 cm"}
+                </div>
+              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-7 gap-1">
+                    {unit === "in" ? "Inches" : "Centimetres"}
+                    <ChevronDown className="h-3 w-3 opacity-70" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-36">
+                  <DropdownMenuItem onClick={() => handleUnitChange("in")}>
+                    Inches
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleUnitChange("cm")}>
+                    Centimetres
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
 
-      {/* Chips */}
-      <h3 className="mt-6 mb-2 text-center text-sm font-semibold text-foreground/80">
-        Size
-      </h3>
-      <div className="mt-4 flex flex-wrap justify-center gap-2">
-        {chips.map((c) => (
-          <Badge
-            key={c.label}
-            role="button"
-            onClick={() => {
-              setSelectedChip(c.label);
-              if (onSizeChange) onSizeChange(c.label);
-            }}
-            className={`rounded-full cursor-pointer select-none ${
-              c.label === selectedChip
-                ? "bg-primary text-primary-foreground"
-                : "bg-secondary text-secondary-foreground"
-            }`}
-          >
-            {c.label}
-          </Badge>
-        ))}
+            {unit === "in" ? (
+              <>
+                <div className="mt-8 mb-8">
+                  <Slider
+                    step={0.5}
+                    min={0}
+                    max={14}
+                    value={[inchesVal]}
+                    onValueChange={handleSlide}
+                  />
+                  <div className="mt-2 flex justify-between text-[10px] text-muted-foreground px-0">
+                    {marksIn.map((m) => (
+                      <span key={m}>{m}</span>
+                    ))}
+                  </div>
+                </div>
+                <div className="mt-4 flex items-center justify-between">
+                  <Label
+                    htmlFor="show-dick-profile"
+                    className="flex items-center gap-2 text-xs text-muted-foreground"
+                  >
+                    <Eye className="h-4 w-4" />
+                    Show on profile
+                  </Label>
+                  <Switch
+                    id="show-dick-profile"
+                    checked={showOnProfile}
+                    onCheckedChange={(val) => {
+                      setShowOnProfile(val);
+                      if (onShowChange) onShowChange(val);
+                    }}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="mt-8 mb-8">
+                  <Slider
+                    step={1}
+                    min={0}
+                    max={36}
+                    value={[cmVal]}
+                    onValueChange={handleSlide}
+                  />
+                  <div className="mt-2 flex justify-between text-[10px] text-muted-foreground px-0">
+                    {marksCm.map((m) => (
+                      <span key={m}>{m}</span>
+                    ))}
+                  </div>
+                </div>
+                <div className="mt-4 flex items-center justify-between">
+                  <Label
+                    htmlFor="show-dick-profile"
+                    className="flex items-center gap-2 text-xs text-muted-foreground"
+                  >
+                    <Eye className="h-4 w-4" />
+                    Show on profile
+                  </Label>
+                  <Switch
+                    id="show-dick-profile"
+                    checked={showOnProfile}
+                    onCheckedChange={(val) => {
+                      setShowOnProfile(val);
+                      if (onShowChange) onShowChange(val);
+                    }}
+                  />
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Thickness chips */}
-      <h3 className="mt-6 mb-2 text-center text-sm font-semibold text-foreground/80">
-        Girth
-      </h3>
-      <div className="mt-4 flex flex-wrap justify-center gap-2">
-        {girthLabels.map((t) => (
-          <Badge
-            key={t}
-            role="button"
-            onClick={() => {
-              const next = selectedGirth === t ? null : t;
-              setSelectedGirth(next);
-              if (onGirthChange) onGirthChange(next);
-            }}
-            className={`rounded-full cursor-pointer select-none ${
-              t === selectedGirth
-                ? "bg-primary text-primary-foreground"
-                : "bg-secondary text-secondary-foreground"
-            }`}
-          >
-            {t}
-          </Badge>
-        ))}
-      </div>
+      {/* options: size label, girth, cut/uncut */}
+      <div className="px-4 pb-4 space-y-5">
+        <div>
+          <Card className="border-0">
+            <CardContent>
+              <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 scrollbar-none">
+                {chips.map((c) => (
+                  <Button
+                    key={c.label}
+                    type="button"
+                    size="sm"
+                    variant={c.label === selectedChip ? "default" : "outline"}
+                    onClick={() => {
+                      setSelectedChip(c.label);
+                      if (onSizeChange) onSizeChange(c.label);
+                    }}
+                    className="rounded-full shrink-0"
+                  >
+                    {c.label}
+                  </Button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
 
-      <h3 className="mt-6 mb-2 text-center text-sm font-semibold text-foreground/80">
-        Cut / Uncut
-      </h3>
-      <div className="mt-3 flex flex-wrap justify-center gap-3">
-        {cutLabels.map((opt) => (
-          <Badge
-            key={opt}
-            role="button"
-            onClick={() => {
-              const next =
-                cutStatus === (opt as "Cut" | "Uncut")
-                  ? null
-                  : (opt as "Cut" | "Uncut");
-              setCutStatus(next);
-              if (onCutChange) onCutChange(next);
-            }}
-            className={`rounded-full px-4 py-2 text-sm cursor-pointer select-none ${
-              cutStatus === opt
-                ? "bg-primary text-primary-foreground"
-                : "bg-secondary text-secondary-foreground"
-            }`}
-          >
-            {opt}
-          </Badge>
-        ))}
+        <div>
+          <h3 className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
+            Cut / Uncut
+          </h3>
+          <Card className="border-0">
+            <CardContent>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">I am</span>
+                <div className="flex gap-2">
+                  {cutLabels.map((opt) => (
+                    <Button
+                      key={opt}
+                      type="button"
+                      size="sm"
+                      variant={cutStatus === opt ? "default" : "outline"}
+                      onClick={() => {
+                        const next =
+                          cutStatus === (opt as "Cut" | "Uncut")
+                            ? null
+                            : (opt as "Cut" | "Uncut");
+                        setCutStatus(next);
+                        if (onCutChange) onCutChange(next);
+                      }}
+                      className="rounded-full"
+                    >
+                      {opt}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/*  HEIGHT DRAWER (unchanged)                                                 */
-/* -------------------------------------------------------------------------- */
 function HeightDrawerContent({
   unit,
   setUnit,
@@ -378,59 +425,76 @@ function HeightDrawerContent({
 
   return (
     <div className="px-4 pb-4">
-      <Tabs
-        value={unit}
-        onValueChange={(v) => handleUnitChange(v as "in" | "cm")}
-        className="w-full"
-      >
-        <TabsList className="grid grid-cols-2 w-full">
-          <TabsTrigger value="in">Feet/Inches</TabsTrigger>
-          <TabsTrigger value="cm">Centimeters</TabsTrigger>
-        </TabsList>
+      <Card className="border-0 space-y-6">
+        <CardContent>
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="text-2xl font-semibold tracking-tight">
+                {unit === "in"
+                  ? formatFeetIn(inchesVal)
+                  : `${Math.round(cmVal)} cm`}
+              </div>
+            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-7 gap-1">
+                  {unit === "in" ? "Feet / Inches" : "Centimetres"}
+                  <ChevronDown className="h-3 w-3 opacity-70" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40">
+                <DropdownMenuItem onClick={() => handleUnitChange("in")}>
+                  Feet / Inches
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleUnitChange("cm")}>
+                  Centimetres
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
 
-        <TabsContent value="in" className="mt-4">
-          <div className="mb-2 text-center text-lg font-bold">
-            {formatFeetIn(inchesVal)}
-          </div>
-          <Slider
-            step={0.5}
-            min={IN_MIN}
-            max={IN_MAX}
-            value={[inchesVal]}
-            onValueChange={handleSlide}
-          />
-          <div className="mt-2 flex justify-between text-[10px] text-muted-foreground px-3">
-            <span>4'7"</span>
-            <span>6'0"</span>
-            <span>7'0"</span>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="cm" className="mt-4">
-          <div className="mb-2 text-center text-lg font-bold">
-            {Math.round(cmVal)} cm
-          </div>
-          <Slider
-            step={1}
-            min={CM_MIN}
-            max={CM_MAX}
-            value={[cmVal]}
-            onValueChange={handleSlide}
-          />
-          <div className="mt-2 flex justify-between text-[10px] text-muted-foreground px-3">
-            <span>{CM_MIN} cm</span>
-            <span>~{Math.round((CM_MIN + CM_MAX) / 2)} cm</span>
-            <span>{CM_MAX} cm</span>
-          </div>
-        </TabsContent>
-      </Tabs>
+          {unit === "in" ? (
+            <>
+              <div className="mt-8 mb-8">
+                <Slider
+                  step={0.5}
+                  min={IN_MIN}
+                  max={IN_MAX}
+                  value={[inchesVal]}
+                  onValueChange={handleSlide}
+                />
+                <div className="mt-2 flex justify-between text-[10px] text-muted-foreground px-0">
+                  <span>4'7"</span>
+                  <span>5'6"</span>
+                  <span>6'3"</span>
+                  <span>7'0"</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="mt-8 mb-8">
+                <Slider
+                  step={1}
+                  min={CM_MIN}
+                  max={CM_MAX}
+                  value={[cmVal]}
+                  onValueChange={handleSlide}
+                />
+                <div className="mt-2 flex justify-between text-[10px] text-muted-foreground px-0">
+                  <span>{CM_MIN} cm</span>
+                  <span>175 cm</span>
+                  <span>{CM_MAX} cm</span>
+                </div>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/*  SEXUALITY DRAWER – now dynamic                                            */
-/* -------------------------------------------------------------------------- */
 function SexualityDrawerContent({
   selected,
   setSelected,
@@ -442,31 +506,47 @@ function SexualityDrawerContent({
 }) {
   return (
     <div className="px-4 pb-4">
-      <div className="flex flex-wrap justify-center gap-2">
-        {options.map((opt) => (
-          <Badge
-            key={opt.id}
-            role="button"
-            onClick={() =>
-              setSelected(selected === opt.label ? null : opt.label)
-            }
-            className={`rounded-full cursor-pointer select-none ${
-              selected === opt.label
-                ? "bg-primary text-primary-foreground"
-                : "bg-secondary text-secondary-foreground"
-            }`}
-          >
-            {opt.label}
-          </Badge>
-        ))}
-      </div>
+      <Card className="border-0 space-y-3">
+        <CardContent>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm text-muted-foreground">I am</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="ustify-between gap-2"
+                >
+                  {selected ? selected : "Select…"}
+                  <ChevronDown className="h-4 w-4 opacity-70" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="max-h-64 overflow-y-auto"
+              >
+                {options.map((opt) => (
+                  <DropdownMenuItem
+                    key={opt.id}
+                    onClick={() =>
+                      setSelected(selected === opt.label ? null : opt.label)
+                    }
+                  >
+                    {opt.label}
+                    {selected === opt.label ? (
+                      <Check className="ml-auto h-4 w-4" />
+                    ) : null}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/*  POSITION DRAWER – already patched                                         */
-/* -------------------------------------------------------------------------- */
 function PositionDrawerContent({
   selected,
   setSelected,
@@ -483,57 +563,90 @@ function PositionDrawerContent({
   attitudes: { id: string; label: string }[];
 }) {
   return (
-    <div className="px-4 pb-4">
-      <h3 className="mb-2 text-center text-sm font-semibold text-foreground/80">
-        Active to passive
-      </h3>
-      <div className="flex flex-wrap justify-center gap-2">
-        {positions.map((opt) => (
-          <Badge
-            key={opt.id}
-            role="button"
-            onClick={() =>
-              setSelected(selected === opt.label ? null : opt.label)
-            }
-            className={`rounded-full cursor-pointer select-none ${
-              selected === opt.label
-                ? "bg-primary text-primary-foreground"
-                : "bg-secondary text-secondary-foreground"
-            }`}
-          >
-            {opt.label}
-          </Badge>
-        ))}
-      </div>
-      <h3 className="mt-6 mb-2 text-center text-sm font-semibold text-foreground/80">
-        Attitude
-      </h3>
-      <div className="flex flex-wrap justify-center gap-2">
-        {attitudes.map((opt) => (
-          <Badge
-            key={opt.id}
-            role="button"
-            onClick={() =>
-              setAttitudeSelected(
-                attitudeSelected === opt.label ? null : opt.label
-              )
-            }
-            className={`rounded-full cursor-pointer select-none ${
-              attitudeSelected === opt.label
-                ? "bg-primary text-primary-foreground"
-                : "bg-secondary text-secondary-foreground"
-            }`}
-          >
-            {opt.label}
-          </Badge>
-        ))}
-      </div>
+    <div className="px-4 pb-4 space-y-4">
+      <Card className="border-0 space-y-3">
+        <CardContent>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm text-muted-foreground">Position</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="ustify-between gap-2"
+                >
+                  {selected ? selected : "Select…"}
+                  <ChevronDown className="h-4 w-4 opacity-70" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="max-h-64 overflow-y-auto"
+              >
+                {positions.map((opt) => (
+                  <DropdownMenuItem
+                    key={opt.id}
+                    onClick={() =>
+                      setSelected(selected === opt.label ? null : opt.label)
+                    }
+                  >
+                    {opt.label}
+                    {selected === opt.label ? (
+                      <Check className="ml-auto h-4 w-4" />
+                    ) : null}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-0 space-y-3">
+        <CardContent>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm text-muted-foreground">Role</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="ustify-between gap-2"
+                >
+                  {attitudeSelected ? attitudeSelected : "Select…"}
+                  <ChevronDown className="h-4 w-4 opacity-70" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="max-h-64 overflow-y-auto"
+              >
+                {attitudes.map((opt) => (
+                  <DropdownMenuItem
+                    key={opt.id}
+                    onClick={() =>
+                      setAttitudeSelected(
+                        attitudeSelected === opt.label ? null : opt.label
+                      )
+                    }
+                  >
+                    {opt.label}
+                    {attitudeSelected === opt.label ? (
+                      <Check className="ml-auto h-4 w-4" />
+                    ) : null}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
 
 /* -------------------------------------------------------------------------- */
-/*  ETHNICITY DRAWER – unchanged                                              */
+/*  ETHNICITY DRAWER – refactored to accept countries from props              */
 /* -------------------------------------------------------------------------- */
 function EthnicityDrawerContent({
   selected,
@@ -543,6 +656,10 @@ function EthnicityDrawerContent({
   ethnicities,
   userId,
   loading,
+  languages,
+  selectedLanguages,
+  setSelectedLanguages,
+  countries,
 }: {
   selected: string | null;
   setSelected: (v: string | null) => void;
@@ -551,23 +668,36 @@ function EthnicityDrawerContent({
   ethnicities: { id: string; label: string }[];
   userId: string | null;
   loading: boolean;
+  languages: { id: string; label: string }[];
+  selectedLanguages: string[];
+  setSelectedLanguages: (v: string[]) => void;
+  countries: { id: string; name: string; code: string }[];
 }) {
   const countryOptions = React.useMemo(
     () =>
       countries
-        .map((c: { name: string }) => c.name.trim())
-        .sort((a: string, b: string) =>
-          a.localeCompare(b, "en", { sensitivity: "base" })
-        ),
-    []
+        .map((c) => c.name)
+        .sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" })),
+    [countries]
   );
 
-  const toggleNationality = (name: string) => {
-    setNationalities(
-      nationalities.includes(name)
-        ? nationalities.filter((n) => n !== name)
-        : [...nationalities, name]
-    );
+  // Persist nationalities to profiles
+  const toggleNationality = async (name: string) => {
+    const next = nationalities.includes(name)
+      ? nationalities.filter((n) => n !== name)
+      : [...nationalities, name];
+
+    setNationalities(next);
+
+    // persist to profiles if user is logged in
+    if (userId) {
+      const supabase = createClient();
+      await supabase.from("profiles").upsert({
+        id: userId,
+        nationalities: next,
+        updated_at: new Date().toISOString(),
+      });
+    }
   };
 
   const handleEthnicityClick = async (label: string) => {
@@ -582,90 +712,188 @@ function EthnicityDrawerContent({
     });
   };
 
+  const toggleLanguage = async (label: string) => {
+    const exists = selectedLanguages.includes(label);
+    const next = exists
+      ? selectedLanguages.filter((l) => l !== label)
+      : [...selectedLanguages, label];
+
+    setSelectedLanguages(next);
+
+    if (userId) {
+      const supabase = createClient();
+      const ids = languages
+        .filter((l) => next.includes(l.label))
+        .map((l) => l.id);
+      await supabase.from("profiles").upsert({
+        id: userId,
+        languages: ids,
+        updated_at: new Date().toISOString(),
+      });
+    }
+  };
+
   return (
     <div className="px-4 pb-4 space-y-6">
-      <div>
-        <h3 className="mb-2 text-center text-sm font-semibold text-foreground/80">
-          Ethnic background
-        </h3>
-        <div className="flex flex-wrap justify-center gap-2">
-          {loading ? (
-            <div className="h-6 w-28 rounded bg-muted animate-pulse" />
-          ) : (
-            ethnicities.map((opt) => (
-              <Badge
-                key={opt.id}
-                role="button"
-                onClick={() => handleEthnicityClick(opt.label)}
-                className={`rounded-full cursor-pointer select-none ${
-                  selected === opt.label
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-secondary text-secondary-foreground"
-                }`}
+      <h3 className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
+        Background
+      </h3>
+      <Card className="border-0 space-y-3">
+        <CardContent>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm text-muted-foreground">I am</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className=""
+                  disabled={loading}
+                >
+                  {selected ? selected : loading ? "Loading…" : "Select…"}
+                  <ChevronDown className="h-4 w-4 opacity-70" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="max-h-64 overflow-y-auto"
               >
-                {opt.label}
-              </Badge>
-            ))
-          )}
-        </div>
-      </div>
-      <div>
-        <h3 className="mb-2 text-center text-sm font-semibold text-foreground/80">
-          Nationalities
-        </h3>
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button variant="outline" className="w-full justify-between">
-              {nationalities.length > 0
-                ? `${nationalities.length} selected`
-                : "Select nationalities"}
-              <ChevronsUpDown className="ml-2 h-4 w-4 opacity-60" />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent
-            className="p-0 w-(--radix-popover-trigger-width)"
-            align="start"
-          >
-            <Command>
-              <CommandInput placeholder="Search nationalities..." />
-              <CommandEmpty>No results found.</CommandEmpty>
-              <CommandList>
-                <CommandGroup>
-                  {countryOptions.map((name) => {
-                    const active = nationalities.includes(name);
-                    return (
-                      <CommandItem
-                        key={name}
-                        value={name}
-                        onSelect={() => toggleNationality(name)}
-                        className="flex items-center justify-between"
-                      >
-                        <span>{name}</span>
-                        {active ? <Check className="h-4 w-4" /> : null}
-                      </CommandItem>
-                    );
-                  })}
-                </CommandGroup>
-              </CommandList>
-            </Command>
-          </PopoverContent>
-        </Popover>
-        {nationalities.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-2">
-            {nationalities.map((n) => (
-              <Badge
-                key={n}
-                variant="secondary"
-                className="cursor-pointer"
-                onClick={() => toggleNationality(n)}
-                title="Remove"
-              >
-                {n}
-              </Badge>
-            ))}
+                {ethnicities.map((opt) => (
+                  <DropdownMenuItem
+                    key={opt.id}
+                    onClick={() => handleEthnicityClick(opt.label)}
+                  >
+                    {opt.label}
+                    {selected === opt.label ? (
+                      <Check className="ml-auto h-4 w-4" />
+                    ) : null}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
-        )}
-      </div>
+        </CardContent>
+      </Card>
+
+      <h3 className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
+        Nationalities
+      </h3>
+      <Card className="border-0 space-y-3">
+        <CardContent>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" className="justify-between gap-2">
+                {nationalities.length > 0
+                  ? `${nationalities.length} selected`
+                  : "Select nationalities"}
+                <ChevronsUpDown className="ml-2 h-4 w-4 opacity-60" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              className="p-0 w-[--radix-popover-trigger-width] max-h-64 overflow-y-auto"
+              align="start"
+            >
+              <Command>
+                <CommandInput placeholder="Search nationalities..." />
+                <CommandEmpty>No results found.</CommandEmpty>
+                <CommandList>
+                  <CommandGroup>
+                    {countryOptions.map((name) => {
+                      const active = nationalities.includes(name);
+                      return (
+                        <CommandItem
+                          key={name}
+                          value={name}
+                          onSelect={() => toggleNationality(name)}
+                          className="flex items-center justify-between"
+                        >
+                          <span>{name}</span>
+                          {active ? <Check className="h-4 w-4" /> : null}
+                        </CommandItem>
+                      );
+                    })}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+          {nationalities.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {nationalities.map((n) => (
+                <Badge
+                  key={n}
+                  variant="secondary"
+                  className="cursor-pointer"
+                  onClick={() => toggleNationality(n)}
+                  title="Remove"
+                >
+                  {n}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <h3 className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
+        Languages
+      </h3>
+      <Card className="border-0 space-y-3">
+        <CardContent>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" className="w-full justify-between">
+                {selectedLanguages.length > 0
+                  ? `${selectedLanguages.length} selected`
+                  : "Select languages"}
+                <ChevronsUpDown className="ml-2 h-4 w-4 opacity-60" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              className="p-0 w-[--radix-popover-trigger-width] max-h-64 overflow-y-auto"
+              align="start"
+            >
+              <Command>
+                <CommandInput placeholder="Search languages..." />
+                <CommandEmpty>No results found.</CommandEmpty>
+                <CommandList>
+                  <CommandGroup>
+                    {languages.map((lang) => {
+                      const active = selectedLanguages.includes(lang.label);
+                      return (
+                        <CommandItem
+                          key={lang.id}
+                          value={lang.label}
+                          onSelect={() => toggleLanguage(lang.label)}
+                          className="flex items-center justify-between"
+                        >
+                          <span>{lang.label}</span>
+                          {active ? <Check className="h-4 w-4" /> : null}
+                        </CommandItem>
+                      );
+                    })}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+          {selectedLanguages.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {selectedLanguages.map((l) => (
+                <Badge
+                  key={l}
+                  variant="secondary"
+                  className="cursor-pointer"
+                  onClick={() => toggleLanguage(l)}
+                  title="Remove"
+                >
+                  {l}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -734,15 +962,23 @@ export default function StatsPage() {
     setValue: (n: number) => void;
     onCommit?: (n: number, unit: "kg" | "lb") => void;
   }) {
+    const [internalValue, setInternalValue] = React.useState(value);
     const KG_MIN = 40;
     const KG_MAX = 160;
     const LB_MIN = 90;
     const LB_MAX = 350;
 
+    React.useEffect(() => {
+      // when parent changes unit or value, resync local slider
+      setInternalValue(value);
+    }, [value, unit]);
+
     const handleUnitChange = (u: "kg" | "lb") => {
       if (u === unit) return;
+      // convert current value to the new unit
       const converted =
         u === "kg" ? Math.round(value / 2.20462) : Math.round(value * 2.20462);
+      // clamp to that unit's range
       const clamped =
         u === "kg"
           ? Math.min(Math.max(converted, KG_MIN), KG_MAX)
@@ -752,64 +988,70 @@ export default function StatsPage() {
       if (onCommit) onCommit(clamped, u);
     };
 
-    const handleSlide = (vals: number[]) => {
-      const v = Math.round(vals[0]);
-      setValue(v);
-    };
+    const min = unit === "kg" ? KG_MIN : LB_MIN;
+    const max = unit === "kg" ? KG_MAX : LB_MAX;
 
     return (
       <div className="px-4 pb-4">
-        <Tabs
-          value={unit}
-          onValueChange={(v) => handleUnitChange(v as "kg" | "lb")}
-        >
-          <TabsList className="grid grid-cols-2 w-full">
-            <TabsTrigger value="kg">Kilograms</TabsTrigger>
-            <TabsTrigger value="lb">Pounds</TabsTrigger>
-          </TabsList>
-          <TabsContent value="kg" className="mt-4">
-            <div className="mb-2 text-center text-lg font-bold">
-              {Math.round(value)} kg
+        <Card className="border-0 space-y-6">
+          <CardContent>
+            <div className="flex items-start justify-between">
+              <div>
+                <div className="text-2xl font-semibold tracking-tight">
+                  {unit === "kg"
+                    ? `${Math.round(internalValue)} kg`
+                    : `${Math.round(internalValue)} lbs`}
+                </div>
+              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-7 gap-1">
+                    {unit === "kg" ? "Kilograms" : "Pounds"}
+                    <ChevronDown className="h-3 w-3 opacity-70" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-36">
+                  <DropdownMenuItem onClick={() => handleUnitChange("kg")}>
+                    Kilograms
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleUnitChange("lb")}>
+                    Pounds
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
-            <Slider
-              step={1}
-              min={KG_MIN}
-              max={KG_MAX}
-              value={[value]}
-              onValueChange={handleSlide}
-              onValueCommit={(vals) => {
-                const v = Math.round(vals[0]);
-                if (onCommit) onCommit(v, "kg");
-              }}
-            />
-            <div className="mt-2 flex justify-between text-[10px] text-muted-foreground px-3">
-              <span>{KG_MIN} kg</span>
-              <span>{Math.round((KG_MIN + KG_MAX) / 2)} kg</span>
-              <span>{KG_MAX} kg</span>
+
+            <div className="mt-8 mb-8">
+              <Slider
+                className="touch-none"
+                value={[Number.isFinite(internalValue) ? internalValue : min]}
+                min={min}
+                max={max}
+                step={1}
+                onValueChange={(vals) => {
+                  const next = Math.round(vals[0]);
+                  setInternalValue(next);
+                }}
+                onValueCommit={(vals) => {
+                  const finalVal = Math.round(vals[0]);
+                  setValue(finalVal);
+                  if (onCommit) onCommit(finalVal, unit);
+                }}
+              />
+              <div className="mt-2 flex justify-between text-[10px] text-muted-foreground px-0">
+                <span>
+                  {min} {unit}
+                </span>
+                <span>
+                  {Math.round((min + max) / 2)} {unit}
+                </span>
+                <span>
+                  {max} {unit}
+                </span>
+              </div>
             </div>
-          </TabsContent>
-          <TabsContent value="lb" className="mt-4">
-            <div className="mb-2 text-center text-lg font-bold">
-              {Math.round(value)} lbs
-            </div>
-            <Slider
-              step={1}
-              min={LB_MIN}
-              max={LB_MAX}
-              value={[value]}
-              onValueChange={handleSlide}
-              onValueCommit={(vals) => {
-                const v = Math.round(vals[0]);
-                if (onCommit) onCommit(v, "lb");
-              }}
-            />
-            <div className="mt-2 flex justify-between text-[10px] text-muted-foreground px-3">
-              <span>{LB_MIN} lbs</span>
-              <span>{Math.round((LB_MIN + LB_MAX) / 2)} lbs</span>
-              <span>{LB_MAX} lbs</span>
-            </div>
-          </TabsContent>
-        </Tabs>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -849,27 +1091,43 @@ export default function StatsPage() {
   }) {
     return (
       <div className="px-4 pb-4">
-        <p className="text-sm text-muted-foreground mb-3 text-center">
-          Choose the body type that best fits you.
-        </p>
-        <div className="flex flex-wrap justify-center gap-2">
-          {bodyTypes.map((bt) => (
-            <Badge
-              key={bt.id}
-              role="button"
-              onClick={() =>
-                setSelected(selected === bt.label ? null : bt.label)
-              }
-              className={`rounded-full cursor-pointer select-none ${
-                selected === bt.label
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-secondary text-secondary-foreground"
-              }`}
-            >
-              {bt.label}
-            </Badge>
-          ))}
-        </div>
+        <Card className="border-0 space-y-3">
+          <CardContent>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-muted-foreground">I am</span>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="ustify-between gap-2"
+                  >
+                    {selected ? selected : "Select…"}
+                    <ChevronDown className="h-4 w-4 opacity-70" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  className="max-h-64 overflow-y-auto"
+                >
+                  {bodyTypes.map((bt) => (
+                    <DropdownMenuItem
+                      key={bt.id}
+                      onClick={() =>
+                        setSelected(selected === bt.label ? null : bt.label)
+                      }
+                    >
+                      {bt.label}
+                      {selected === bt.label ? (
+                        <Check className="ml-auto h-4 w-4" />
+                      ) : null}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -888,6 +1146,13 @@ export default function StatsPage() {
   const [sexualityOptions, setSexualityOptions] = React.useState<
     { id: string; label: string }[]
   >([]);
+  const [languageOptions, setLanguageOptions] = React.useState<
+    { id: string; label: string }[]
+  >([]);
+  const [languagesSel, setLanguagesSel] = React.useState<string[]>([]);
+  const [countryOptions, setCountryOptions] = React.useState<
+    { id: string; name: string; code: string }[]
+  >([]);
 
   React.useEffect(() => {
     const loadStatsLookups = async () => {
@@ -898,13 +1163,18 @@ export default function StatsPage() {
       } = await supabase.auth.getUser();
       if (user) {
         setCurrentUserId(user.id);
-        const { data: profile } = await supabase
+        const { data: profile, error: profileError } = await supabase
           .from("profiles")
-          .select(
-            "ethnicity_id, body_type_id, position_id, attitude_id, sexuality_id, height_cm, weight_kg, height_input_unit, weight_input_unit, dick_length_cm, dick_length_input_unit, dick_size_id, dick_girth_id, dick_cut_status_id, dick_show"
-          )
+          .select("*")
           .eq("id", user.id)
           .maybeSingle();
+        if (profileError) {
+          console.error("stats page: profile fetch failed", profileError);
+        }
+        // hydrate nationalities if column exists
+        if (profile && Array.isArray(profile.nationalities)) {
+          setNationalitiesSel(profile.nationalities as string[]);
+        }
 
         // ETHNICITIES
         const { data: ethData } = await supabase
@@ -940,6 +1210,56 @@ export default function StatsPage() {
               setSexuality(match.label);
             }
           }
+        }
+
+        // LANGUAGES
+        const { data: langData } = await supabase
+          .from("languages")
+          .select("id, code, name")
+          .order("sort_order", { ascending: true })
+          .order("name", { ascending: true });
+
+        if (langData) {
+          const mapped = (langData as any[]).map((l) => ({
+            id: l.id,
+            label: `${l.name} (${l.code})`,
+          }));
+          setLanguageOptions(mapped);
+
+          // hydrate from profile.languages – handle array, Postgres array string, or json
+          const raw = profile?.languages as any;
+          let profileLangIds: string[] = [];
+
+          if (Array.isArray(raw)) {
+            profileLangIds = raw as string[];
+          } else if (typeof raw === "string") {
+            // e.g. "{uuid,uuid}" -> ["uuid","uuid"]
+            const cleaned = raw.replace(/[{}]/g, "").trim();
+            profileLangIds = cleaned.length ? cleaned.split(",") : [];
+          } else if (raw && typeof raw === "object") {
+            // in case it was stored as jsonb
+            if (Array.isArray(raw.ids)) {
+              profileLangIds = raw.ids;
+            }
+          }
+
+          if (profileLangIds.length > 0) {
+            const selectedLabels = mapped
+              .filter((l) => profileLangIds.includes(l.id))
+              .map((l) => l.label);
+            setLanguagesSel(selectedLabels);
+          }
+        }
+        // COUNTRIES (for nationalities)
+        const { data: countriesData } = await supabase
+          .from("countries")
+          .select("id, name, code")
+          .order("sort_order", { ascending: true })
+          .order("name", { ascending: true });
+        if (countriesData) {
+          setCountryOptions(
+            countriesData as { id: string; name: string; code: string }[]
+          );
         }
 
         // BODY TYPES
@@ -1124,6 +1444,29 @@ export default function StatsPage() {
           .order("label", { ascending: true });
         if (sexData) {
           setSexualityOptions(sexData as { id: string; label: string }[]);
+        }
+
+        const { data: langData } = await client
+          .from("languages")
+          .select("id, code, name")
+          .order("sort_order", { ascending: true })
+          .order("name", { ascending: true });
+        if (langData) {
+          const mapped = (langData as any[]).map((l) => ({
+            id: l.id,
+            label: `${l.name} (${l.code})`,
+          }));
+          setLanguageOptions(mapped);
+        }
+        const { data: countriesData } = await client
+          .from("countries")
+          .select("id, name, code")
+          .order("sort_order", { ascending: true })
+          .order("name", { ascending: true });
+        if (countriesData) {
+          setCountryOptions(
+            countriesData as { id: string; name: string; code: string }[]
+          );
         }
 
         const { data: bodyData } = await client
@@ -1640,6 +1983,10 @@ export default function StatsPage() {
                       ethnicities={ethnicityOptions}
                       userId={currentUserId}
                       loading={ethnicityLoading}
+                      languages={languageOptions}
+                      selectedLanguages={languagesSel}
+                      setSelectedLanguages={setLanguagesSel}
+                      countries={countryOptions}
                     />
                   ) : null}
                 </DrawerContent>
