@@ -209,7 +209,7 @@ export default function AvatarEditorPage() {
   };
 
   return (
-    <div className="fixed inset-0 z-[9999] bg-[#040615] flex flex-col px-4 py-3 gap-4 overscroll-none">
+    <div className="fixed inset-0 z-9999 bg-[#040615] flex flex-col px-4 py-3 gap-4 overscroll-none">
       {/* top bar */}
       <div className="flex items-center justify-between gap-2">
         <BackButton />
@@ -274,7 +274,7 @@ export default function AvatarEditorPage() {
         <>
           <div className="flex-1 flex items-center justify-center">
             <div
-              className="relative h-72 w-72 rounded-full overflow-hidden bg-slate-200/40 border-[4px] border-white touch-none shadow-[0_0_50px_rgba(0,0,0,0.45)]"
+              className="relative h-72 w-72 rounded-full overflow-hidden bg-slate-200/40 border-4 border-white touch-none shadow-[0_0_50px_rgba(0,0,0,0.45)]"
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
