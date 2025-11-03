@@ -19,11 +19,20 @@ export default function SettingsPage() {
 
       {/* Logout */}
       <div className="pt-2">
-        <Button asChild variant="outline" className="w-full">
-          <Link href="/auth" aria-label="Log out">
-            <LogOut className="mr-2 h-4 w-4" />
-            Log out
-          </Link>
+        <Button
+          variant="outline"
+          className="w-full"
+          onClick={async () => {
+            try {
+              await fetch("/api/auth/logout", { method: "POST" });
+            } finally {
+              window.location.href = "/auth";
+            }
+          }}
+          aria-label="Log out"
+        >
+          <LogOut className="mr-2 h-4 w-4" />
+          Log out
         </Button>
         <p className="mt-2 text-center text-xs text-muted-foreground">
           Proximity v0.1.0-alpha

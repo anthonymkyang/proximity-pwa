@@ -1,11 +1,13 @@
 {
   "version": 8,
   "name": "Proximity Dark",
-  "glyphs": "http://127.0.0.1:8080/fonts/{fontstack}/{range}.pbf",
+  "glyphs": "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
   "sources": {
     "openmaptiles": {
       "type": "vector",
-      "url": "http://127.0.0.1:8080/data/v3.json"
+      "tiles": ["https://demotiles.maplibre.org/tiles-omt/{z}/{x}/{y}.pbf"],
+      "minzoom": 0,
+      "maxzoom": 14
     }
   },
   "layers": [

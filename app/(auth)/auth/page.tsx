@@ -1,6 +1,8 @@
-import Link from "next/link";
-import { login, signup } from "./actions";
+"use client";
 
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { login, signup } from "./actions";
 import {
   Card,
   CardHeader,
@@ -9,82 +11,92 @@ import {
   CardContent,
   CardFooter,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function AuthPage() {
+  const router = useRouter();
+  const sp = useSearchParams();
+
+  const initialError = sp.get("error") ?? "";
+  const initialInfo = sp.get("info") ?? "";
+  const initialEmail = sp.get("email") ?? "";
+
+  const [error] = useState(initialError);
+  const [info] = useState(initialInfo);
+  const [email] = useState(initialEmail);
+
+  // clean the URL right after we read the params
+  useEffect(() => {
+    if (sp.toString()) {
+      router.replace("/auth");
+    }
+  }, [sp, router]);
+
   return (
-    <main className="min-h-[calc(100dvh)] grid place-items-center bg-background px-4">
-      <Card className="w-full max-w-sm shadow-sm">
-        <CardHeader className="space-y-2 text-center">
-          <CardTitle className="text-2xl tracking-tight">
-            <span className="bg-linear-to-r from-fuchsia-500 via-pink-500 to-rose-500 bg-clip-text text-transparent">
-              Proximity
-            </span>
-          </CardTitle>
-          <CardDescription>
-            Log in to find guys nearby — fast, simple, and discreet.
-          </CardDescription>
+    <main className="min-h-screen flex items-center justify-center px-4">
+      <Card className="w-full max-w-sm">
+        <CardHeader className="space-y-1 text-center">
+          <CardTitle className="text-xl">Sign in</CardTitle>
+          <CardDescription>Use your email and password.</CardDescription>
         </CardHeader>
-        <CardContent>
-          <form className="grid gap-4">
-            <div className="grid gap-2">
+
+        <CardContent className="space-y-4">
+          {info ? (
+            <Alert className="bg-emerald-100 text-emerald-700 border-emerald-200">
+              <AlertDescription>{info}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          {error ? (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          <form className="space-y-4">
+            <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
                 name="email"
                 type="email"
-                placeholder="you@example.com"
                 required
+                defaultValue={email}
+                autoCapitalize="none"
+                autoCorrect="off"
+                inputMode="email"
               />
             </div>
-            <div className="grid gap-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password">Password</Label>
-                <Link
-                  href="/forgot-password"
-                  className="text-sm text-muted-foreground hover:underline"
-                >
-                  Forgot?
-                </Link>
-              </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
               <Input
                 id="password"
                 name="password"
                 type="password"
-                placeholder="••••••••"
                 required
+                autoComplete="current-password"
               />
             </div>
 
-            <div className="grid gap-2 pt-2">
-              <Button type="submit" formAction={login} className="w-full">
+            <CardFooter className="flex flex-col gap-2 px-0">
+              <Button formAction={login} className="w-full">
                 Log in
               </Button>
               <Button
-                type="submit"
                 variant="outline"
+                type="submit"
                 formAction={signup}
                 className="w-full"
               >
                 Create account
               </Button>
-            </div>
+            </CardFooter>
           </form>
         </CardContent>
-        <CardFooter className="flex flex-col gap-2 text-center text-sm text-muted-foreground">
-          <div className="mx-auto h-px w-10 bg-border" />
-          By continuing you agree to our{" "}
-          <Link href="/terms" className="underline underline-offset-4">
-            Terms
-          </Link>{" "}
-          and{" "}
-          <Link href="/privacy" className="underline underline-offset-4">
-            Privacy Policy
-          </Link>
-          .
-        </CardFooter>
       </Card>
     </main>
   );

@@ -1,8 +1,10 @@
-// app/(app)/app/layout.tsx  <-- make this a SERVER component (no "use client")
+// app/(app)/app/layout.tsx
+import { redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
-import AppShell from "./AppShell"; // a client shell that contains your current code
 
-export default async function ProtectedAppLayout({
+import AppShell from "./AppShell";
+
+export default async function AppLayout({
   children,
 }: {
   children: React.ReactNode;
@@ -13,12 +15,7 @@ export default async function ProtectedAppLayout({
   } = await supabase.auth.getUser();
 
   if (!user) {
-    // force server redirect
-    return Response.redirect(
-      new URL("/login", process.env.NEXT_PUBLIC_SITE_URL),
-      302
-    );
-    // or: redirect("/login") if you're using next/navigation in server comp
+    redirect("/auth");
   }
 
   return <AppShell>{children}</AppShell>;
