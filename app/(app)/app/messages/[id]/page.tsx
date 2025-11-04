@@ -3,28 +3,28 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  MoreVertical,
-  ShieldAlert,
-  Ban,
-  OctagonAlert,
-  Plus,
-  ArrowUp,
-  Check,
-  CheckCheck,
-} from "lucide-react";
-import { Button as ShadButton } from "@/components/ui/button";
 
-import BackButton from "@/components/ui/back-button";
+import Conversation from "@/components/messages/Conversation";
 
-import TextareaAutosize from "react-textarea-autosize";
+import Header from "@/components/messages/Header";
+import MessageBar from "@/components/messages/MessageBar";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerFooter,
+} from "@/components/ui/drawer";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
+import { Image as ImageIcon } from "lucide-react";
+import { Image, MapPin, IdCard, User, Users } from "lucide-react";
 
 type Message = {
   id: string;
@@ -39,66 +39,6 @@ type Message = {
     avatar_url?: string | null;
   } | null;
 };
-
-// --- Local MessageInput component (inline) ---
-function MessageInput({
-  value,
-  onChange,
-  onSend,
-  placeholder = "Write a message…",
-  maxRows = 5,
-  disabled,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  onSend: () => void;
-  placeholder?: string;
-  maxRows?: number;
-  disabled?: boolean;
-}) {
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      onSend();
-    }
-  };
-
-  return (
-    <div className="relative w-full max-w-full overflow-hidden flex items-center gap-2">
-      <Button
-        type="button"
-        variant="outline"
-        size="icon"
-        className="rounded-full h-9 w-9 shrink-0"
-      >
-        <Plus className="h-5 w-5" />
-      </Button>
-      <div className="relative flex-1">
-        <TextareaAutosize
-          minRows={1}
-          maxRows={maxRows}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          data-slot="input-group-control"
-          className="block w-full resize-none rounded-full bg-transparent px-4 pr-20 py-2 text-base leading-5 outline-none md:text-sm field-sizing-content min-h-0 whitespace-pre-wrap wrap-break-word"
-          style={{ overflow: "hidden" }}
-        />
-        <Button
-          type="button"
-          onClick={onSend}
-          size="icon"
-          disabled={disabled || !value.trim()}
-          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full h-8 w-8 shrink-0"
-        >
-          <ArrowUp className="h-4 w-4" />
-        </Button>
-      </div>
-    </div>
-  );
-}
-// --- End local MessageInput ---
 
 export default function ConversationPage() {
   const params = useParams();
@@ -116,6 +56,12 @@ export default function ConversationPage() {
   const [error, setError] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [newMessage, setNewMessage] = useState("");
+  const [hasMounted, setHasMounted] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [photosOpen, setPhotosOpen] = useState(false);
+  useEffect(() => {
+    setHasMounted(true);
+  }, []);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   // Share the realtime channel across effects so we can broadcast after PATCH
   const channelRef = useRef<any>(null);
@@ -124,40 +70,6 @@ export default function ConversationPage() {
   useEffect(() => {
     messageIdsRef.current = new Set(messages.map((m) => m.id));
   }, [messages]);
-
-  const isGroup = useMemo(() => {
-    if (!messages || messages.length === 0) return false;
-    const others = new Set(
-      messages
-        .filter((m) => m.sender_id && m.sender_id !== currentUserId)
-        .map((m) => m.sender_id)
-    );
-    return others.size > 1;
-  }, [messages, currentUserId]);
-
-  // Determine the other participant (for 1:1) and resolve their avatar URL for the header
-  const otherProfile = useMemo(() => {
-    if (!messages || messages.length === 0) return null;
-    return (
-      messages.find((m) => m.sender_id !== currentUserId && m.profiles)
-        ?.profiles ?? null
-    );
-  }, [messages, currentUserId]);
-
-  const headerAvatarUrl = useMemo(() => {
-    if (!otherProfile?.avatar_url) return null;
-    const raw = otherProfile.avatar_url;
-    if (raw.startsWith("http")) return raw;
-    try {
-      const bucket =
-        process.env.NEXT_PUBLIC_SUPABASE_AVATARS_BUCKET || "avatars";
-      const supa = createClient();
-      const { data } = supa.storage.from(bucket).getPublicUrl(raw);
-      return data.publicUrl ?? null;
-    } catch {
-      return null;
-    }
-  }, [otherProfile]);
 
   useEffect(() => {
     const load = async () => {
@@ -405,10 +317,23 @@ export default function ConversationPage() {
       }
 
       // swap optimistic with server message
-      setMessages((prev) =>
-        prev.map((m) => (m.id === tempId ? data.message : m))
-      );
-
+      setMessages((prev) => {
+        const server = data.message as Message;
+        // remove any existing instance of the server id (in case realtime INSERT added it first)
+        let next = prev.filter((m) => m.id !== server.id);
+        // replace the optimistic message with the server one
+        let replaced = false;
+        next = next.map((m) => {
+          if (m.id === tempId) {
+            replaced = true;
+            return server;
+          }
+          return m;
+        });
+        // if the optimistic message isn't present anymore, append server once
+        if (!replaced) next.push(server);
+        return next;
+      });
       requestAnimationFrame(() => {
         messagesEndRef.current?.scrollIntoView({
           behavior: "smooth",
@@ -426,54 +351,11 @@ export default function ConversationPage() {
 
   return (
     <div className="h-full bg-background overflow-hidden">
-      {/* fixed top bar */}
-      <header className="fixed top-0 left-0 right-0 z-50 bg-background border-b px-4 py-3 flex items-center gap-3">
-        <BackButton />
-        {!isGroup && headerAvatarUrl ? (
-          <img
-            src={headerAvatarUrl}
-            alt={otherProfile?.profile_title || "User avatar"}
-            className="w-8 h-8 rounded-full border border-muted object-cover"
-            onError={(e) => {
-              (e.currentTarget as HTMLImageElement).src =
-                "/avatar-fallback.png";
-            }}
-          />
-        ) : null}
-        <div className="flex-1">
-          <h1 className="text-sm font-semibold">
-            {messages.length > 0
-              ? messages.find(
-                  (m) =>
-                    m.profiles?.profile_title && m.sender_id !== currentUserId
-                )?.profiles?.profile_title ?? "Conversation"
-              : "Conversation"}
-          </h1>
-          <p className="text-[10px] text-green-600">Online now</p>
-        </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <ShadButton variant="ghost" size="icon" className="h-8 w-8">
-              <MoreVertical className="h-4 w-4" />
-              <span className="sr-only">Open conversation menu</span>
-            </ShadButton>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
-            <DropdownMenuItem>
-              <ShieldAlert className="mr-2 h-4 w-4" />
-              <span>Restrict user</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem>
-              <OctagonAlert className="mr-2 h-4 w-4" />
-              <span>Report user</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem className="text-destructive focus:text-destructive">
-              <Ban className="mr-2 h-4 w-4" />
-              <span>Block user</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </header>
+      <Header
+        messages={messages}
+        currentUserId={currentUserId}
+        hasMounted={hasMounted}
+      />
 
       {/* scrollable messages, padded for header + footer */}
       <main
@@ -493,108 +375,132 @@ export default function ConversationPage() {
               No messages yet. Say hi 👋
             </p>
           ) : (
-            messages.map((m, index) => {
-              const mine = currentUserId
-                ? m.sender_id === currentUserId
-                : false;
-              // Resolve avatar URL from Supabase Storage if it's a key like `userId/filename.jpg`
-              let resolvedAvatarUrl: string | null = null;
-              if (!mine && m.profiles?.avatar_url) {
-                const raw = m.profiles.avatar_url;
-                if (raw.startsWith("http")) {
-                  resolvedAvatarUrl = raw;
-                } else {
-                  const supa = createClient();
-                  const bucket =
-                    process.env.NEXT_PUBLIC_SUPABASE_AVATARS_BUCKET ||
-                    "avatars";
-                  const { data } = supa.storage.from(bucket).getPublicUrl(raw);
-                  resolvedAvatarUrl = data.publicUrl || null;
-                }
-              }
-              return (
-                <div
-                  key={m.id}
-                  className={`flex items-start gap-2 ${
-                    mine ? "justify-end" : "justify-start"
-                  } ${index === messages.length - 1 ? "" : "mb-3"}`}
-                >
-                  {isGroup && !mine && m.profiles?.avatar_url ? (
-                    <img
-                      src={resolvedAvatarUrl ?? ""}
-                      alt={m.profiles.profile_title || "User avatar"}
-                      className="w-6 h-6 rounded-full border border-muted object-cover self-start"
-                      onError={(e) => {
-                        (e.currentTarget as HTMLImageElement).src =
-                          "/avatar-fallback.png";
-                      }}
-                    />
-                  ) : isGroup && !mine ? (
-                    <div className="w-6 h-6 rounded-full bg-muted border border-muted self-start" />
-                  ) : null}
-                  <div
-                    className={
-                      mine
-                        ? "max-w-[75%] rounded-lg px-3 py-2 text-sm bg-linear-to-br from-blue-500 via-blue-600 to-indigo-500 text-white"
-                        : "max-w-[75%] rounded-lg px-3 py-2 text-sm bg-muted text-foreground"
-                    }
-                  >
-                    {isGroup && !mine && m.profiles?.profile_title ? (
-                      <p className="text-xs font-medium mb-1">
-                        {m.profiles.profile_title}
-                      </p>
-                    ) : null}
-                    <p>{m.body}</p>
-                    <div className="flex items-center justify-end gap-1 mt-1">
-                      <p className="text-[10px] opacity-60 text-right">
-                        {new Date(m.created_at).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </p>
-                      {mine ? (
-                        m.failed ? (
-                          <span className="text-[10px] text-red-500 ml-1">
-                            Failed
-                          </span>
-                        ) : m.read_at ? (
-                          <CheckCheck
-                            className="h-3.5 w-3.5 text-primary opacity-90"
-                            aria-label="Read"
-                          />
-                        ) : m.delivered_at ? (
-                          <CheckCheck
-                            className="h-3.5 w-3.5 text-muted-foreground opacity-70"
-                            aria-label="Delivered"
-                          />
-                        ) : (
-                          <Check
-                            className="h-3.5 w-3.5 text-muted-foreground opacity-70"
-                            aria-label="Sent"
-                          />
-                        )
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-              );
-            })
+            <Conversation
+              messages={messages}
+              currentUserId={currentUserId}
+              hasMounted={hasMounted}
+              messagesEndRef={messagesEndRef}
+            />
           )}
-          <div ref={messagesEndRef} />
         </div>
       </main>
 
       {/* fixed message bar ABOVE the 56px AppShell bar */}
       <footer
-        className="fixed left-0 right-0 z-9999 bg-background border-t px-3 py-3"
-        style={{ bottom: "50px" }}
+        className="fixed left-0 right-0 z-40 bg-card/95 backdrop-blur supports-backdrop-filter:bg-card/80 text-card-foreground px-3 py-3"
+        style={{ bottom: "53px" }}
       >
-        <MessageInput
+        <MessageBar
           value={newMessage}
           onChange={setNewMessage}
           onSend={handleSend}
+          onShareClick={() => setShareOpen(true)}
         />
       </footer>
+      <Drawer open={shareOpen} onOpenChange={setShareOpen}>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>Share to conversation</DrawerTitle>
+          </DrawerHeader>
+          <div className="px-4 pb-4">
+            <div className="grid grid-cols-3 gap-4">
+              <button
+                type="button"
+                className="flex flex-col items-center justify-center gap-2 rounded-md bg-card text-card-foreground py-3"
+                onClick={() => {
+                  setShareOpen(false);
+                  setPhotosOpen(true);
+                }}
+                aria-label="Share photos"
+              >
+                <Image className="h-6 w-6" />
+                <span className="text-xs">Photos</span>
+              </button>
+              <button
+                type="button"
+                className="flex flex-col items-center justify-center gap-2 rounded-md bg-card text-card-foreground py-3"
+                onClick={() => setShareOpen(false)}
+                aria-label="Share location"
+              >
+                <MapPin className="h-6 w-6" />
+                <span className="text-xs">Location</span>
+              </button>
+              <button
+                type="button"
+                className="flex flex-col items-center justify-center gap-2 rounded-md bg-card text-card-foreground py-3"
+                onClick={() => setShareOpen(false)}
+                aria-label="Share my card"
+              >
+                <IdCard className="h-6 w-6" />
+                <span className="text-xs">My card</span>
+              </button>
+              <button
+                type="button"
+                className="flex flex-col items-center justify-center gap-2 rounded-md bg-card text-card-foreground py-3"
+                onClick={() => setShareOpen(false)}
+                aria-label="Share profile"
+              >
+                <User className="h-6 w-6" />
+                <span className="text-xs">Profile</span>
+              </button>
+              <button
+                type="button"
+                className="flex flex-col items-center justify-center gap-2 rounded-md bg-card text-card-foreground py-3"
+                onClick={() => setShareOpen(false)}
+                aria-label="Share group"
+              >
+                <Users className="h-6 w-6" />
+                <span className="text-xs">Group</span>
+              </button>
+            </div>
+          </div>
+          <DrawerFooter />
+        </DrawerContent>
+      </Drawer>
+      <Drawer open={photosOpen} onOpenChange={setPhotosOpen}>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>Send photos</DrawerTitle>
+          </DrawerHeader>
+          <div className="px-4 pb-4">
+            <div className="flex w-full flex-col gap-3">
+              <Item
+                variant="outline"
+                onClick={() => setPhotosOpen(false)}
+                className="bg-card"
+              >
+                <ItemMedia variant="icon">
+                  <ImageIcon className="h-5 w-5" />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>Send a photo</ItemTitle>
+                  <ItemDescription>Send image from your device</ItemDescription>
+                </ItemContent>
+              </Item>
+
+              <div className="mt-2">
+                <h3 className="px-1 mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  Recently sent
+                </h3>
+
+                {/* Horizontal scroll list */}
+                <div className="flex gap-3 -mx-4 px-4 overflow-x-auto pb-1">
+                  {Array.from({ length: 10 }).map((_, i) => (
+                    <div
+                      key={i}
+                      className="h-24 w-24 shrink-0 rounded-md border bg-muted flex items-center justify-center text-muted-foreground"
+                      aria-label={`Recent photo ${i + 1}`}
+                    >
+                      <ImageIcon className="h-6 w-6 opacity-70" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+          <DrawerFooter />
+        </DrawerContent>
+      </Drawer>
     </div>
   );
 }

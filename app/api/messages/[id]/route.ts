@@ -2,13 +2,27 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 
-// Helper to extract conversation id robustly
-function getConversationId(req: Request, params: { id?: string }) {
+// Helper to extract conversation id robustly (Next 16 may pass params as a Promise)
+async function getConversationId(
+  req: Request,
+  paramsOrPromise: { id?: string } | Promise<{ id?: string }>
+) {
   const url = new URL(req.url);
   const tail = url.pathname.split("/").pop();
-  const p = params?.id && params.id !== "undefined" ? params.id : null;
+
+  let pid: string | null = null;
+  try {
+    const ctx = (paramsOrPromise as any)?.then
+      ? await (paramsOrPromise as Promise<{ id?: string }>)
+      : (paramsOrPromise as { id?: string });
+    const cid = ctx?.id;
+    pid = cid && cid !== "undefined" ? String(cid) : null;
+  } catch {
+    // ignore; fall back to tail
+  }
+
   const t = tail && tail !== "undefined" ? tail : null;
-  return p || t || null;
+  return pid || t || null;
 }
 
 // GET /api/messages/:id -> list messages in a convo + upsert delivered receipts for viewer
@@ -16,7 +30,7 @@ export async function GET(
   req: Request,
   { params }: { params: { id: string } }
 ) {
-  const conversationId = getConversationId(req, params);
+  const conversationId = await getConversationId(req, params);
   if (!conversationId) {
     return NextResponse.json(
       { error: "conversation_id is required (api)" },
@@ -154,7 +168,7 @@ export async function POST(
   req: Request,
   { params }: { params: { id: string } }
 ) {
-  const conversationId = getConversationId(req, params);
+  const conversationId = await getConversationId(req, params);
   if (!conversationId) {
     return NextResponse.json(
       { error: "conversation_id is required (api)" },
@@ -219,7 +233,7 @@ export async function PATCH(
   req: Request,
   { params }: { params: { id: string } }
 ) {
-  const conversationId = getConversationId(req, params);
+  const conversationId = await getConversationId(req, params);
   if (!conversationId) {
     return NextResponse.json(
       { error: "conversation_id is required (api)" },

@@ -16,7 +16,7 @@ export default function AppBar() {
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-20 border-t bg-card/95 backdrop-blur supports-backdrop-filter:bg-card/80 text-card-foreground">
+    <nav className="fixed bottom-0 left-0 right-0 z-20 bg-card/95 backdrop-blur supports-backdrop-filter:bg-card/80 text-card-foreground">
       <ul className="flex justify-between items-center py-2">
         {navItems.map(({ name, href, icon: Icon }) => {
           const active = pathname === href;
