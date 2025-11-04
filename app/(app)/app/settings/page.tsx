@@ -17,6 +17,13 @@ export default function SettingsPage() {
 
       <SettingsMenu />
 
+      {/* View profile */}
+      <div className="pt-2">
+        <Button asChild variant="secondary" className="w-full">
+          <Link href="/app/profile/me">View my profile</Link>
+        </Button>
+      </div>
+
       {/* Logout */}
       <div className="pt-2">
         <Button

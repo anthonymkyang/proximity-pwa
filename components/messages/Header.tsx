@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import Link from "next/link";
 import { createClient } from "@/utils/supabase/client";
 import BackButton from "@/components/ui/back-button";
 import { Button as ShadButton } from "@/components/ui/button";
@@ -64,23 +65,57 @@ export default function Header({
     );
   }, [messages, currentUserId]);
 
+  const otherUserId = useMemo(() => {
+    if (!messages || messages.length === 0) return null;
+    const msg = messages.find(
+      (m) => m.sender_id && m.sender_id !== currentUserId
+    );
+    return msg ? msg.sender_id : null;
+  }, [messages, currentUserId]);
+
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-card/95 backdrop-blur supports-backdrop-filter:bg-card/80 px-4 py-3 flex items-center gap-3">
       <BackButton />
-      {headerAvatarUrl ? (
-        <img
-          src={headerAvatarUrl}
-          alt={title || "User avatar"}
-          className="w-8 h-8 rounded-full border border-muted object-cover"
-          onError={(e) => {
-            (e.currentTarget as HTMLImageElement).src = "/avatar-fallback.png";
-          }}
-        />
-      ) : null}
-      <div className="flex-1">
-        <h1 className="text-sm font-semibold">{title}</h1>
-        <p className="text-[10px] text-green-600">Online now</p>
-      </div>
+      {otherUserId ? (
+        <Link
+          href={`/app/profile/${otherUserId}`}
+          className="flex items-center gap-3"
+        >
+          {headerAvatarUrl ? (
+            <img
+              src={headerAvatarUrl}
+              alt={title || "User avatar"}
+              className="w-8 h-8 rounded-full border border-muted object-cover"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).src =
+                  "/avatar-fallback.png";
+              }}
+            />
+          ) : null}
+          <div className="flex-1">
+            <h1 className="text-sm font-semibold">{title}</h1>
+            <p className="text-[10px] text-green-600">Online now</p>
+          </div>
+        </Link>
+      ) : (
+        <>
+          {headerAvatarUrl ? (
+            <img
+              src={headerAvatarUrl}
+              alt={title || "User avatar"}
+              className="w-8 h-8 rounded-full border border-muted object-cover"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).src =
+                  "/avatar-fallback.png";
+              }}
+            />
+          ) : null}
+          <div className="flex-1">
+            <h1 className="text-sm font-semibold">{title}</h1>
+            <p className="text-[10px] text-green-600">Online now</p>
+          </div>
+        </>
+      )}
       {hasMounted ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

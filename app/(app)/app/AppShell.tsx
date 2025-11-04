@@ -16,7 +16,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <MapCanvas />
       </div>
       <main
-        className={`relative min-h-[calc(100vh-56px)] overflow-y-auto ${
+        className={`relative min-h-[calc(100-screen-56px)] overflow-y-auto ${
           isMapPage ? "bg-transparent pointer-events-none" : "bg-background"
         }`}
       >

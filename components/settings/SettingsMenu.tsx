@@ -122,7 +122,7 @@ export default function SettingsMenu() {
           Media centre
         </p>
         <ItemGroup className="border-y border-border -mx-4">
-          <Link href="/app/settings/media/photos" className="block">
+          <Link href="/app/settings/photos/profile" className="block">
             <Item className="px-4 py-3">
               <ItemMedia variant="icon">
                 <ImageIcon className="h-4 w-4" />
@@ -137,7 +137,7 @@ export default function SettingsMenu() {
             </Item>
           </Link>
           <ItemSeparator />
-          <Link href="/app/settings/media/albums" className="block">
+          <Link href="/app/settings/albums" className="block">
             <Item className="px-4 py-3">
               <ItemMedia variant="icon">
                 <ImagesIcon className="h-4 w-4" />

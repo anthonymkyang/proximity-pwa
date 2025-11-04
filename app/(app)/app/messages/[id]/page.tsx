@@ -467,7 +467,7 @@ export default function ConversationPage() {
               <Item
                 variant="outline"
                 onClick={() => setPhotosOpen(false)}
-                className="bg-card"
+                className="bg-card border-0"
               >
                 <ItemMedia variant="icon">
                   <ImageIcon className="h-5 w-5" />

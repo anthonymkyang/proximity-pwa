@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -18,8 +17,8 @@ interface Profile {
   bio: string | null;
   avatar_url: string | null;
   updated_at: string | null;
-  nationalities: string[] | null; // strings already human-readable
-  languages: string[] | null; // array of UUIDs referencing languages table
+  nationalities: string[] | null;
+  languages: string[] | null; // UUIDs referencing languages
 
   ethnicity_id: string | null;
   body_type_id: string | null;
@@ -32,30 +31,24 @@ interface Profile {
 
   height_cm: string | number | null;
   weight_kg: string | number | null;
-  height_input_unit: string | null; // e.g. "cm"
-  weight_input_unit: string | null; // e.g. "kg"
+  height_input_unit: string | null;
+  weight_input_unit: string | null;
 
-  dick_length_cm: string | number | null; // value, regardless of named _cm
-  dick_length_input_unit: string | null; // e.g. "in" or "cm"
-  dick_size_label: string | null; // fallback label
-  dick_cut: string | null;
-  dick_show: boolean | null; // gate to show actual length
+  dick_length_cm: string | number | null;
+  dick_length_input_unit: string | null;
+  dick_size_label: string | null;
+  dick_cut: string | null; // raw field
+  dick_show: boolean | null;
 }
 
 const pickLabel = (row: any) =>
   row?.label ?? row?.name ?? row?.title ?? row?.value ?? null;
 
 export default function ProfilePage() {
-  const params = useParams();
-  const routeId = Array.isArray((params as any).id)
-    ? (params as any).id[0]
-    : (params as any).id ?? null;
-
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
 
-  // Lookup labels
   const [lookups, setLookups] = useState<{
     ethnicity?: string | null;
     body_type?: string | null;
@@ -68,16 +61,22 @@ export default function ProfilePage() {
     languages?: string[];
   }>({});
 
-  // --------- Load base profile ---------
+  // --------- Load base profile for current user ---------
   useEffect(() => {
     const run = async () => {
-      if (!routeId) {
-        setError("Missing profile id");
-        setLoading(false);
-        return;
-      }
       try {
         const supabase = createClient();
+        const {
+          data: { user },
+          error: userErr,
+        } = await supabase.auth.getUser();
+        if (userErr) throw userErr;
+        if (!user) {
+          setError("Not signed in");
+          setLoading(false);
+          return;
+        }
+
         const { data, error } = await supabase
           .from("profiles")
           .select(
@@ -110,7 +109,7 @@ export default function ProfilePage() {
               "dick_show",
             ].join(",")
           )
-          .eq("id", routeId)
+          .eq("id", user.id)
           .maybeSingle();
         if (error) throw error;
         if (!data) {
@@ -127,9 +126,9 @@ export default function ProfilePage() {
       }
     };
     run();
-  }, [routeId]);
+  }, []);
 
-  // --------- Resolve lookups once we have profile ---------
+  // --------- Resolve lookups ---------
   useEffect(() => {
     const loadLookups = async () => {
       if (!profile) return;
@@ -165,24 +164,21 @@ export default function ProfilePage() {
         ),
       ]);
 
-      // Languages (array of IDs)
       if (Array.isArray(profile.languages) && profile.languages.length) {
         const { data, error } = await supabase
           .from("languages")
           .select("id, name, label")
           .in("id", profile.languages as string[]);
-        if (!error && data) {
+        if (!error && data)
           next.languages = (data as any[]).map(pickLabel).filter(Boolean);
-        }
       }
 
       setLookups(next);
     };
-
     loadLookups();
   }, [profile]);
 
-  // --------- Derived display values ---------
+  // --------- Derived display ---------
   const avatarUrl = useMemo(
     () => getAvatarPublicUrl(profile?.avatar_url) ?? "/avatar-fallback.png",
     [profile?.avatar_url]
@@ -238,7 +234,7 @@ export default function ProfilePage() {
   }, [lookups.dick_cut_status, profile?.dick_cut]);
 
   return (
-    <div className="min-h-dvh bg-background">
+    <div className="bg-background">
       <header className="sticky top-0 z-20 bg-card/95 backdrop-blur supports-backdrop-filter:bg-card/80 border-b px-4 py-3 flex items-center gap-3">
         <Link
           href="/app/messages"
@@ -246,7 +242,7 @@ export default function ProfilePage() {
         >
           &larr; Back
         </Link>
-        <h1 className="text-sm font-semibold">Profile</h1>
+        <h1 className="text-sm font-semibold">My profile</h1>
       </header>
 
       <main className="px-4 py-4 space-y-6">
@@ -264,7 +260,7 @@ export default function ProfilePage() {
           <p className="text-sm text-muted-foreground">Profile unavailable.</p>
         ) : (
           <>
-            {/* Header card */}
+            {/* Header */}
             <section className="flex items-start gap-4">
               <img
                 src={avatarUrl}
@@ -310,7 +306,7 @@ export default function ProfilePage() {
               </>
             ) : null}
 
-            {/* Details grid */}
+            {/* Details */}
             <>
               <Separator />
               <section>
