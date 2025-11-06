@@ -1026,9 +1026,54 @@ export default function ProfilePage() {
   }, [lightboxOpen]);
 
   const handleChat = useCallback(async () => {
-    if (chatLoading) return;
+    if (chatLoading || !routeId) return;
     setChatLoading(true);
     try {
+      const supabase = createClient();
+
+      // 1) who am I?
+      const { data: auth } = await supabase.auth.getUser();
+      const me = auth?.user?.id ?? null;
+
+      // 2) Try to find an existing direct conversation with this user
+      if (me) {
+        const { data: mine, error: mineErr } = await supabase
+          .from("conversation_members")
+          .select("conversation_id")
+          .eq("user_id", me);
+
+        if (!mineErr && mine && mine.length) {
+          const convoIds = Array.from(
+            new Set(mine.map((m: any) => m.conversation_id))
+          );
+
+          // other user's memberships among my conversations
+          const { data: shared, error: sharedErr } = await supabase
+            .from("conversation_members")
+            .select("conversation_id")
+            .eq("user_id", routeId as string)
+            .in("conversation_id", convoIds);
+
+          if (!sharedErr && shared && shared.length) {
+            const sharedIds = shared.map((s: any) => s.conversation_id);
+            const { data: convos } = await supabase
+              .from("conversations")
+              .select("id, type, updated_at")
+              .in("id", sharedIds)
+              .eq("type", "direct")
+              .order("updated_at", { ascending: false })
+              .limit(1);
+
+            const existingId = convos?.[0]?.id as string | undefined;
+            if (existingId) {
+              router.push(`/app/messages/${existingId}`);
+              return;
+            }
+          }
+        }
+      }
+
+      // 3) Fallback: create/ensure a conversation and go there
       const res = await fetch("/api/messages/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
