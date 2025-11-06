@@ -87,7 +87,7 @@ export default function Groups() {
     <>
       {/* Your groups section */}
       <section className="mt-4">
-        <h2 className="text-lg font-semibold px-1 mb-3">Your groups</h2>
+        <h3 className="text-lg font-semibold px-1 mb-3">Your groups</h3>
         <div className="flex gap-3 overflow-x-auto -mx-4 px-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           {[
             { name: "Weekend Hikers", fallback: "WH" },
@@ -140,7 +140,7 @@ export default function Groups() {
         <div className="relative rounded-2xl bg-foreground/90 text-background p-4 shadow-[0_20px_40px_-15px_rgba(0,0,0,0.35)]">
           <div className="flex items-start justify-between">
             <div>
-              <h3 className="text-2xl font-semibold">Upcoming</h3>
+              <h2 className="text-xl tracking-tight">Upcoming</h2>
               <p className="text-sm/6 opacity-70">In the next 2 weeks</p>
             </div>
             <button
@@ -224,7 +224,7 @@ export default function Groups() {
 
       {/* Nearby groups */}
       <section className="mt-8">
-        <h2 className="text-lg font-semibold px-1 mb-3">Nearby groups</h2>
+        <h3 className="text-lg font-semibold px-1 mb-3">Nearby groups</h3>
         <div className="space-y-3">
           {[
             {

@@ -1,16 +1,28 @@
 import { ThemeProvider } from "@/utils/providers/ThemeProvider";
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
+import { Quicksand } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+const stackSansNotch = localFont({
+  src: [
+    {
+      path: "../fonts/StackSansNotch-Regular.ttf",
+      weight: "400",
+      style: "normal",
+    },
+    {
+      path: "../fonts/StackSansNotch-Bold.ttf",
+      weight: "700",
+      style: "normal",
+    },
+  ],
+  variable: "--font-stack-sans-notch", // optional, for CSS variable usage
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const quicksand = Quicksand({
   subsets: ["latin"],
+  variable: "--font-quicksand",
 });
 
 export const metadata: Metadata = {
@@ -30,7 +42,7 @@ export default function RootLayout({
         content="width=device-width, initial-scale=1, viewport-fit=cover"
       />
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${stackSansNotch.variable} ${quicksand.variable} antialiased`}
       >
         <ThemeProvider
           attribute="class"

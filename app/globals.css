@@ -122,3 +122,13 @@
     @apply bg-background text-foreground;
   }
 }
+
+body {
+  @apply bg-background text-foreground;
+  font-family: var(--font-quicksand);
+}
+
+h1,
+h2 {
+  font-family: var(--font-stack-sans-notch);
+}

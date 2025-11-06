@@ -1244,7 +1244,7 @@ export default function ProfilePage() {
                   type="button"
                   aria-label="Close"
                   data-nodrag
-                  className="absolute top-4 right-4 z-[60] rounded-full p-2 bg-white/10 hover:bg-white/20 ring-1 ring-white/25 pointer-events-auto"
+                  className="absolute top-4 right-4 z-60 rounded-full p-2 bg-white/10 hover:bg-white/20 ring-1 ring-white/25 pointer-events-auto"
                   onClick={() => setLightboxOpen(false)}
                   onTouchStart={(e) => e.stopPropagation()}
                   onPointerDown={(e) => e.stopPropagation()}
