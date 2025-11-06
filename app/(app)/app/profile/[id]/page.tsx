@@ -949,6 +949,8 @@ export default function ProfilePage() {
   const swipeStartYRef = useRef<number | null>(null);
   // Handlers for sliding lightbox
   const onTouchStart = (e: React.TouchEvent) => {
+    const target = e.target as HTMLElement | null;
+    if (target && target.closest && target.closest("[data-nodrag]")) return;
     const t = e.touches[0];
     swipeStartXRef.current = t.clientX;
     swipeStartYRef.current = t.clientY;
@@ -957,6 +959,8 @@ export default function ProfilePage() {
     setDragX(0);
   };
   const onTouchMove = (e: React.TouchEvent) => {
+    const target = e.target as HTMLElement | null;
+    if (target && target.closest && target.closest("[data-nodrag]")) return;
     if (!isDragging) return;
     const t = e.touches[0];
     const sx = swipeStartXRef.current ?? t.clientX;
@@ -970,6 +974,8 @@ export default function ProfilePage() {
     }
   };
   const onTouchEnd = (e: React.TouchEvent) => {
+    const target = e.target as HTMLElement | null;
+    if (target && target.closest && target.closest("[data-nodrag]")) return;
     const sx = swipeStartXRef.current;
     const sy = swipeStartYRef.current;
     swipeStartXRef.current = null;
@@ -1237,8 +1243,11 @@ export default function ProfilePage() {
                 <button
                   type="button"
                   aria-label="Close"
-                  className="absolute top-4 right-4 z-60 rounded-full p-2 bg-white/10 hover:bg-white/20 ring-1 ring-white/25"
+                  data-nodrag
+                  className="absolute top-4 right-4 z-[60] rounded-full p-2 bg-white/10 hover:bg-white/20 ring-1 ring-white/25 pointer-events-auto"
                   onClick={() => setLightboxOpen(false)}
+                  onTouchStart={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => e.stopPropagation()}
                 >
                   <X className="h-6 w-6 text-white" />
                 </button>
@@ -1334,7 +1343,7 @@ export default function ProfilePage() {
             </div>
 
             {/* Avatar overlay + static Flame reaction button */}
-            <div className="absolute right-4 bottom-4 z-40 flex flex-col items-center gap-4">
+            <div className="absolute right-4 bottom-4 z-40 flex flex-col items-center gap-6">
               <button
                 type="button"
                 onClick={() => setProfileDrawerOpen(true)}
@@ -1388,7 +1397,7 @@ export default function ProfilePage() {
                 onClick={() => setFlameActive((prev) => !prev)}
               >
                 <Flame
-                  className={`h-5 w-5 ${
+                  className={`h-6 w-6 ${
                     flameActive
                       ? "fill-orange-500 text-orange-500"
                       : "text-primary"
@@ -1402,14 +1411,14 @@ export default function ProfilePage() {
                 className="relative p-0 hover:scale-110 transition-transform mx-auto"
                 onClick={() => setFavoriteDrawerOpen(true)}
               >
-                <UserStar className="h-5 w-5 text-primary" aria-hidden="true" />
+                <UserStar className="h-6 w-6 text-primary" aria-hidden="true" />
               </button>
               <button
                 type="button"
                 aria-label="Share profile"
                 className="relative p-0 hover:scale-110 transition-transform mx-auto"
               >
-                <Share2 className="h-5 w-5 text-primary" aria-hidden="true" />
+                <Share2 className="h-6 w-6 text-primary" aria-hidden="true" />
               </button>
               <button
                 type="button"
@@ -1420,7 +1429,7 @@ export default function ProfilePage() {
                 disabled={chatLoading}
               >
                 <MessageCircle
-                  className="h-5 w-5 text-primary"
+                  className="h-6 w-6 text-primary"
                   aria-hidden="true"
                 />
               </button>
