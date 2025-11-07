@@ -24,8 +24,8 @@ function presenceFromLastSeen(lastSeen?: string | Date | null): Presence {
 }
 
 type SizeKey = "xs" | "sm" | "md" | "lg" | "xl";
-type DotSizeKey = "xs" | "sm" | "md";
-type InsetKey = "flush" | "tighter" | "tight" | "tightest";
+type DotSizeKey = "nano" | "xxs" | "xs" | "sm" | "md";
+type InsetKey = "flush" | "tighter" | "tight" | "tightest" | "micro";
 
 const sizeClasses: Record<SizeKey, string> = {
   xs: "w-8 h-8", // 32px
@@ -36,6 +36,8 @@ const sizeClasses: Record<SizeKey, string> = {
 };
 
 const dotSizeClasses: Record<DotSizeKey, string> = {
+  nano: "w-0.5 h-0.5", // 2px
+  xxs: "w-1 h-1", // 4px
   xs: "w-1.5 h-1.5", // 6px
   sm: "w-2 h-2", // 8px
   md: "w-2.5 h-2.5", // 10px
@@ -44,8 +46,9 @@ const dotSizeClasses: Record<DotSizeKey, string> = {
 const insetClasses: Record<InsetKey, string> = {
   flush: "top-0 left-0",
   tighter: "-top-0.5 -left-0.5",
-  tight: "-top-1 -left-1",
+  tight: "-top-0.5 -left-0.5",
   tightest: "-top-1 -left-1",
+  micro: "-top-px -left-px",
 };
 
 export default function AvatarWithPresence({
@@ -55,8 +58,8 @@ export default function AvatarWithPresence({
   className = "",
   status, // optional explicit status
   lastSeen, // or pass a timestamp to compute it
-  dotSize = "xs",
-  dotInset = "tight",
+  dotSize = "nano",
+  dotInset = "micro",
 }: {
   src?: string | null;
   alt?: string;
@@ -102,7 +105,7 @@ export default function AvatarWithPresence({
       {/* Presence dot (top-left) */}
       {dotColor ? (
         <span
-          className={`absolute ${insetClasses[dotInset]} ${dotSizeClasses[dotSize]} z-10 rounded-full ring-2 ring-background ${dotColor} pointer-events-none`}
+          className={`absolute ${insetClasses[dotInset]} ${dotSizeClasses[dotSize]} z-10 rounded-full ring-1 ring-background ${dotColor} pointer-events-none`}
           aria-label={`Status: ${resolved}`}
           title={resolved}
         />

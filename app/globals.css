@@ -158,3 +158,49 @@ h1,
 h2 {
   font-family: var(--font-stack-sans-notch);
 }
+
+@layer components {
+  /* Avatar + presence: stable utility classes so Tailwind never purges them */
+  .avatar-presence {
+    @apply relative inline-flex items-center justify-center overflow-visible;
+  }
+
+  .presence-dot {
+    @apply absolute rounded-full ring-1 ring-background shadow-sm;
+  }
+  /* Sizes (pick one per usage) */
+  .presence-dot--xs {
+    @apply h-1.5 w-1.5 -top-0.5 -left-0.5;
+  }
+  .presence-dot--sm {
+    @apply h-2 w-2 -top-0.5 -left-0.5;
+  }
+  .presence-dot--md {
+    @apply h-2.5 w-2.5 -top-0.5 -left-0.5;
+  }
+  .presence-dot--lg {
+    @apply h-3 w-3 -top-1 -left-1;
+  }
+
+  /* Status colours */
+  .presence-online {
+    @apply bg-emerald-500;
+  }
+  .presence-away {
+    @apply bg-amber-400;
+  }
+  .presence-recent {
+    @apply bg-zinc-400;
+  }
+
+  /* Reusable glass circle button (used by back / more buttons) */
+  .glass-circle {
+    @apply rounded-full backdrop-blur-xl ring-1 ring-white/25 bg-white/5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.35),0_6px_20px_rgba(0,0,0,0.25)] hover:bg-white/10 transition;
+  }
+  .glass-circle--icon {
+    @apply flex items-center justify-center h-8 w-8;
+  }
+  .glass-circle--primary {
+    @apply ring-primary/30 bg-primary/20 hover:bg-primary/25;
+  }
+}

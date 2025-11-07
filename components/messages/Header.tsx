@@ -215,10 +215,7 @@ export default function Header({
             className="flex items-center gap-3"
           >
             {headerAvatarUrl ? (
-              <div
-                className="relative overflow-visible"
-                style={{ width: 44, height: 44 }}
-              >
+              <div className="relative overflow-visible w-11 h-11">
                 <img
                   src={headerAvatarUrl}
                   alt={title || "User avatar"}
@@ -231,7 +228,7 @@ export default function Header({
                 {presenceStatus !== "offline" ? (
                   <span
                     className={
-                      "absolute -top-1 -left-1 h-3 w-3 rounded-full ring-2 ring-background z-10 pointer-events-none " +
+                      "absolute top-[2px] left-[2px] h-2 w-2 rounded-full ring-1 ring-background z-10 pointer-events-none " +
                       presenceDot
                     }
                     aria-hidden="true"
@@ -249,10 +246,7 @@ export default function Header({
         ) : (
           <>
             {headerAvatarUrl ? (
-              <div
-                className="relative overflow-visible"
-                style={{ width: 44, height: 44 }}
-              >
+              <div className="relative overflow-visible w-11 h-11">
                 <img
                   src={headerAvatarUrl}
                   alt={title || "User avatar"}
@@ -265,7 +259,7 @@ export default function Header({
                 {presenceStatus !== "offline" ? (
                   <span
                     className={
-                      "absolute -top-1 -left-1 h-3 w-3 rounded-full ring-2 ring-background z-10 pointer-events-none " +
+                      "absolute top-[2px] left-[2px] h-2 w-2 rounded-full ring-1 ring-background z-10 pointer-events-none " +
                       presenceDot
                     }
                     aria-hidden="true"
