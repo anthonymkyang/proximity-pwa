@@ -7,10 +7,8 @@ import {
   Item,
   ItemActions,
   ItemContent,
-  ItemDescription,
   ItemGroup,
   ItemMedia,
-  ItemSeparator,
   ItemTitle,
 } from "@/components/ui/item";
 import {
@@ -248,37 +246,31 @@ export default function IntoPage() {
   const rows: {
     title: string;
     icon: React.ComponentType<any>;
-    description: string;
     kind: "attributes" | "myType" | "fetishes" | "actions" | "scenarios";
   }[] = [
     {
       title: "Attributes",
       icon: Heart,
-      description: "Traits and body notes",
       kind: "attributes",
     },
     {
       title: "My type",
       icon: Users,
-      description: "Who you go for",
       kind: "myType",
     },
     {
       title: "Fetishes",
       icon: Sparkles,
-      description: "Your interests",
       kind: "fetishes",
     },
     {
       title: "Action",
       icon: Clock,
-      description: "Preferred play styles",
       kind: "actions",
     },
     {
       title: "Scenarios",
       icon: Shield,
-      description: "Situations you enjoy",
       kind: "scenarios",
     },
   ];
@@ -330,7 +322,7 @@ export default function IntoPage() {
         />
       </div>
 
-      <ItemGroup className="border-y border-border -mx-4 mt-4">
+      <ItemGroup className="bg-card rounded-2xl mt-4">
         {rows.map((row, i) => (
           <React.Fragment key={row.title}>
             <Drawer>
@@ -341,7 +333,6 @@ export default function IntoPage() {
                   </ItemMedia>
                   <ItemContent>
                     <ItemTitle>{row.title}</ItemTitle>
-                    <ItemDescription>{row.description}</ItemDescription>
                   </ItemContent>
                   <ItemActions>
                     {(() => {
@@ -405,7 +396,6 @@ export default function IntoPage() {
                 ) : null}
               </DrawerContent>
             </Drawer>
-            {i !== rows.length - 1 && <ItemSeparator />}
           </React.Fragment>
         ))}
       </ItemGroup>

@@ -2,6 +2,17 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 
+function calcAge(dobStr?: string | null): number | null {
+  if (!dobStr) return null;
+  const dob = new Date(dobStr);
+  if (isNaN(dob.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const m = today.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
+  return age;
+}
+
 // Helper to extract conversation id robustly (Next 16 may pass params as a Promise)
 async function getConversationId(
   req: Request,
@@ -56,7 +67,7 @@ export async function GET(
       body,
       created_at,
       sender_id,
-      profiles:profiles!messages_sender_id_profiles_fkey(profile_title, avatar_url)
+      profiles:profiles!messages_sender_id_profiles_fkey(profile_title, avatar_url, date_of_birth)
     `
     )
     .eq("conversation_id", conversationId)
@@ -69,6 +80,15 @@ export async function GET(
 
   const list = messages ?? [];
 
+  const listWithAge = list.map((m: any) => {
+    const dob = m?.profiles?.date_of_birth ?? null;
+    if (m?.profiles) {
+      const { date_of_birth, ...rest } = m.profiles;
+      return { ...m, profiles: { ...rest, age: calcAge(dob) } };
+    }
+    return m;
+  });
+
   // Determine 1:1 other participant (if any)
   const { data: members } = await supabase
     .from("conversation_members")
@@ -79,9 +99,68 @@ export async function GET(
   const others = memberIds.filter((id) => id !== user.id);
   const otherUserId = others.length === 1 ? others[0] : null;
 
+  // Fetch the other participant (with labels) and compute age
+  let otherMeta: {
+    profile_title: string | null;
+    avatar_url: string | null;
+    age: number | null;
+    sexuality: { label: string } | null;
+    position: { label: string } | null;
+  } | null = null;
+
+  if (otherUserId) {
+    const { data: other } = await supabase
+      .from("profiles")
+      .select(
+        `
+        profile_title,
+        avatar_url,
+        date_of_birth,
+        sexuality:sexualities!profiles_sexuality_id_fkey(label),
+        position:positions!profiles_position_id_fkey(label)
+      `
+      )
+      .eq("id", otherUserId)
+      .maybeSingle();
+
+    if (other) {
+      const age = calcAge((other as any).date_of_birth ?? null);
+      otherMeta = {
+        profile_title: (other as any).profile_title ?? null,
+        avatar_url: (other as any).avatar_url ?? null,
+        age: age ?? null,
+        sexuality: (other as any).sexuality?.label
+          ? { label: (other as any).sexuality.label }
+          : null,
+        position: (other as any).position?.label
+          ? { label: (other as any).position.label }
+          : null,
+      };
+    }
+  }
+
+  // Attach the other participant's meta (age/sexuality/position) onto each message's profiles
+  const listWithMeta = listWithAge.map((m: any) => {
+    const base = m?.profiles ?? {};
+    return {
+      ...m,
+      profiles: otherMeta
+        ? {
+            ...base,
+            profile_title:
+              otherMeta.profile_title ?? base.profile_title ?? null,
+            avatar_url: otherMeta.avatar_url ?? base.avatar_url ?? null,
+            age: otherMeta.age ?? base.age ?? null,
+            sexuality: otherMeta.sexuality ?? base.sexuality ?? null,
+            position: otherMeta.position ?? base.position ?? null,
+          }
+        : base,
+    };
+  });
+
   // 2) Upsert delivered receipts for all messages from others (idempotent)
-  if (list.length) {
-    const toDeliver = list
+  if (listWithMeta.length) {
+    const toDeliver = listWithMeta
       .filter((m) => m.sender_id !== user.id)
       .map((m) => ({
         message_id: m.id,
@@ -104,8 +183,8 @@ export async function GET(
     string,
     { delivered_at: string | null; read_at: string | null }
   > = {};
-  if (list.length) {
-    const ids = list.map((m) => m.id);
+  if (listWithMeta.length) {
+    const ids = listWithMeta.map((m: any) => m.id);
     const { data: receipts, error: recErr } = await supabase
       .from("message_receipts")
       .select("message_id, delivered_at, read_at")
@@ -126,8 +205,8 @@ export async function GET(
     string,
     { delivered_at: string | null; read_at: string | null }
   > = {};
-  if (otherUserId && list.length) {
-    const ids = list.map((m) => m.id);
+  if (otherUserId && listWithMeta.length) {
+    const ids = listWithMeta.map((m: any) => m.id);
     const { data: otherReceipts } = await supabase
       .from("message_receipts")
       .select("message_id, delivered_at, read_at")
@@ -144,7 +223,7 @@ export async function GET(
     }
   }
 
-  const enriched = list.map((m) => {
+  const enriched = listWithMeta.map((m: any) => {
     const mine = m.sender_id === user.id;
     if (mine && otherUserId) {
       return {
@@ -203,7 +282,7 @@ export async function POST(
         body,
         created_at,
         sender_id,
-        profiles:profiles!messages_sender_id_profiles_fkey(profile_title, avatar_url)
+        profiles:profiles!messages_sender_id_profiles_fkey(profile_title, avatar_url, date_of_birth)
       `
     )
     .single();
@@ -215,6 +294,53 @@ export async function POST(
     );
   }
 
+  let insertedWithAge: any = inserted;
+  if (insertedWithAge?.profiles) {
+    const { date_of_birth, ...rest } = insertedWithAge.profiles;
+    insertedWithAge = {
+      ...insertedWithAge,
+      profiles: { ...rest, age: calcAge(date_of_birth ?? null) },
+    };
+  }
+
+  // Attach sexuality/position labels by looking up the sender's profile
+  let sexuality = null;
+  let position = null;
+  const { data: senderProfile } = await supabase
+    .from("profiles")
+    .select("id, sexuality_id, positions_id, position_id")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (senderProfile?.sexuality_id) {
+    const { data } = await supabase
+      .from("sexualities")
+      .select("label")
+      .eq("id", senderProfile.sexuality_id)
+      .maybeSingle();
+    sexuality = data?.label ? { label: data.label } : null;
+  }
+  const pid = senderProfile?.positions_id ?? senderProfile?.position_id;
+  if (pid) {
+    const { data } = await supabase
+      .from("positions")
+      .select("label")
+      .eq("id", pid)
+      .maybeSingle();
+    position = data?.label ? { label: data.label } : null;
+  }
+
+  if (insertedWithAge?.profiles) {
+    insertedWithAge = {
+      ...insertedWithAge,
+      profiles: {
+        ...insertedWithAge.profiles,
+        sexuality,
+        position,
+      },
+    };
+  }
+
   // Do not set sender read/delivered here; recipient delivery will be recorded when they fetch/view
   const nowIso = new Date().toISOString();
 
@@ -224,7 +350,7 @@ export async function POST(
     .update({ updated_at: nowIso, last_message: body.trim() })
     .eq("id", conversationId);
 
-  const message = { ...inserted, delivered_at: null, read_at: null };
+  const message = { ...insertedWithAge, delivered_at: null, read_at: null };
   return NextResponse.json({ message }, { status: 201 });
 }
 

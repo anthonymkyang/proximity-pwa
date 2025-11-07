@@ -22,87 +22,19 @@ export default function Membership() {
         Membership
       </p>
 
-      {/* Card stage: list header with peek + View card */}
-      <div className=" backdrop-blur overflow-hidden">
-        {/* Header row */}
-        <div className="flex items-center justify-between px-4 py-3">
-          <div className="text-sm font-medium">Membership</div>
-        </div>
-
-        {/* Peek area – card pokes out of the top of the list container */}
-        <div className="relative h-16">
-          <div className="absolute left-4 right-4 -top-8">
-            <div className="relative overflow-hidden rounded-xl aspect-85/54 w-full shadow-xl bg-linear-to-br from-slate-200 via-slate-300 to-slate-400 text-slate-900">
-              <div className="relative z-10 flex flex-col h-full">
-                <div className="pl-3 pt-3">
-                  <div className="text-xs uppercase tracking-wider text-slate-800/80 font-semibold">
-                    Proximity
-                  </div>
-                  <div className="text-2xl font-extrabold tracking-tight leading-tight mt-0.5">
-                    Core
-                  </div>
-                </div>
-                <div className="mt-auto pl-3 pb-3">
-                  <div className="text-[11px] text-slate-800/80">
-                    Member since 2025
-                  </div>
-                </div>
-              </div>
-              {/* Subtle noise overlay */}
-              <div className="pointer-events-none absolute inset-0 z-0 opacity-[0.05] [background-image:url('data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'100\' height=\'100\' viewBox=\'0 0 100 100\'><circle cx=\'1\' cy=\'1\' r=\'1\' fill=\'black\'/></svg>')] bg-size-[6px_6px]" />
-              {/* Brushed overlays */}
-              <div className="pointer-events-none absolute inset-0 opacity-30 -z-10 [background:repeating-linear-gradient(-45deg,rgba(255,255,255,0.35)_0px,rgba(255,255,255,0.35)_1px,rgba(0,0,0,0.08)_2px,rgba(0,0,0,0.08)_3px)]" />
-              <div className="pointer-events-none absolute -top-8 -left-10 h-40 w-72 -rotate-12 rounded-full bg-white/30 blur-xl opacity-40 -z-10" />
-              <div className="pointer-events-none absolute -bottom-16 -right-10 h-48 w-48 rounded-full bg-black/20 blur-2xl opacity-60 -z-10" />
-            </div>
-          </div>
+      <div className="mx-auto mt-2 mb-0 max-w-sm overflow-hidden rounded-t-2xl bg-linear-to-br from-primary/80 to-primary/40 h-20 shadow-lg backdrop-blur-md border border-white/10">
+        <div className="flex flex-col w-full h-full items-start justify-start px-6 py-4">
+          <span className="text-xs tracking-widest uppercase text-primary-foreground/80 font-semibold">
+            Proximity
+          </span>
+          <span className="text-primary-foreground text-2xl font-semibold">
+            Core
+          </span>
         </div>
       </div>
 
-      {/* Full-screen expand modal when viewing the card */}
-      {cardOpen ? (
-        <div className="fixed inset-0 z-50 flex items-start justify-center pt-24">
-          <div
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm"
-            onClick={() => setCardOpen(false)}
-          />
-          <div className="relative z-10 w-[min(92vw,420px)]">
-            <div className="relative overflow-hidden rounded-xl aspect-85/54 w-full shadow-2xl border border-border bg-linear-to-br from-slate-200 via-slate-300 to-slate-400 text-slate-900">
-              <div className="relative z-10 flex flex-col h-full">
-                <div className="pl-4 pt-4">
-                  <div className="text-sm uppercase tracking-wider text-slate-800/80 font-semibold">
-                    Proximity
-                  </div>
-                  <div className="text-3xl font-extrabold font-stack-sans-notch tracking-tight leading-tight mt-1">
-                    Core
-                  </div>
-                </div>
-                <div className="mt-auto pl-4 pb-4">
-                  <div className="text-xs text-slate-800/80">
-                    Member since 2025
-                  </div>
-                </div>
-              </div>
-              {/* Subtle noise overlay */}
-              <div className="pointer-events-none absolute inset-0 z-0 opacity-[0.05] [background-image:url('data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'100\' height=\'100\' viewBox=\'0 0 100 100\'><circle cx=\'1\' cy=\'1\' r=\'1\' fill=\'black\'/></svg>')] bg-size-[6px_6px]" />
-              {/* Brushed overlays */}
-              <div className="pointer-events-none absolute inset-0 opacity-30 -z-10 [background:repeating-linear-gradient(-45deg,rgba(255,255,255,0.35)_0px,rgba(255,255,255,0.35)_1px,rgba(0,0,0,0.08)_2px,rgba(0,0,0,0.08)_3px)]" />
-              <div className="pointer-events-none absolute -top-8 -left-10 h-40 w-72 -rotate-12 rounded-full bg-white/30 blur-xl opacity-40 -z-10" />
-              <div className="pointer-events-none absolute -bottom-16 -right-10 h-48 w-48 rounded-full bg-black/20 blur-2xl opacity-60 -z-10" />
-
-              <button
-                onClick={() => setCardOpen(false)}
-                className="absolute -top-10 right-0 rounded-full bg-card/80 px-3 py-1 text-xs text-foreground shadow"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
       {/* Actions under membership header */}
-      <ItemGroup className="bg-card rounded-2xl -mt-8 relative z-10">
+      <ItemGroup className="bg-card rounded-2xl relative z-10">
         <Item className="px-4 py-3">
           <ItemMedia variant="icon">
             <Crown className="h-4 w-4" />

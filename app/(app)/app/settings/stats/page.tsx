@@ -1773,23 +1773,14 @@ export default function StatsPage() {
   const rows: {
     title: string;
     icon: React.ComponentType<any>;
-    description: string;
   }[] = [
-    { title: "My dick", icon: Ruler, description: "Length, girth, and type" },
-    { title: "Sexuality", icon: Heart, description: "Who you’re attracted to" },
-    {
-      title: "Position",
-      icon: ArrowDownUp,
-      description: "Top, bottom, or versatile",
-    },
-    { title: "Height", icon: User, description: "Your height in cm or ft" },
-    { title: "Weight", icon: Scale, description: "Your weight in kg or lbs" },
-    { title: "My body", icon: Activity, description: "Body type or build" },
-    {
-      title: "Ethnicity",
-      icon: Palette,
-      description: "Your ethnic background",
-    },
+    { title: "My dick", icon: Ruler },
+    { title: "Sexuality", icon: Heart },
+    { title: "Position", icon: ArrowDownUp },
+    { title: "Height", icon: User },
+    { title: "Weight", icon: Scale },
+    { title: "My body", icon: Activity },
+    { title: "Ethnicity", icon: Palette },
   ];
 
   return (
@@ -1801,7 +1792,7 @@ export default function StatsPage() {
       </TopBar>
 
       {statsLoading ? (
-        <ItemGroup className="border-y border-border -mx-4 mt-4">
+        <ItemGroup className="bg-card rounded-2xl mt-4">
           {[1, 2, 3, 4, 5, 6, 7].map((i) => (
             <React.Fragment key={i}>
               <div className="px-4 py-3 flex items-center gap-3">
@@ -1812,12 +1803,11 @@ export default function StatsPage() {
                 </div>
                 <div className="h-4 w-4 bg-muted rounded-full animate-pulse" />
               </div>
-              {i !== 7 && <ItemSeparator />}
             </React.Fragment>
           ))}
         </ItemGroup>
       ) : (
-        <ItemGroup className="border-y border-border -mx-4 mt-4">
+        <ItemGroup className="bg-card rounded-2xl mt-4">
           {rows.map((item, i) => (
             <React.Fragment key={item.title}>
               <Drawer>
@@ -1828,7 +1818,6 @@ export default function StatsPage() {
                     </ItemMedia>
                     <ItemContent>
                       <ItemTitle>{item.title}</ItemTitle>
-                      <ItemDescription>{item.description}</ItemDescription>
                     </ItemContent>
                     <ItemActions>
                       {item.title === "My dick" && dickSummary ? (
@@ -1991,7 +1980,6 @@ export default function StatsPage() {
                   ) : null}
                 </DrawerContent>
               </Drawer>
-              {i !== rows.length - 1 && <ItemSeparator />}
             </React.Fragment>
           ))}
         </ItemGroup>

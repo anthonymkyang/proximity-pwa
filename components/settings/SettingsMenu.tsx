@@ -25,17 +25,50 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { useTheme } from "next-themes";
 import React from "react";
+import { useEffect, useState } from "react";
 
 export default function SettingsMenu() {
-  const { theme, setTheme, resolvedTheme } = useTheme();
-  const [isDark, setIsDark] = React.useState(false);
+  const { theme, resolvedTheme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const [pushEnabled, setPushEnabled] = React.useState(false);
   const [messageAlerts, setMessageAlerts] = React.useState(true);
   const [nearbyAlerts, setNearbyAlerts] = React.useState(true);
 
-  React.useEffect(() => {
-    setIsDark((resolvedTheme ?? theme) === "dark");
-  }, [resolvedTheme, theme]);
+  useEffect(() => {
+    try {
+      const p = window.localStorage.getItem("settings:push");
+      const m = window.localStorage.getItem("settings:messages");
+      const n = window.localStorage.getItem("settings:nearby");
+      if (p !== null) setPushEnabled(p === "1");
+      if (m !== null) setMessageAlerts(m === "1");
+      if (n !== null) setNearbyAlerts(n === "1");
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("settings:push", pushEnabled ? "1" : "0");
+    } catch {}
+  }, [pushEnabled]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "settings:messages",
+        messageAlerts ? "1" : "0"
+      );
+    } catch {}
+  }, [messageAlerts]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("settings:nearby", nearbyAlerts ? "1" : "0");
+    } catch {}
+  }, [nearbyAlerts]);
+
+  const stop = (e: React.SyntheticEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
 
   return (
     <>
@@ -149,68 +182,19 @@ export default function SettingsMenu() {
               <ItemTitle>Dark mode</ItemTitle>
             </ItemContent>
             <ItemActions>
-              <Switch
-                checked={isDark}
-                onCheckedChange={(checked) => {
-                  setIsDark(checked);
-                  setTheme(checked ? "dark" : "light");
-                }}
-                aria-label="Toggle dark mode"
-              />
-            </ItemActions>
-          </Item>
-        </ItemGroup>
-      </section>
-
-      {/* Notifications */}
-      <section>
-        <p className="text-xs font-semibold tracking-wider text-muted-foreground mb-3 uppercase">
-          Notifications
-        </p>
-        <ItemGroup className="bg-card border-b-accent-foreground rounded-2xl">
-          <Item className="px-4 py-3">
-            <ItemMedia variant="icon">
-              <Bell className="h-4 w-4" />
-            </ItemMedia>
-            <ItemContent>
-              <ItemTitle>Enable push notifications</ItemTitle>
-            </ItemContent>
-            <ItemActions>
-              <Switch
-                id="push"
-                checked={pushEnabled}
-                onCheckedChange={setPushEnabled}
-              />
-            </ItemActions>
-          </Item>
-          <Item className="px-4 py-3">
-            <ItemMedia variant="icon">
-              <Bell className="h-4 w-4" />
-            </ItemMedia>
-            <ItemContent>
-              <ItemTitle>Message alerts</ItemTitle>
-            </ItemContent>
-            <ItemActions>
-              <Switch
-                id="messages"
-                checked={messageAlerts}
-                onCheckedChange={setMessageAlerts}
-              />
-            </ItemActions>
-          </Item>
-          <Item className="px-4 py-3">
-            <ItemMedia variant="icon">
-              <Wifi className="h-4 w-4" />
-            </ItemMedia>
-            <ItemContent>
-              <ItemTitle>Nearby activity</ItemTitle>
-            </ItemContent>
-            <ItemActions>
-              <Switch
-                id="nearby"
-                checked={nearbyAlerts}
-                onCheckedChange={setNearbyAlerts}
-              />
+              <div onClick={stop} onPointerDown={stop} onKeyDown={stop}>
+                <Switch
+                  id="switch-dark-mode"
+                  name="switch-dark-mode"
+                  checked={
+                    mounted && (resolvedTheme === "dark" || theme === "dark")
+                  }
+                  onCheckedChange={(v) =>
+                    setTheme(v === true ? "dark" : "light")
+                  }
+                  aria-label="Toggle dark mode"
+                />
+              </div>
             </ItemActions>
           </Item>
         </ItemGroup>

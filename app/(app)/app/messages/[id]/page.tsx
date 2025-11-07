@@ -59,9 +59,39 @@ export default function ConversationPage() {
   const [hasMounted, setHasMounted] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [photosOpen, setPhotosOpen] = useState(false);
+  const [hasHistory, setHasHistory] = useState<boolean | null>(null);
   useEffect(() => {
     setHasMounted(true);
   }, []);
+
+  // Preflight: only show skeleton chat bubbles when a conversation already has history
+  useEffect(() => {
+    let cancelled = false;
+
+    const check = async () => {
+      if (!conversationId) {
+        setHasHistory(null);
+        return;
+      }
+      try {
+        const res = await fetch(`/api/messages/${conversationId}`);
+        const data = await res.json();
+        if (!cancelled) {
+          const count = Array.isArray(data?.messages)
+            ? data.messages.length
+            : 0;
+          setHasHistory(count > 0);
+        }
+      } catch {
+        if (!cancelled) setHasHistory(null);
+      }
+    };
+
+    check();
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId]);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   // Share the realtime channel across effects so we can broadcast after PATCH
   const channelRef = useRef<any>(null);
@@ -369,11 +399,33 @@ export default function ConversationPage() {
           {error ? <p className="text-sm text-red-500">{error}</p> : null}
 
           {loading ? (
-            <p className="text-sm text-muted-foreground">Loading messages…</p>
+            hasHistory ? (
+              <div className="space-y-4">
+                {/* Left bubble 1 */}
+                <div className="flex justify-start">
+                  <div className="max-w-[75%] rounded-lg rounded-bl-none bg-muted animate-pulse px-3 py-3 w-3/5" />
+                </div>
+                {/* Right bubbles (current user) */}
+                <div className="flex justify-end">
+                  <div className="max-w-[75%] rounded-lg rounded-br-none bg-primary/30 animate-pulse px-3 py-3 w-1/2" />
+                </div>
+                <div className="flex justify-end">
+                  <div className="max-w-[75%] rounded-lg rounded-br-none bg-primary/30 animate-pulse px-3 py-3 w-2/3" />
+                </div>
+                {/* Left bubble 2 */}
+                <div className="flex justify-start">
+                  <div className="max-w-[75%] rounded-lg rounded-bl-none bg-muted animate-pulse px-3 py-3 w-2/3" />
+                </div>
+                {/* Right bubble 3 (latest from current user) */}
+                <div className="flex justify-end">
+                  <div className="max-w-[75%] rounded-lg rounded-br-none bg-primary/30 animate-pulse px-3 py-3 w-3/5" />
+                </div>
+              </div>
+            ) : (
+              <></>
+            )
           ) : messages.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No messages yet. Say hi 👋
-            </p>
+            <div></div>
           ) : (
             <Conversation
               messages={messages}

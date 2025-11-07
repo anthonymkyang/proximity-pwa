@@ -16,6 +16,9 @@ export type ConversationMessage = {
   profiles?: {
     profile_title?: string | null;
     avatar_url?: string | null;
+    age?: number | null;
+    sexuality?: string | null;
+    position?: string | null;
   } | null;
 };
 

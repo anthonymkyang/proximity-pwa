@@ -9,10 +9,8 @@ import {
   Item,
   ItemActions,
   ItemContent,
-  ItemDescription,
   ItemGroup,
   ItemMedia,
-  ItemSeparator,
   ItemTitle,
 } from "@/components/ui/item";
 import {
@@ -262,31 +260,26 @@ export default function SaferSexPage() {
   const rows: {
     title: string;
     icon: React.ComponentType<any>;
-    description: string;
     kind: "status" | "vaccines" | "prepPep" | "barrier";
   }[] = [
     {
       title: "Status",
       icon: Shield,
-      description: "Your current statuses",
       kind: "status",
     },
     {
       title: "Vaccines",
       icon: Syringe,
-      description: "What you’ve had",
       kind: "vaccines",
     },
     {
       title: "PrEP & PEP",
       icon: Pill,
-      description: "Prevention meds",
       kind: "prepPep",
     },
     {
       title: "Bareback & Condoms",
       icon: HeartPulse,
-      description: "Your practice",
       kind: "barrier",
     },
   ];
@@ -334,29 +327,12 @@ export default function SaferSexPage() {
         </h1>
       </TopBar>
 
-      <div className="mt-2">
-        <Link href="/app/settings/safer-sex/guide" className="block">
-          <div className="rounded-xl bg-card p-4">
-            <div className="flex items-center gap-3">
-              <BookOpen className="h-5 w-5" />
-              <div className="flex-1">
-                <div className="font-semibold">Safer sex guide</div>
-                <div className="text-sm text-muted-foreground">
-                  Where to get PrEP, DoxyPEP, free condoms, and STI testing.
-                </div>
-              </div>
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
-            </div>
-          </div>
-        </Link>
-      </div>
-
       {saving ? (
         <p className="mt-3 text-xs text-muted-foreground">Saving&hellip;</p>
       ) : null}
 
       {loading ? (
-        <ItemGroup className="border-y border-border -mx-4 mt-4">
+        <ItemGroup className="bg-card rounded-2xl mt-4">
           {[1, 2, 3, 4].map((i) => (
             <React.Fragment key={i}>
               <div className="px-4 py-3 flex items-center gap-3">
@@ -367,12 +343,11 @@ export default function SaferSexPage() {
                 </div>
                 <div className="h-4 w-4 bg-muted rounded-full animate-pulse" />
               </div>
-              {i !== 4 && <ItemSeparator />}
             </React.Fragment>
           ))}
         </ItemGroup>
       ) : (
-        <ItemGroup className="border-y border-border -mx-4 mt-4">
+        <ItemGroup className="bg-card rounded-2xl mt-4">
           {rows.map((row, i) => (
             <React.Fragment key={row.title}>
               <Drawer>
@@ -383,7 +358,6 @@ export default function SaferSexPage() {
                     </ItemMedia>
                     <ItemContent>
                       <ItemTitle>{row.title}</ItemTitle>
-                      <ItemDescription>{row.description}</ItemDescription>
                     </ItemContent>
                     <ItemActions>
                       <ChevronDown className="h-4 w-4 text-muted-foreground" />
@@ -714,11 +688,26 @@ export default function SaferSexPage() {
                   </div>
                 </DrawerContent>
               </Drawer>
-              {i !== rows.length - 1 && <ItemSeparator />}
             </React.Fragment>
           ))}
         </ItemGroup>
       )}
+      <div className="mt-4">
+        <Link href="/app/settings/safer-sex/guide" className="block">
+          <div className="bg-card rounded-2xl p-4">
+            <div className="flex items-center gap-3">
+              <BookOpen className="h-5 w-5" />
+              <div className="flex-1">
+                <div className="font-semibold">Safer sex guide</div>
+                <div className="text-sm text-muted-foreground">
+                  Where to get PrEP, DoxyPEP, free condoms, and STI testing.
+                </div>
+              </div>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </div>
+          </div>
+        </Link>
+      </div>
     </div>
   );
 }

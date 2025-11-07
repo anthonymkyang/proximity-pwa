@@ -27,7 +27,12 @@ export default function AvatarEditorPage() {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const prevObjectUrl = useRef<string | null>(null);
+
   const [brokenImageEnv, setBrokenImageEnv] = useState(false);
+
+  // New state to track image intrinsic size
+  const [imgSize, setImgSize] = useState<{ w: number; h: number } | null>(null);
 
   useEffect(() => {
     let imageFound: string | null = null;
@@ -37,7 +42,7 @@ export default function AvatarEditorPage() {
         const sData = window.sessionStorage.getItem("avatar:tempDataUrl");
         const sUrl = window.sessionStorage.getItem("avatar:tempUrl");
         const sLegacy = window.sessionStorage.getItem("avatar:temp");
-        imageFound = sData || sUrl || sLegacy || null;
+        imageFound = sUrl || sData || sLegacy || null;
       } catch {
         // ignore
       }
@@ -54,7 +59,7 @@ export default function AvatarEditorPage() {
       }
     }
 
-    setSrc(imageFound);
+    setSrc((prev) => (prev ? prev : imageFound));
   }, []);
 
   useEffect(() => {
@@ -87,11 +92,36 @@ export default function AvatarEditorPage() {
 
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
     if (!dragging.current) return;
+
+    const containerSize = 288; // 72 * 4 (h-72 and w-72 in tailwind)
+
+    const cover = imgSize
+      ? Math.max(containerSize / imgSize.w, containerSize / imgSize.h)
+      : 1;
+
+    const baseW = imgSize ? imgSize.w * cover : containerSize;
+    const baseH = imgSize ? imgSize.h * cover : containerSize;
+    const drawW = baseW * scale;
+    const drawH = baseH * scale;
+
+    // 2) Clamp using actual drawn dimensions
+    const maxOffsetX = Math.max(0, (drawW - containerSize) / 2);
+    const maxOffsetY = Math.max(0, (drawH - containerSize) / 2);
+
     const dx = e.clientX - dragStart.current.x;
     const dy = e.clientY - dragStart.current.y;
+
+    let newX = dragOrigin.current.x + dx;
+    let newY = dragOrigin.current.y + dy;
+
+    if (newX > maxOffsetX) newX = maxOffsetX;
+    if (newX < -maxOffsetX) newX = -maxOffsetX;
+    if (newY > maxOffsetY) newY = maxOffsetY;
+    if (newY < -maxOffsetY) newY = -maxOffsetY;
+
     setOffset({
-      x: dragOrigin.current.x + dx,
-      y: dragOrigin.current.y + dy,
+      x: newX,
+      y: newY,
     });
   };
 
@@ -100,25 +130,51 @@ export default function AvatarEditorPage() {
   };
 
   const handlePickAgain = () => {
+    if (fileInputRef.current) {
+      // allow selecting the same file twice
+      fileInputRef.current.value = "";
+    }
+    // clear any stale temp so we never preload old images
+    try {
+      window.sessionStorage.removeItem("avatar:tempDataUrl");
+      window.sessionStorage.removeItem("avatar:tempUrl");
+      window.sessionStorage.removeItem("avatar:temp");
+    } catch {}
+    // optionally clear current preview until user picks
+    setSrc(null);
     fileInputRef.current?.click();
   };
 
   const handleFileChosen = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const result = ev.target?.result as string | null;
-      if (result) {
-        setSrc(result);
-        try {
-          window.sessionStorage.setItem("avatar:tempDataUrl", result);
-        } catch {
-          // ignore quota
-        }
-      }
-    };
-    reader.readAsDataURL(file);
+
+    // Clear previous temp keys and revoke prior object URL
+    try {
+      window.sessionStorage.removeItem("avatar:tempDataUrl");
+      window.sessionStorage.removeItem("avatar:tempUrl");
+      window.sessionStorage.removeItem("avatar:temp");
+    } catch {}
+    if (prevObjectUrl.current) {
+      URL.revokeObjectURL(prevObjectUrl.current);
+      prevObjectUrl.current = null;
+    }
+
+    const url = URL.createObjectURL(file);
+    prevObjectUrl.current = url;
+
+    // Reset editor state so old dimensions/offsets don't leak
+    setScale(1.1);
+    setOffset({ x: 0, y: 0 });
+    setImgSize(null);
+
+    setSrc(url);
+    try {
+      window.sessionStorage.setItem("avatar:tempUrl", url);
+    } catch {}
+
+    // allow selecting the same file again
+    if (e.target) e.target.value = "";
   };
 
   const handleSave = async () => {
@@ -166,9 +222,10 @@ export default function AvatarEditorPage() {
     ctx.closePath();
     ctx.clip();
 
-    // Scale the image to COVER the square canvas while preserving aspect ratio.
+    // 4) Ensure baseCover uses container to compute effectiveScale correctly
     const baseCover = Math.max(size / iw, size / ih);
-    const coverScale = baseCover * 1.4 * scale; // same visual zoom range as preview
+    // 5) Update save() mapping to use `effectiveScale` semantics
+    const coverScale = baseCover * scale; // matches preview: baseCover from canvas size
     const drawW = iw * coverScale;
     const drawH = ih * coverScale;
     const centerX = size / 2 + offset.x; // 1:1 with UI offset
@@ -209,7 +266,20 @@ export default function AvatarEditorPage() {
     }
 
     router.replace("/app/settings");
+    if (prevObjectUrl.current) {
+      URL.revokeObjectURL(prevObjectUrl.current);
+      prevObjectUrl.current = null;
+    }
   };
+
+  useEffect(() => {
+    return () => {
+      if (prevObjectUrl.current) {
+        URL.revokeObjectURL(prevObjectUrl.current);
+        prevObjectUrl.current = null;
+      }
+    };
+  }, []);
 
   return (
     <div className="fixed inset-0 z-9999 bg-[#040615] flex flex-col px-4 py-3 gap-4 overscroll-none">
@@ -283,16 +353,43 @@ export default function AvatarEditorPage() {
               onPointerUp={onPointerUp}
               onPointerLeave={onPointerUp}
             >
+              {/* Base cover size is set via width/height; user zoom is applied via CSS transform scale() for uniform scaling */}
               <img
                 key={src}
                 src={src}
                 alt="avatar preview"
-                className="absolute inset-0 h-full w-full object-cover select-none"
+                className="absolute select-none"
                 style={{
-                  transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
+                  width: `${
+                    imgSize
+                      ? Math.max(
+                          288 / (imgSize.w || 1),
+                          288 / (imgSize.h || 1)
+                        ) * (imgSize.w || 288)
+                      : 288
+                  }px`,
+                  height: `${
+                    imgSize
+                      ? Math.max(
+                          288 / (imgSize.w || 1),
+                          288 / (imgSize.h || 1)
+                        ) * (imgSize.h || 288)
+                      : 288
+                  }px`,
+                  left: "50%",
+                  top: "50%",
+                  transform: `translate(-50%, -50%) translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
                   transformOrigin: "center center",
+                  willChange: "transform",
                 }}
                 draggable={false}
+                onLoad={(ev) => {
+                  const el = ev.currentTarget as HTMLImageElement;
+                  const w = el.naturalWidth || el.width;
+                  const h = el.naturalHeight || el.height;
+                  if (!imgSize || imgSize.w !== w || imgSize.h !== h)
+                    setImgSize({ w, h });
+                }}
               />
               <div className="pointer-events-none absolute inset-3 rounded-full ring-1 ring-white/15" />
             </div>
