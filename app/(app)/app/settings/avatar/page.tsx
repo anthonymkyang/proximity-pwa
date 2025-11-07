@@ -139,10 +139,13 @@ export default function AvatarEditorPage() {
 
     const img = new Image();
     img.crossOrigin = "anonymous";
+    img.decoding = "async";
     img.src = src;
     await new Promise((res) => {
       img.onload = () => res(null);
     });
+    const iw = img.naturalWidth || img.width;
+    const ih = img.naturalHeight || img.height;
 
     const size = 512;
     const canvas = document.createElement("canvas");
@@ -153,6 +156,8 @@ export default function AvatarEditorPage() {
       router.replace("/app/settings");
       return;
     }
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high" as ImageSmoothingQuality;
 
     ctx.clearRect(0, 0, size, size);
     ctx.save();
@@ -161,17 +166,15 @@ export default function AvatarEditorPage() {
     ctx.closePath();
     ctx.clip();
 
-    const renderSize = size * 1.4 * scale;
-    const centerX = size / 2 + offset.x * 1.5;
-    const centerY = size / 2 + offset.y * 1.5;
+    // Scale the image to COVER the square canvas while preserving aspect ratio.
+    const baseCover = Math.max(size / iw, size / ih);
+    const coverScale = baseCover * 1.4 * scale; // same visual zoom range as preview
+    const drawW = iw * coverScale;
+    const drawH = ih * coverScale;
+    const centerX = size / 2 + offset.x; // 1:1 with UI offset
+    const centerY = size / 2 + offset.y;
 
-    ctx.drawImage(
-      img,
-      centerX - renderSize / 2,
-      centerY - renderSize / 2,
-      renderSize,
-      renderSize
-    );
+    ctx.drawImage(img, centerX - drawW / 2, centerY - drawH / 2, drawW, drawH);
 
     ctx.restore();
 
@@ -291,7 +294,7 @@ export default function AvatarEditorPage() {
                 }}
                 draggable={false}
               />
-              <div className="pointer-events-none absolute inset-3 rounded-full ring-2 ring-black/25" />
+              <div className="pointer-events-none absolute inset-3 rounded-full ring-1 ring-white/15" />
             </div>
           </div>
 

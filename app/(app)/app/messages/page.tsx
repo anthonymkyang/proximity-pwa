@@ -13,6 +13,7 @@ import {
   Inbox,
   AlertTriangle,
 } from "lucide-react";
+import { motion } from "framer-motion";
 import {
   InputGroup,
   InputGroupInput,
@@ -43,79 +44,6 @@ import {
 // -----------------------------------------------------------------------------
 const filters = ["All", "Unread", "Favourites", "Groups", "Cruising"] as const;
 
-type MockConversation = {
-  id: string;
-  name: string;
-  avatar?: string;
-  fallback: string;
-  lastMessage: string;
-  time: string;
-  unread?: boolean;
-  pinned?: boolean;
-  service?: string;
-  seenChecks?: boolean;
-};
-
-const mockConversations: MockConversation[] = [
-  {
-    id: "1",
-    name: "Masc4Masc",
-    fallback: "M4",
-    lastMessage: "You host? 5 mins away",
-    time: "15:54",
-    pinned: true,
-  },
-  {
-    id: "2",
-    name: "Pump n Dump St Giles",
-    fallback: "PD",
-    lastMessage: "Leg day done ✅ shower then?",
-    time: "17:51",
-    pinned: true,
-  },
-  {
-    id: "3",
-    name: "DL Neighbor",
-    service: "(Grindr)",
-    fallback: "DL",
-    lastMessage: "Totally down. No pics here tho",
-    time: "22:32",
-    seenChecks: true,
-  },
-  {
-    id: "4",
-    name: "PupMax",
-    service: "(Sniffies)",
-    fallback: "PM",
-    lastMessage: "mask on or off? 😈",
-    time: "19:16",
-  },
-  {
-    id: "5",
-    name: "TopDad",
-    service: "(Sniffies)",
-    fallback: "TD",
-    lastMessage: 'Reacted ❤️ to "Not bad thanks!"',
-    time: "12:04",
-  },
-  {
-    id: "6",
-    name: "VersInVauxhall",
-    service: "(Sniffies)",
-    fallback: "VV",
-    lastMessage: "that sauna was 🔥 when are you free",
-    time: "Saturday",
-  },
-  {
-    id: "7",
-    name: "SpiceBoy",
-    service: "(Sniffies)",
-    fallback: "SB",
-    lastMessage: "yep swing by, door’s open",
-    time: "Friday",
-  },
-];
-
 // shape coming back from Supabase (normalised)
 type DBConversation = {
   id: string;
@@ -124,6 +52,28 @@ type DBConversation = {
   avatar?: string | null;
   updated_at?: string | null;
 };
+
+// -----------------------------------------------------------------------------
+// REUSABLE ROW LAYOUT
+// -----------------------------------------------------------------------------
+function ListItemRow({
+  left,
+  right,
+  className = "",
+}: {
+  left: React.ReactNode;
+  right: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`relative flex items-center gap-3 -mr-4 ${className}`}>
+      <div className="relative h-12 w-12 grid place-items-center">{left}</div>
+      <div className="min-w-0 flex-1 border-b border-b-muted py-3 pr-4">
+        {right}
+      </div>
+    </div>
+  );
+}
 
 // -----------------------------------------------------------------------------
 // SWIPE ROW
@@ -446,12 +396,6 @@ export default function MessagesPage() {
   const hasNoConvos =
     !loading && userConversations.length === 0 && !loadError && !!currentUserId;
 
-  function isDBConversation(
-    c: DBConversation | MockConversation
-  ): c is DBConversation {
-    return "updated_at" in c;
-  }
-
   return (
     <div className="mx-auto w-full max-w-xl px-4 pb-[calc(72px+env(safe-area-inset-bottom))]">
       {/* Top bar */}
@@ -459,9 +403,16 @@ export default function MessagesPage() {
         leftContent={
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" aria-label="Menu">
-                <MoreHorizontal className="h-5 w-5" />
-              </Button>
+              <motion.button
+                aria-label="Menu"
+                whileTap={{ scale: 1.15 }}
+                drag
+                dragElastic={0.2}
+                dragConstraints={{ top: 0, bottom: 0, left: 0, right: 0 }}
+                className="h-10 w-10 flex items-center justify-center rounded-full bg-white/5 backdrop-blur-xl border border-white/20 shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.6),0_2px_10px_rgba(0,0,0,0.2)] hover:bg-white/10 transition-all duration-300 active:scale-110"
+              >
+                <MoreHorizontal className="h-6 w-6 text-white" />
+              </motion.button>
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="start"
@@ -574,10 +525,14 @@ export default function MessagesPage() {
       </div>
 
       {/* Archived row */}
-      <button className="flex w-full items-center gap-3 py-3 text-left">
-        <Archive className="h-5 w-5 text-muted-foreground" />
-        <span className="text-muted-foreground">Archived</span>
-      </button>
+      <ListItemRow
+        left={<Archive className="h-5 w-5 text-muted-foreground" />}
+        right={
+          <span className="truncate text-base font-semibold text-muted-foreground">
+            Archived
+          </span>
+        }
+      />
 
       {/* EMPTY STATE */}
       {hasNoConvos ? (
@@ -604,7 +559,7 @@ export default function MessagesPage() {
         </div>
       ) : (
         // CONVERSATION LIST
-        <ul className="divide-y -mx-4 border-t">
+        <ul className="divide-y">
           {/* if there's an error, show it in-list */}
           {loadError ? (
             <li className="bg-destructive/5 px-4 py-3 flex items-start gap-3">
@@ -630,24 +585,15 @@ export default function MessagesPage() {
             </li>
           ) : null}
 
-          {(userConversations.length
-            ? userConversations
-            : mockConversations
-          ).map((c) => {
-            const fromDB = isDBConversation(c);
+          {userConversations.map((c) => {
+            const displayTime = c.updated_at
+              ? new Date(c.updated_at).toLocaleTimeString(undefined, {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })
+              : "";
 
-            const displayTime = fromDB
-              ? c.updated_at
-                ? new Date(c.updated_at).toLocaleTimeString(undefined, {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })
-                : ""
-              : c.time;
-
-            const lastLine = fromDB
-              ? c.lastMessage || "No messages yet"
-              : c.lastMessage;
+            const lastLine = c.lastMessage || "No messages yet";
 
             return (
               <li key={c.id}>
@@ -659,9 +605,7 @@ export default function MessagesPage() {
                 >
                   <Link
                     href={`/app/messages/${c.id}`}
-                    className={`relative flex items-center gap-3 py-3 px-4 ${
-                      selectMode ? "pl-14" : ""
-                    }`}
+                    className={`relative block ${selectMode ? "pl-14" : ""}`}
                   >
                     {selectMode && (
                       <div className="absolute left-4 top-1/2 -translate-y-1/2 z-10">
@@ -675,31 +619,36 @@ export default function MessagesPage() {
                         />
                       </div>
                     )}
-                    <div className="relative h-12 w-12">
-                      <Avatar className="h-12 w-12">
-                        <AvatarImage
-                          src={fromDB ? c.avatar ?? undefined : c.avatar}
-                          alt={c.name}
-                        />
-                        <AvatarFallback>
-                          {c.name?.slice(0, 2).toUpperCase() || "??"}
-                        </AvatarFallback>
-                      </Avatar>
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline justify-between gap-3">
-                        <p className="truncate text-base font-semibold">
-                          {c.name}
-                        </p>
-                        <div className="shrink-0 text-xs text-muted-foreground flex items-center gap-1">
-                          {displayTime}
+                    <ListItemRow
+                      left={
+                        <div className="relative h-12 w-12">
+                          <Avatar className="h-12 w-12">
+                            <AvatarImage
+                              src={c.avatar ?? undefined}
+                              alt={c.name}
+                            />
+                            <AvatarFallback>
+                              {c.name?.slice(0, 2).toUpperCase() || "??"}
+                            </AvatarFallback>
+                          </Avatar>
                         </div>
-                      </div>
-                      <div className="mt-0.5 flex items-center gap-1 text-sm text-muted-foreground">
-                        <p className="truncate">{lastLine}</p>
-                      </div>
-                    </div>
+                      }
+                      right={
+                        <>
+                          <div className="flex items-baseline justify-between gap-3">
+                            <p className="truncate text-base font-semibold">
+                              {c.name}
+                            </p>
+                            <div className="shrink-0 text-xs text-muted-foreground flex items-center gap-1">
+                              {displayTime}
+                            </div>
+                          </div>
+                          <div className="mt-0.5 flex items-center gap-1 text-sm text-muted-foreground">
+                            <p className="truncate">{lastLine}</p>
+                          </div>
+                        </>
+                      }
+                    />
                   </Link>
                 </SwipeableRow>
               </li>

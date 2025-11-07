@@ -23,19 +23,10 @@ export default function Membership() {
       </p>
 
       {/* Card stage: list header with peek + View card */}
-      <div className="bg-card/70 backdrop-blur supports-backdrop-filter:bg-card/60 overflow-hidden">
+      <div className=" backdrop-blur overflow-hidden">
         {/* Header row */}
         <div className="flex items-center justify-between px-4 py-3">
           <div className="text-sm font-medium">Membership</div>
-          <button
-            type="button"
-            onClick={() => setCardOpen(true)}
-            className="text-primary text-sm font-medium inline-flex items-center gap-1"
-            aria-label="View card"
-          >
-            View card
-            <ChevronRight className="h-3.5 w-3.5" />
-          </button>
         </div>
 
         {/* Peek area – card pokes out of the top of the list container */}
@@ -82,7 +73,7 @@ export default function Membership() {
                   <div className="text-sm uppercase tracking-wider text-slate-800/80 font-semibold">
                     Proximity
                   </div>
-                  <div className="text-3xl font-extrabold tracking-tight leading-tight mt-1">
+                  <div className="text-3xl font-extrabold font-stack-sans-notch tracking-tight leading-tight mt-1">
                     Core
                   </div>
                 </div>
@@ -111,31 +102,24 @@ export default function Membership() {
       ) : null}
 
       {/* Actions under membership header */}
-      <ItemGroup className="border-y border-border -mx-4 -mt-8 relative z-10">
+      <ItemGroup className="bg-card rounded-2xl -mt-8 relative z-10">
         <Item className="px-4 py-3">
           <ItemMedia variant="icon">
             <Crown className="h-4 w-4" />
           </ItemMedia>
           <ItemContent>
             <ItemTitle>Upgrade to Max</ItemTitle>
-            <ItemDescription>
-              Access premium features and perks.
-            </ItemDescription>
           </ItemContent>
           <ItemActions>
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
           </ItemActions>
         </Item>
-        <ItemSeparator />
         <Item className="px-4 py-3">
           <ItemMedia variant="icon">
             <CreditCard className="h-4 w-4" />
           </ItemMedia>
           <ItemContent>
             <ItemTitle>Payment details</ItemTitle>
-            <ItemDescription>
-              Manage your billing and subscriptions.
-            </ItemDescription>
           </ItemContent>
           <ItemActions>
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />

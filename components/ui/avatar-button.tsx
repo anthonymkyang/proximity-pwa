@@ -15,17 +15,26 @@ import {
 import { Button } from "@/components/ui/button";
 import { Image as ImageIcon, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 
 export function AvatarButton({
   fallbackName = "C",
+  size = 64,
 }: {
   fallbackName?: string;
+  size?: number;
 }) {
   const supabase = createClient();
   const router = useRouter();
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const boxSize = typeof size === "number" ? `${size}px` : String(size);
+  const initialsFontSize = Math.max(
+    12,
+    Math.floor((typeof size === "number" ? size : 64) * 0.35)
+  );
 
   // load current avatar (defensive)
   useEffect(() => {
@@ -117,16 +126,23 @@ export function AvatarButton({
         onChange={handleFileChosen}
       />
       <div className="relative">
-        <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center text-sm font-medium border border-border overflow-hidden">
+        <div
+          className="relative aspect-square rounded-full bg-muted flex items-center justify-center font-medium border border-border overflow-hidden shrink-0"
+          style={{ width: boxSize }}
+        >
           {avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <Image
               src={avatarUrl}
               alt="Avatar"
-              className="h-full w-full object-cover"
+              fill
+              className="object-cover object-center"
+              sizes={`${size}px`}
+              priority
             />
           ) : (
-            fallbackName?.[0]?.toUpperCase() ?? "C"
+            <span style={{ fontSize: `${initialsFontSize}px` }}>
+              {fallbackName?.[0]?.toUpperCase() ?? "C"}
+            </span>
           )}
         </div>
         <button
@@ -140,7 +156,7 @@ export function AvatarButton({
       </div>
 
       <Drawer open={open} onOpenChange={setOpen}>
-        <DrawerContent className="max-w-md mx-auto w-full">
+        <DrawerContent className="w-full">
           <div className="p-4 space-y-2">
             <DrawerHeader className="px-0 pt-0 pb-2">
               <DrawerTitle>Change avatar</DrawerTitle>

@@ -5,9 +5,8 @@ import {
   Item,
   ItemActions,
   ItemContent,
-  ItemDescription,
-  ItemMedia,
   ItemTitle,
+  ItemMedia,
   ItemGroup,
   ItemSeparator,
 } from "@/components/ui/item";
@@ -45,7 +44,7 @@ export default function SettingsMenu() {
         <p className="text-xs font-semibold tracking-wider text-muted-foreground mb-3 uppercase">
           My profile
         </p>
-        <ItemGroup className="border-y border-border -mx-4">
+        <ItemGroup className="bg-card rounded-2xl">
           <Link href="/app/settings/edit-profile" className="block">
             <Item className="px-4 py-3">
               <ItemMedia variant="icon">
@@ -53,16 +52,12 @@ export default function SettingsMenu() {
               </ItemMedia>
               <ItemContent>
                 <ItemTitle>Edit profile</ItemTitle>
-                <ItemDescription>
-                  Update your profile title and bio.
-                </ItemDescription>
               </ItemContent>
               <ItemActions>
                 <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
               </ItemActions>
             </Item>
           </Link>
-          <ItemSeparator />
           <Link href="/app/settings/stats" className="block">
             <Item className="px-4 py-3">
               <ItemMedia variant="icon">
@@ -70,16 +65,12 @@ export default function SettingsMenu() {
               </ItemMedia>
               <ItemContent>
                 <ItemTitle>My stats</ItemTitle>
-                <ItemDescription>
-                  Dick, measurements, and sexuality.
-                </ItemDescription>
               </ItemContent>
               <ItemActions>
                 <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
               </ItemActions>
             </Item>
           </Link>
-          <ItemSeparator />
           <Link href="/app/settings/into" className="block">
             <Item className="px-4 py-3">
               <ItemMedia variant="icon">
@@ -87,16 +78,12 @@ export default function SettingsMenu() {
               </ItemMedia>
               <ItemContent>
                 <ItemTitle>What I'm into</ItemTitle>
-                <ItemDescription>
-                  Kinks, fetishes, sex, and roleplay.
-                </ItemDescription>
               </ItemContent>
               <ItemActions>
                 <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
               </ItemActions>
             </Item>
           </Link>
-          <ItemSeparator />
           <Link href="/app/settings/safer-sex" className="block">
             <Item className="px-4 py-3">
               <ItemMedia variant="icon">
@@ -104,9 +91,6 @@ export default function SettingsMenu() {
               </ItemMedia>
               <ItemContent>
                 <ItemTitle>Safer sex</ItemTitle>
-                <ItemDescription>
-                  PrEP, testing, condoms, and consent.
-                </ItemDescription>
               </ItemContent>
               <ItemActions>
                 <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
@@ -121,7 +105,7 @@ export default function SettingsMenu() {
         <p className="text-xs font-semibold tracking-wider text-muted-foreground mb-3 uppercase">
           Media centre
         </p>
-        <ItemGroup className="border-y border-border -mx-4">
+        <ItemGroup className="bg-card rounded-2xl">
           <Link href="/app/settings/photos/profile" className="block">
             <Item className="px-4 py-3">
               <ItemMedia variant="icon">
@@ -129,14 +113,12 @@ export default function SettingsMenu() {
               </ItemMedia>
               <ItemContent>
                 <ItemTitle>Profile photos</ItemTitle>
-                <ItemDescription>Manage your profile pictures.</ItemDescription>
               </ItemContent>
               <ItemActions>
                 <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
               </ItemActions>
             </Item>
           </Link>
-          <ItemSeparator />
           <Link href="/app/settings/albums" className="block">
             <Item className="px-4 py-3">
               <ItemMedia variant="icon">
@@ -144,9 +126,6 @@ export default function SettingsMenu() {
               </ItemMedia>
               <ItemContent>
                 <ItemTitle>Albums</ItemTitle>
-                <ItemDescription>
-                  Create and organize photo albums.
-                </ItemDescription>
               </ItemContent>
               <ItemActions>
                 <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
@@ -161,16 +140,13 @@ export default function SettingsMenu() {
         <p className="text-xs font-semibold tracking-wider text-muted-foreground mb-3 uppercase">
           Appearance
         </p>
-        <ItemGroup className="border-y border-border -mx-4">
+        <ItemGroup className="bg-card rounded-2xl">
           <Item className="px-4 py-3">
             <ItemMedia variant="icon">
               <Moon className="h-4 w-4" />
             </ItemMedia>
             <ItemContent>
               <ItemTitle>Dark mode</ItemTitle>
-              <ItemDescription>
-                Switch between light and dark themes.
-              </ItemDescription>
             </ItemContent>
             <ItemActions>
               <Switch
@@ -191,16 +167,13 @@ export default function SettingsMenu() {
         <p className="text-xs font-semibold tracking-wider text-muted-foreground mb-3 uppercase">
           Notifications
         </p>
-        <ItemGroup className="border-y border-border -mx-4">
+        <ItemGroup className="bg-card border-b-accent-foreground rounded-2xl">
           <Item className="px-4 py-3">
             <ItemMedia variant="icon">
               <Bell className="h-4 w-4" />
             </ItemMedia>
             <ItemContent>
               <ItemTitle>Enable push notifications</ItemTitle>
-              <ItemDescription>
-                Stay updated with live app notifications.
-              </ItemDescription>
             </ItemContent>
             <ItemActions>
               <Switch
@@ -210,16 +183,12 @@ export default function SettingsMenu() {
               />
             </ItemActions>
           </Item>
-          <ItemSeparator />
           <Item className="px-4 py-3">
             <ItemMedia variant="icon">
               <Bell className="h-4 w-4" />
             </ItemMedia>
             <ItemContent>
               <ItemTitle>Message alerts</ItemTitle>
-              <ItemDescription>
-                Receive alerts for new messages.
-              </ItemDescription>
             </ItemContent>
             <ItemActions>
               <Switch
@@ -229,16 +198,12 @@ export default function SettingsMenu() {
               />
             </ItemActions>
           </Item>
-          <ItemSeparator />
           <Item className="px-4 py-3">
             <ItemMedia variant="icon">
               <Wifi className="h-4 w-4" />
             </ItemMedia>
             <ItemContent>
               <ItemTitle>Nearby activity</ItemTitle>
-              <ItemDescription>
-                Be notified when users are near you.
-              </ItemDescription>
             </ItemContent>
             <ItemActions>
               <Switch
