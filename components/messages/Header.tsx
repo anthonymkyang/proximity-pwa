@@ -228,7 +228,7 @@ export default function Header({
                 {presenceStatus !== "offline" ? (
                   <span
                     className={
-                      "absolute top-[2px] left-[2px] h-2 w-2 rounded-full ring-1 ring-background z-10 pointer-events-none " +
+                      "absolute top-0.5 left-0.5 h-2 w-2 rounded-full ring-1 ring-background z-10 pointer-events-none " +
                       presenceDot
                     }
                     aria-hidden="true"
@@ -259,7 +259,7 @@ export default function Header({
                 {presenceStatus !== "offline" ? (
                   <span
                     className={
-                      "absolute top-[2px] left-[2px] h-2 w-2 rounded-full ring-1 ring-background z-10 pointer-events-none " +
+                      "absolute top-0.5 left-0.5 h-2 w-2 rounded-full ring-1 ring-background z-10 pointer-events-none " +
                       presenceDot
                     }
                     aria-hidden="true"

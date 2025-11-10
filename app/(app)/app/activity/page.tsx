@@ -3,7 +3,7 @@
 import * as React from "react";
 
 import TopBar from "@/components/nav/TopBar";
-import { Button } from "@/components/ui/button";
+import GlassButton from "@/components/ui/glass-button";
 import { MoreHorizontal, ChevronRight } from "lucide-react";
 import {
   DropdownMenu,
@@ -14,6 +14,7 @@ import {
 
 // Notification icon imports removed, now handled in Notifications component
 import Notifications from "@/components/activity/Notifications";
+import { Button } from "@/components/ui/button";
 import Groups from "@/components/activity/Groups";
 import Calendar from "@/components/activity/Calendar";
 import Timeline from "@/components/activity/Timeline";
@@ -35,9 +36,9 @@ export default function ActivityPage() {
         leftContent={
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" aria-label="Menu">
-                <MoreHorizontal className="h-5 w-5" />
-              </Button>
+              <GlassButton aria-label="Menu">
+                <MoreHorizontal className="h-6 w-6 text-white" />
+              </GlassButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="start"

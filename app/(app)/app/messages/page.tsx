@@ -12,13 +12,16 @@ import {
   User,
   Inbox,
   AlertTriangle,
+  Check,
+  CheckCheck,
 } from "lucide-react";
-import { motion } from "framer-motion";
+import GlassButton from "@/components/ui/glass-button";
 import {
   InputGroup,
   InputGroupInput,
   InputGroupAddon,
 } from "@/components/ui/input-group";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import TopBar from "@/components/nav/TopBar";
@@ -38,6 +41,7 @@ import {
   EmptyHeader,
   EmptyContent,
 } from "@/components/ui/empty";
+import getAvatarPublicUrl from "@/lib/profiles/getAvatarPublicUrl";
 
 // -----------------------------------------------------------------------------
 // LOCAL MOCK
@@ -51,6 +55,11 @@ type DBConversation = {
   lastMessage: string | null;
   avatar?: string | null;
   updated_at?: string | null;
+  lastMessageAt?: string | null;
+  lastMessageSenderId?: string | null;
+  lastReceipt?: { delivered_at: string | null; read_at: string | null } | null;
+  unreadCount?: number;
+  presence?: "online" | "away" | "recent" | null;
 };
 
 // -----------------------------------------------------------------------------
@@ -218,10 +227,15 @@ export default function MessagesPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [rawRows, setRawRows] = useState<any[] | null>(null);
+  const convoIdsRef = useRef<Set<string>>(new Set());
   const [showDebug, setShowDebug] = useState(false);
 
   // 👇 NEW: show what user the client thinks is logged in
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const currentUserIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId;
+  }, [currentUserId]);
 
   useEffect(() => {
     const load = async () => {
@@ -275,6 +289,43 @@ export default function MessagesPage() {
         const convoIds = Array.from(
           new Set(myMemberships.map((m) => m.conversation_id))
         );
+        convoIdsRef.current = new Set(convoIds);
+
+        // --- fetch latest messages for each conversation ---
+        const { data: msgs, error: msgsError } = await supabase
+          .from("messages")
+          .select("id, body, conversation_id, sender_id, created_at")
+          .in("conversation_id", convoIds)
+          .order("created_at", { ascending: false });
+        if (msgsError) {
+          console.warn("messages fetch failed", msgsError.message);
+        }
+        const latestByConvo: Record<string, any> = {};
+        for (const m of msgs ?? []) {
+          if (!latestByConvo[m.conversation_id])
+            latestByConvo[m.conversation_id] = m;
+        }
+
+        // Compute unread counts per conversation for messages from others
+        const otherMsgs = (msgs ?? []).filter((m) => m.sender_id !== user.id);
+        const otherMsgIds = otherMsgs.map((m) => m.id);
+        let readByMsgId: Record<string, boolean> = {};
+        if (otherMsgIds.length) {
+          const { data: readRecs } = await supabase
+            .from("message_receipts")
+            .select("message_id, read_at")
+            .in("message_id", otherMsgIds)
+            .eq("user_id", user.id)
+            .not("read_at", "is", null);
+          for (const r of readRecs ?? []) readByMsgId[r.message_id] = true;
+        }
+        const unreadByConvo: Record<string, number> = {};
+        for (const m of otherMsgs) {
+          const cid = m.conversation_id as string;
+          if (!readByMsgId[m.id]) {
+            unreadByConvo[cid] = (unreadByConvo[cid] ?? 0) + 1;
+          }
+        }
 
         // 4) fetch ALL members for ALL those conversations (NO joins here!)
         const { data: allMembers, error: allMembersError } = await supabase
@@ -330,11 +381,76 @@ export default function MessagesPage() {
           profileById[p.id] = p;
         }
 
+        // 7.1) presence for all users
+        const { data: presenceRows } = await supabase
+          .from("user_presence")
+          .select("user_id, status, updated_at")
+          .in("user_id", allUserIds);
+        const presenceByUser: Record<
+          string,
+          { status: string | null; updated_at: string | null }
+        > = {};
+        for (const r of presenceRows ?? []) {
+          presenceByUser[r.user_id] = {
+            status: r.status ?? null,
+            updated_at: r.updated_at ?? null,
+          };
+        }
+        const classifyPresence = (row?: {
+          status: string | null;
+          updated_at: string | null;
+        }) => {
+          if (!row || !row.updated_at) return null;
+          const updated = new Date(row.updated_at).getTime();
+          const now = Date.now();
+          const minutes = (now - updated) / 60000;
+          if (minutes > 60) return null; // offline too long
+          if (minutes <= 60 && minutes > 5) return "recent";
+          // <= 5 minutes -> online/away depending on status
+          if (row.status === "away") return "away";
+          return "online";
+        };
+
         // 8) group members by conversation
         const byConvo: Record<string, any[]> = {};
         for (const m of allMembers ?? []) {
           if (!byConvo[m.conversation_id]) byConvo[m.conversation_id] = [];
           byConvo[m.conversation_id].push(m);
+        }
+
+        // --- gather receipts for 1:1 where I am the last sender ---
+        // determine recipients for 1:1 where I am the last sender
+        const candidateMsgIds: string[] = [];
+        const candidateRecipientIds: Set<string> = new Set();
+        for (const convoId of convoIds) {
+          const latest = latestByConvo[convoId];
+          const members = byConvo[convoId] ?? [];
+          const others = members.filter((m: any) => m.user_id !== user.id);
+          const isGroup = members.length > 2;
+          if (!isGroup && latest && latest.sender_id === user.id && others[0]) {
+            candidateMsgIds.push(latest.id);
+            candidateRecipientIds.add(others[0].user_id);
+          }
+        }
+
+        let receiptsByMsg: Record<
+          string,
+          { delivered_at: string | null; read_at: string | null }
+        > = {};
+        if (candidateMsgIds.length) {
+          const { data: recs, error: recErr } = await supabase
+            .from("message_receipts")
+            .select("message_id, user_id, delivered_at, read_at")
+            .in("message_id", candidateMsgIds)
+            .in("user_id", Array.from(candidateRecipientIds));
+          if (!recErr) {
+            for (const r of recs ?? []) {
+              receiptsByMsg[r.message_id] = {
+                delivered_at: r.delivered_at ?? null,
+                read_at: r.read_at ?? null,
+              };
+            }
+          }
         }
 
         // 9) build the final display list
@@ -343,16 +459,14 @@ export default function MessagesPage() {
             (m) => m.conversation_id === convoId
           );
           const members = byConvo[convoId] ?? [];
-
           const convoRow = convoById[convoId] ?? null;
-
           const others = members.filter((m) => m.user_id !== user.id);
-
           // group if >2 members (we don't have is_group on this table)
           const isGroup = members.length > 2;
 
           let name: string;
           let avatar: string | null = null;
+          let presence: "online" | "away" | "recent" | null = null;
 
           if (isGroup) {
             // group: prefer conversation.name
@@ -368,18 +482,44 @@ export default function MessagesPage() {
             name =
               (otherProfile && otherProfile.profile_title) || "Unknown user";
             avatar = otherProfile?.avatar_url ?? null;
+            presence =
+              !isGroup && other
+                ? classifyPresence(presenceByUser[other.user_id])
+                : null;
+          }
+
+          const latest = latestByConvo[convoId] ?? null;
+          const lastMessage = latest?.body ?? null;
+          const lastMessageAt = latest?.created_at ?? null;
+          const lastMessageSenderId = latest?.sender_id ?? null;
+
+          let lastReceipt: {
+            delivered_at: string | null;
+            read_at: string | null;
+          } | null = null;
+          if (!isGroup && latest && latest.sender_id === user.id) {
+            lastReceipt = receiptsByMsg[latest.id] ?? {
+              delivered_at: null,
+              read_at: null,
+            };
           }
 
           return {
             id: convoId,
             name,
             avatar,
-            lastMessage: null,
-            updated_at: myRow?.joined_at ?? null,
-          };
+            lastMessage,
+            updated_at: lastMessageAt ?? myRow?.joined_at ?? null,
+            lastMessageAt,
+            lastMessageSenderId,
+            lastReceipt,
+            unreadCount: unreadByConvo[convoId] ?? 0,
+            presence,
+          } as DBConversation;
         });
 
         setUserConversations(displayConvos);
+        initRealtime(convoIds);
         setLoadError(null);
         setLoading(false);
       } catch (err: any) {
@@ -393,6 +533,120 @@ export default function MessagesPage() {
     load();
   }, []);
 
+  const realtimeChannelRef = useRef<ReturnType<
+    ReturnType<typeof createClient>["channel"]
+  > | null>(null);
+
+  function initRealtime(convoIds: string[]) {
+    try {
+      // Avoid duplicate subscriptions
+      if (realtimeChannelRef.current) return;
+      const supabase = createClient();
+      const channel = supabase.channel("messages:list");
+
+      // New messages
+      channel.on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages" },
+        (payload: any) => {
+          const m = payload.new as {
+            id: string;
+            body: string;
+            conversation_id: string;
+            sender_id: string;
+            created_at: string;
+          };
+          if (!convoIdsRef.current.has(m.conversation_id)) return;
+
+          setUserConversations((prev) => {
+            const next = prev.map((c) => {
+              if (c.id !== m.conversation_id) return c;
+              // Only update if this is newer than what we show
+              const isNewer =
+                !c.lastMessageAt ||
+                new Date(m.created_at).getTime() >=
+                  new Date(c.lastMessageAt).getTime();
+              if (!isNewer) return c;
+              return {
+                ...c,
+                lastMessage: m.body,
+                lastMessageAt: m.created_at,
+                lastMessageSenderId: m.sender_id,
+                updated_at: m.created_at,
+                lastReceipt:
+                  m.sender_id === currentUserIdRef.current
+                    ? { delivered_at: null, read_at: null }
+                    : c.lastReceipt,
+                unreadCount:
+                  m.sender_id !== currentUserIdRef.current
+                    ? (c.unreadCount ?? 0) + 1
+                    : c.unreadCount ?? 0,
+              };
+            });
+            return next;
+          });
+        }
+      );
+
+      // Message receipts for your last sent message in 1:1
+      channel.on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "message_receipts" },
+        async (payload: any) => {
+          const r = payload.new as {
+            message_id: string;
+            user_id: string;
+            delivered_at: string | null;
+            read_at: string | null;
+          };
+          if (r.user_id !== currentUserIdRef.current || !r.read_at) return;
+          try {
+            const supa = createClient();
+            const { data: msgRow } = await supa
+              .from("messages")
+              .select("conversation_id, sender_id")
+              .eq("id", r.message_id)
+              .maybeSingle();
+            if (!msgRow) return;
+            setUserConversations((prev) =>
+              prev.map((c) => {
+                if (c.id !== msgRow.conversation_id) return c;
+                // Only decrement unread for messages that were from the other user
+                const fromOther = msgRow.sender_id !== currentUserIdRef.current;
+                if (!fromOther) return c;
+                const nextUnread = Math.max(0, (c.unreadCount ?? 0) - 1);
+                return { ...c, unreadCount: nextUnread };
+              })
+            );
+          } catch {}
+        }
+      );
+
+      channel.subscribe((status) => {
+        if (process.env.NODE_ENV !== "production") {
+          // console.debug("realtime status", status);
+        }
+      });
+
+      realtimeChannelRef.current = channel;
+    } catch (e) {
+      // noop
+    }
+  }
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      try {
+        if (realtimeChannelRef.current) {
+          const supabase = createClient();
+          supabase.removeChannel(realtimeChannelRef.current);
+          realtimeChannelRef.current = null;
+        }
+      } catch {}
+    };
+  }, []);
+
   const hasNoConvos =
     !loading && userConversations.length === 0 && !loadError && !!currentUserId;
 
@@ -403,16 +657,9 @@ export default function MessagesPage() {
         leftContent={
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <motion.button
-                aria-label="Menu"
-                whileTap={{ scale: 1.15 }}
-                drag
-                dragElastic={0.2}
-                dragConstraints={{ top: 0, bottom: 0, left: 0, right: 0 }}
-                className="h-10 w-10 flex items-center justify-center rounded-full bg-white/5 backdrop-blur-xl border border-white/20 shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.6),0_2px_10px_rgba(0,0,0,0.2)] hover:bg-white/10 transition-all duration-300 active:scale-110"
-              >
+              <GlassButton ariaLabel="Menu">
                 <MoreHorizontal className="h-6 w-6 text-white" />
-              </motion.button>
+              </GlassButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="start"
@@ -433,16 +680,13 @@ export default function MessagesPage() {
         }
         rightContent={
           <>
-            <Button variant="ghost" size="icon" aria-label="Sparkles">
-              <Sparkles className="h-5 w-5" />
-            </Button>
             <Button
               variant="default"
               size="icon"
               className="rounded-full"
               aria-label="New chat"
             >
-              <Plus className="h-5 w-5" />
+              <Sparkles className="h-5 w-5" />
             </Button>
           </>
         }
@@ -452,52 +696,6 @@ export default function MessagesPage() {
       <h1 className="px-1 pb-2 text-4xl font-extrabold tracking-tight">
         Messages
       </h1>
-
-      {/* 👇 show who we are logged in as */}
-      <div className="mb-4 rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-        {currentUserId ? (
-          <span>
-            Authenticated as:{" "}
-            <code className="font-mono text-[11px]">{currentUserId}</code>
-          </span>
-        ) : (
-          <span className="text-destructive">
-            No Supabase user in this environment — messages will be empty.
-          </span>
-        )}
-      </div>
-
-      {/* debug: what did Supabase actually return for this user */}
-      <div className="mb-4 rounded-lg border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
-        <div className="flex items-center justify-between gap-2">
-          <span>
-            conversation_members for this user:{" "}
-            <strong>{rawRows ? rawRows.length : 0}</strong>
-          </span>
-          <button
-            type="button"
-            onClick={() => setShowDebug((p) => !p)}
-            className="text-xs text-primary underline-offset-2 hover:underline"
-          >
-            {showDebug ? "Hide" : "Show"} raw
-          </button>
-        </div>
-        {showDebug ? (
-          <pre className="mt-2 max-h-40 overflow-auto rounded bg-background/80 p-2 text-[10px] leading-tight">
-            {JSON.stringify(rawRows, null, 2)}
-          </pre>
-        ) : null}
-      </div>
-
-      {!loading && currentUserId && (rawRows?.length ?? 0) === 0 ? (
-        <p className="mt-1 text-[11px] text-amber-500">
-          You are authenticated but got 0 rows. This almost always means RLS on
-          <code className="mx-1 rounded bg-muted/60 px-1">
-            conversation_members
-          </code>
-          isn’t letting this user read their own rows.
-        </p>
-      ) : null}
 
       {/* Search */}
       <div className="pb-5">
@@ -547,14 +745,6 @@ export default function MessagesPage() {
                 When you start chatting, your conversations will appear here.
               </EmptyDescription>
             </EmptyHeader>
-            <EmptyContent>
-              <div className="flex gap-2">
-                <Button variant="outline">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Start a chat
-                </Button>
-              </div>
-            </EmptyContent>
           </Empty>
         </div>
       ) : (
@@ -586,14 +776,18 @@ export default function MessagesPage() {
           ) : null}
 
           {userConversations.map((c) => {
-            const displayTime = c.updated_at
-              ? new Date(c.updated_at).toLocaleTimeString(undefined, {
+            const ts = c.lastMessageAt || c.updated_at;
+            const displayTime = ts
+              ? new Date(ts).toLocaleTimeString(undefined, {
                   hour: "2-digit",
                   minute: "2-digit",
                 })
               : "";
 
-            const lastLine = c.lastMessage || "No messages yet";
+            const lastLine = c.lastMessage ? c.lastMessage : "No messages yet";
+            const avatarUrl = c.avatar
+              ? getAvatarPublicUrl(c.avatar) || undefined
+              : undefined;
 
             return (
               <li key={c.id}>
@@ -624,29 +818,76 @@ export default function MessagesPage() {
                         <div className="relative h-12 w-12">
                           <Avatar className="h-12 w-12">
                             <AvatarImage
-                              src={c.avatar ?? undefined}
+                              src={avatarUrl}
                               alt={c.name}
+                              className="object-cover"
                             />
                             <AvatarFallback>
                               {c.name?.slice(0, 2).toUpperCase() || "??"}
                             </AvatarFallback>
                           </Avatar>
+                          {c.presence ? (
+                            <span
+                              className={
+                                "absolute -top-0.5 -left-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-background " +
+                                (c.presence === "online"
+                                  ? "bg-emerald-500"
+                                  : c.presence === "away"
+                                  ? "bg-amber-400"
+                                  : "bg-gray-400")
+                              }
+                              aria-label={
+                                c.presence === "online"
+                                  ? "Online"
+                                  : c.presence === "away"
+                                  ? "Away"
+                                  : "Online recently"
+                              }
+                            />
+                          ) : null}
                         </div>
                       }
                       right={
-                        <>
-                          <div className="flex items-baseline justify-between gap-3">
-                            <p className="truncate text-base font-semibold">
-                              {c.name}
-                            </p>
-                            <div className="shrink-0 text-xs text-muted-foreground flex items-center gap-1">
+                        <div className="min-w-0 grid grid-cols-[minmax(0,1fr)_auto] gap-x-3">
+                          {/* Row 1: title + time (+ badge under time) */}
+                          <p className="col-start-1 truncate text-base font-semibold">
+                            {c.name}
+                          </p>
+                          <div className="col-start-2 row-start-1 text-right">
+                            <div className="text-xs text-muted-foreground leading-none mt-0.5">
                               {displayTime}
                             </div>
                           </div>
-                          <div className="mt-0.5 flex items-center gap-1 text-sm text-muted-foreground">
-                            <p className="truncate">{lastLine}</p>
+                          {/* Row 2: preview + send/deliver/read status aligned with preview */}
+                          <p className="col-start-1 mt-0.5 text-sm text-muted-foreground truncate whitespace-nowrap">
+                            {lastLine}
+                          </p>
+                          <div className="col-start-2 row-start-2 mt-0.5 leading-tight flex items-center justify-end">
+                            {typeof c.unreadCount === "number" &&
+                            c.unreadCount > 0 ? (
+                              <Badge className="px-2 py-0.5 text-[10px] rounded-full">
+                                {c.unreadCount}
+                              </Badge>
+                            ) : c.lastMessageSenderId === currentUserId ? (
+                              c.lastReceipt?.read_at ? (
+                                <CheckCheck
+                                  className="h-3.5 w-3.5 text-accent opacity-90"
+                                  aria-label="Read"
+                                />
+                              ) : c.lastReceipt?.delivered_at ? (
+                                <CheckCheck
+                                  className="h-3.5 w-3.5 text-accent opacity-70"
+                                  aria-label="Delivered"
+                                />
+                              ) : c.lastMessageAt ? (
+                                <Check
+                                  className="h-3.5 w-3.5 text-accent opacity-70"
+                                  aria-label="Sent"
+                                />
+                              ) : null
+                            ) : null}
                           </div>
-                        </>
+                        </div>
                       }
                     />
                   </Link>

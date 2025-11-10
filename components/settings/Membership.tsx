@@ -22,7 +22,7 @@ export default function Membership() {
         Membership
       </p>
 
-      <div className="mx-auto mt-2 mb-0 max-w-sm overflow-hidden rounded-t-2xl bg-linear-to-br from-primary/80 to-primary/40 h-20 shadow-lg backdrop-blur-md border border-white/10">
+      <div className="mx-auto mt-2 mb-0 max-w-10/12 overflow-hidden rounded-t-2xl bg-linear-to-br from-primary/80 to-primary/40 h-20 shadow-lg backdrop-blur-md border border-white/10">
         <div className="flex flex-col w-full h-full items-start justify-start px-6 py-4">
           <span className="text-xs tracking-widest uppercase text-primary-foreground/80 font-semibold">
             Proximity

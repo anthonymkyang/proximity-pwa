@@ -4,13 +4,29 @@ import { useRouter } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { motion } from "framer-motion";
 
-export default function BackButton() {
+interface BackButtonProps {
+  useWizardNavigation?: boolean;
+  onWizardBack?: () => void;
+}
+
+export default function BackButton({
+  useWizardNavigation = false,
+  onWizardBack,
+}: BackButtonProps) {
   const router = useRouter();
+
+  const handleClick = () => {
+    if (useWizardNavigation && onWizardBack) {
+      onWizardBack();
+    } else {
+      router.back();
+    }
+  };
 
   return (
     <motion.div>
       <motion.button
-        onClick={() => router.back()}
+        onClick={handleClick}
         aria-label="Go back"
         whileTap={{ scale: 1.15 }}
         drag

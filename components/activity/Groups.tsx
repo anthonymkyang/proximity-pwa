@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { MoreHorizontal, ChevronRight } from "lucide-react";
+import { MoreHorizontal, ChevronRight, Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import Link from "next/link";
 
 type GroupEvent = {
@@ -87,7 +88,18 @@ export default function Groups() {
     <>
       {/* Your groups section */}
       <section className="mt-4">
-        <h3 className="text-lg font-semibold px-1 mb-3">Your groups</h3>
+        <div className="px-1 mb-3 flex items-center justify-between">
+          <h3 className="text-lg font-semibold">Your groups</h3>
+          <Link
+            href="/app/activity/groups/create"
+            aria-label="Host a new group or event"
+          >
+            <Button variant="ghost" size="sm" className="rounded-full gap-2">
+              <Plus className="h-4 w-4" />
+              Host
+            </Button>
+          </Link>
+        </div>
         <div className="flex gap-3 overflow-x-auto -mx-4 px-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           {[
             { name: "Weekend Hikers", fallback: "WH" },
@@ -101,7 +113,7 @@ export default function Groups() {
               href="/app/activity/group"
               className="flex flex-col items-start gap-2"
             >
-              <div className="relative w-36 aspect-4/3 rounded-xl bg-muted flex items-center justify-center text-sm font-medium text-muted-foreground shrink-0">
+              <div className="relative w-48 aspect-4/3 rounded-xl bg-muted flex items-center justify-center text-sm font-medium text-muted-foreground shrink-0">
                 {group.fallback}
 
                 {/* Date badge */}
@@ -151,7 +163,7 @@ export default function Groups() {
             </button>
           </div>
           {/* Calendar dots row */}
-          <div className="mt-6 grid grid-cols-7 gap-2">
+          <div className="mt-6 grid grid-cols-7 gap-2 place-items-center">
             {upcomingDays.map((date, index) => (
               <button
                 key={date.toISOString()}
