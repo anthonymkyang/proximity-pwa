@@ -1,4 +1,5 @@
-"use server";
+import { NextRequest, NextResponse } from "next/server";
+export const dynamic = "force-dynamic";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/utils/supabase/server";
@@ -234,4 +235,41 @@ export async function getGroupSummary(
   };
 
   return { data: summary, error: null };
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+
+    if (body?.op === "createDraft") {
+      const id = await createDraftGroup();
+      return NextResponse.json({ id });
+    }
+
+    if (body?.op === "publish") {
+      const { id, status } = body as { id: string; status: "active" | "draft" };
+      if (!id || !status) {
+        return NextResponse.json(
+          { error: "Missing id or status" },
+          { status: 400 }
+        );
+      }
+      const out = await publishGroup(id, status);
+      return NextResponse.json(out);
+    }
+
+    const { id, patch } = body as { id?: string; patch?: UpdatableGroupFields };
+    if (!id || !patch || typeof patch !== "object") {
+      return NextResponse.json(
+        { error: "Missing id or patch" },
+        { status: 400 }
+      );
+    }
+
+    const out = await updateGroup(id, patch);
+    return NextResponse.json(out);
+  } catch (e: any) {
+    const msg = e?.message || "Internal error";
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }

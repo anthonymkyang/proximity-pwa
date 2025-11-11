@@ -3,7 +3,7 @@
 import * as React from "react";
 
 import TopBar from "@/components/nav/TopBar";
-import GlassButton from "@/components/ui/glass-button";
+import HeaderButton from "@/components/ui/header-button";
 import { MoreHorizontal, ChevronRight } from "lucide-react";
 import {
   DropdownMenu,
@@ -128,9 +128,9 @@ export default function ActivityPage() {
         leftContent={
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <GlassButton aria-label="Menu">
+              <HeaderButton aria-label="Menu">
                 <MoreHorizontal className="h-6 w-6 text-white" />
-              </GlassButton>
+              </HeaderButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="start"

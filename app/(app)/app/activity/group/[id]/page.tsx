@@ -648,131 +648,184 @@ export default function GroupPage() {
         </header>
 
         {/* Group image */}
-        <div className="w-full aspect-video rounded-xl bg-muted flex items-center justify-center text-sm text-muted-foreground overflow-hidden">
-          {coverUrl ? (
-            <div className="relative w-full h-full">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                key={coverUrl || "cover"}
-                src={coverUrl || ""}
-                alt="Group cover"
-                className="w-full h-full object-cover"
-                loading="lazy"
-                referrerPolicy="no-referrer"
-              />
-              {/* Vignette overlay */}
-              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0)_0%,rgba(0,0,0,0.35)_60%,rgba(0,0,0,0.7)_100%)]" />
-            </div>
-          ) : (
-            <span>Image placeholder</span>
-          )}
-        </div>
+        {loading ? (
+          <Skeleton className="w-full aspect-video rounded-xl" />
+        ) : (
+          <div className="w-full aspect-video rounded-xl bg-muted flex items-center justify-center text-sm text-muted-foreground overflow-hidden">
+            {coverUrl ? (
+              <div className="relative w-full h-full">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  key={coverUrl || "cover"}
+                  src={coverUrl || ""}
+                  alt="Group cover"
+                  className="w-full h-full object-cover"
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                />
+                {/* Vignette overlay */}
+                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0)_0%,rgba(0,0,0,0.35)_60%,rgba(0,0,0,0.7)_100%)]" />
+              </div>
+            ) : (
+              <span>Image placeholder</span>
+            )}
+          </div>
+        )}
 
         {/* People: Hosts & Attendees */}
         <section className="mt-4">
           <div className="rounded-xl bg-card text-card-foreground p-4">
-            {/* Host & Co-hosts */}
-
-            <div className="grid grid-cols-2 gap-8 md:gap-8 mb-8">
-              {/* Host column */}
-              <div className="col-span-1 rounded-lg">
-                <h2 className="text-xs font-bold tracking-wider text-muted-foreground uppercase mb-2">
-                  Host
-                </h2>
-                <div className="flex items-center gap-3">
-                  <Avatar04
-                    src={resolveAvatarUrl(host?.profile?.avatar_url) || ""}
-                    name={
-                      host?.profile?.profile_title ||
-                      host?.profile?.name ||
-                      "Host"
-                    }
-                    fallback={initials(
-                      host?.profile?.profile_title || host?.profile?.name
-                    )}
-                  />
-                  <div className="min-w-0">
-                    <p className="font-medium leading-tight truncate">
-                      {host?.profile?.profile_title ||
-                        host?.profile?.name ||
-                        "Host"}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground">Host</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Co-hosts column */}
-              <div className="col-span-1 rounded-lg">
-                <h2 className="text-xs font-bold tracking-wider text-muted-foreground uppercase mb-2">
-                  Co-hosts
-                </h2>
-                {cohosts.length ? (
-                  <div className="flex items-center gap-3">
-                    <div className="flex -space-x-2">
-                      {cohosts.slice(0, 3).map((h, i) => (
-                        <Avatar15
-                          key={h.user_id + i}
-                          avatars={[
-                            {
-                              src:
-                                resolveAvatarUrl(h.profile?.avatar_url) || "",
-                              name:
-                                h.profile?.profile_title ||
-                                h.profile?.name ||
-                                "Co-host",
-                              fallback: initials(
-                                h.profile?.profile_title || h.profile?.name
-                              ),
-                            },
-                          ]}
-                        />
-                      ))}
+            {loading ? (
+              <>
+                <div className="grid grid-cols-2 gap-8 md:gap-8 mb-8">
+                  <div>
+                    <h2 className="text-xs font-bold tracking-wider text-muted-foreground uppercase mb-2">
+                      Host
+                    </h2>
+                    <div className="flex items-center gap-3">
+                      <Skeleton className="h-10 w-10 rounded-full" />
+                      <div className="space-y-2 w-40">
+                        <Skeleton className="h-4 w-3/4" />
+                        <Skeleton className="h-3 w-1/2" />
+                      </div>
                     </div>
                   </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    No co-hosts yet.
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* Attendees */}
-            <h2 className="text-xs font-semibold tracking-wider text-muted-foreground uppercase mb-2">
-              Attendees
-            </h2>
-            <div className="">
-              {attendeesPreview.length > 0 ? (
+                  <div>
+                    <h2 className="text-xs font-bold tracking-wider text-muted-foreground uppercase mb-2">
+                      Co-hosts
+                    </h2>
+                    <div className="flex items-center gap-3">
+                      <div className="flex -space-x-2">
+                        <Skeleton className="h-8 w-8 rounded-full ring-2 ring-card" />
+                        <Skeleton className="h-8 w-8 rounded-full ring-2 ring-card" />
+                        <Skeleton className="h-8 w-8 rounded-full ring-2 ring-card" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <h2 className="text-xs font-semibold tracking-wider text-muted-foreground uppercase mb-2">
+                  Attendees
+                </h2>
                 <div className="flex items-center gap-2">
                   <div className="flex -space-x-2">
-                    {attendeesPreview.map((row) => (
-                      <Avatar
-                        key={row.user_id}
-                        className="h-8 w-8 ring-2 ring-card"
-                      >
-                        <AvatarImage
-                          src={resolveAvatarUrl(row.profile?.avatar_url) || ""}
-                          alt=""
-                        />
-                        <AvatarFallback className="text-[10px]">
-                          {initials(
-                            row.profile?.profile_title || row.profile?.name
-                          )}
-                        </AvatarFallback>
-                      </Avatar>
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <Skeleton
+                        key={i}
+                        className="h-8 w-8 rounded-full ring-2 ring-card"
+                      />
                     ))}
                   </div>
-                  {attendeesExtra > 0 ? (
-                    <span className="text-sm text-muted-foreground">
-                      +{attendeesExtra}
-                    </span>
-                  ) : null}
+                  <Skeleton className="h-4 w-8" />
                 </div>
-              ) : (
-                <p className="text-muted-foreground">No attendees yet.</p>
-              )}
-            </div>
+              </>
+            ) : (
+              <>
+                {/* Host & Co-hosts */}
+                <div className="grid grid-cols-2 gap-8 md:gap-8 mb-8">
+                  {/* Host column */}
+                  <div className="col-span-1 rounded-lg">
+                    <h2 className="text-xs font-bold tracking-wider text-muted-foreground uppercase mb-2">
+                      Host
+                    </h2>
+                    <div className="flex items-center gap-3">
+                      <Avatar04
+                        src={resolveAvatarUrl(host?.profile?.avatar_url) || ""}
+                        name={
+                          host?.profile?.profile_title ||
+                          host?.profile?.name ||
+                          "Host"
+                        }
+                        fallback={initials(
+                          host?.profile?.profile_title || host?.profile?.name
+                        )}
+                      />
+                      <div className="min-w-0">
+                        <p className="font-medium leading-tight truncate">
+                          {host?.profile?.profile_title ||
+                            host?.profile?.name ||
+                            "Host"}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">
+                          Host
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  {/* Co-hosts column */}
+                  <div className="col-span-1 rounded-lg">
+                    <h2 className="text-xs font-bold tracking-wider text-muted-foreground uppercase mb-2">
+                      Co-hosts
+                    </h2>
+                    {cohosts.length ? (
+                      <div className="flex items-center gap-3">
+                        <div className="flex -space-x-2">
+                          {cohosts.slice(0, 3).map((h, i) => (
+                            <Avatar15
+                              key={h.user_id + i}
+                              avatars={[
+                                {
+                                  src:
+                                    resolveAvatarUrl(h.profile?.avatar_url) ||
+                                    "",
+                                  name:
+                                    h.profile?.profile_title ||
+                                    h.profile?.name ||
+                                    "Co-host",
+                                  fallback: initials(
+                                    h.profile?.profile_title || h.profile?.name
+                                  ),
+                                },
+                              ]}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        No co-hosts yet.
+                      </p>
+                    )}
+                  </div>
+                </div>
+                {/* Attendees */}
+                <h2 className="text-xs font-semibold tracking-wider text-muted-foreground uppercase mb-2">
+                  Attendees
+                </h2>
+                <div className="">
+                  {attendeesPreview.length > 0 ? (
+                    <div className="flex items-center gap-2">
+                      <div className="flex -space-x-2">
+                        {attendeesPreview.map((row) => (
+                          <Avatar
+                            key={row.user_id}
+                            className="h-8 w-8 ring-2 ring-card"
+                          >
+                            <AvatarImage
+                              src={
+                                resolveAvatarUrl(row.profile?.avatar_url) || ""
+                              }
+                              alt=""
+                            />
+                            <AvatarFallback className="text-[10px]">
+                              {initials(
+                                row.profile?.profile_title || row.profile?.name
+                              )}
+                            </AvatarFallback>
+                          </Avatar>
+                        ))}
+                      </div>
+                      {attendeesExtra > 0 ? (
+                        <span className="text-sm text-muted-foreground">
+                          +{attendeesExtra}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="text-muted-foreground">No attendees yet.</p>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </section>
 
@@ -786,13 +839,10 @@ export default function GroupPage() {
               <MapPin className="h-5 w-5 text-primary mt-0.5" />
               <div className="min-w-0 flex-1">
                 <div className="rounded-lg bg-muted overflow-hidden">
-                  <div className="relative w-full h-64 flex items-center justify-center text-sm bg-muted">
-                    {loading ? (
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>Loading map…</span>
-                      </div>
-                    ) : (
+                  {loading ? (
+                    <Skeleton className="w-full h-64" />
+                  ) : (
+                    <div className="relative w-full h-64 flex items-center justify-center text-sm bg-muted">
                       <div className="text-center space-y-2">
                         <div className="inline-flex items-center gap-2 rounded-md border bg-background px-2 py-1 text-xs">
                           <MapPin className="h-4 w-4 text-primary" />
@@ -809,10 +859,15 @@ export default function GroupPage() {
                           Map preview coming soon
                         </div>
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
-                {group?.location_text || group?.postcode ? (
+                {loading ? (
+                  <div className="mt-2 space-y-2">
+                    <Skeleton className="h-4 w-1/2" />
+                    <Skeleton className="h-4 w-1/3" />
+                  </div>
+                ) : group?.location_text || group?.postcode ? (
                   <p className="text-sm text-muted-foreground mt-2">
                     {group?.location_text ? (
                       <span>{group.location_text}</span>
@@ -827,6 +882,18 @@ export default function GroupPage() {
             </div>
           </div>
         </section>
+        {loading ? (
+          <section className="mt-4">
+            <div className="rounded-xl bg-card text-card-foreground p-4 space-y-3">
+              <Skeleton className="h-4 w-24" />
+              <div className="flex flex-wrap gap-2">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Skeleton key={i} className="h-6 w-20 rounded-full" />
+                ))}
+              </div>
+            </div>
+          </section>
+        ) : null}
 
         {/* Provided + House rules (combined card) */}
         {(Array.isArray(group?.provided_items) &&
@@ -886,7 +953,16 @@ export default function GroupPage() {
         ) : null}
 
         {/* About / Description */}
-        {group?.description ? (
+        {loading ? (
+          <section className="mt-4">
+            <div className="rounded-xl bg-card text-card-foreground p-4 space-y-2">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-11/12" />
+              <Skeleton className="h-4 w-10/12" />
+            </div>
+          </section>
+        ) : group?.description ? (
           <section className="mt-4">
             <div className="rounded-xl bg-card text-card-foreground p-4">
               <h2 className="text-xs font-semibold tracking-wider text-muted-foreground uppercase mb-2">
@@ -904,24 +980,28 @@ export default function GroupPage() {
         {/* Sticky request to join */}
         <div className="fixed bottom-[72px] left-0 right-0 z-20 px-4 pb-[env(safe-area-inset-bottom)]">
           <div className="mx-auto w-full max-w-xl flex justify-center">
-            <Button
-              size="lg"
-              className="rounded-full"
-              onClick={handleRequest}
-              disabled={requesting || requested}
-            >
-              {requested ? (
-                <span className="inline-flex items-center gap-2">
-                  <CheckCircle2 className="h-5 w-5" /> Request sent
-                </span>
-              ) : requesting ? (
-                "Sending…"
-              ) : (
-                <span className="inline-flex items-center gap-2">
-                  <UserPlus className="h-5 w-5" /> Request to join
-                </span>
-              )}
-            </Button>
+            {loading ? (
+              <Skeleton className="h-10 w-60 rounded-full" />
+            ) : (
+              <Button
+                size="lg"
+                className="rounded-full"
+                onClick={handleRequest}
+                disabled={requesting || requested}
+              >
+                {requested ? (
+                  <span className="inline-flex items-center gap-2">
+                    <CheckCircle2 className="h-5 w-5" /> Request sent
+                  </span>
+                ) : requesting ? (
+                  "Sending…"
+                ) : (
+                  <span className="inline-flex items-center gap-2">
+                    <UserPlus className="h-5 w-5" /> Request to join
+                  </span>
+                )}
+              </Button>
+            )}
           </div>
         </div>
       </div>

@@ -17,7 +17,7 @@ import {
   Plus,
 } from "lucide-react";
 import TopBar from "@/components/nav/TopBar";
-import GlassButton from "@/components/ui/glass-button";
+import GlassButton from "@/components/ui/header-button";
 import {
   DropdownMenu,
   DropdownMenuTrigger,

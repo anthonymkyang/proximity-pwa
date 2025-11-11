@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import NotificationsButton from "@/components/shadcn-studio/button/button-38";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -105,15 +106,7 @@ export default function Notifications({
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetTrigger asChild>
-        <Button
-          variant="default"
-          size="icon"
-          className="relative rounded-full"
-          aria-label="Notifications"
-        >
-          <Bell className="h-5 w-5" />
-          <span className="absolute bottom-0 right-0 block h-2.5 w-2.5 rounded-full bg-red-500" />
-        </Button>
+        <NotificationsButton />
       </SheetTrigger>
 
       <SheetContent

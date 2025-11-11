@@ -1,6 +1,7 @@
 "use client";
 import { MessageCircle, Users, Calendar as CalendarIcon } from "lucide-react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { createClient } from "@/utils/supabase/client";
 
 import * as React from "react";
 import {
@@ -39,21 +40,12 @@ function endOfMonth(date: Date) {
   return new Date(date.getFullYear(), date.getMonth() + 1, 0);
 }
 
-function shouldHighlight(date: Date) {
-  // Deterministic hash from YYYYMMDD
-  const y = date.getFullYear();
-  const m = date.getMonth() + 1;
-  const d = date.getDate();
-  const key = y * 10000 + m * 100 + d;
-  // Simple LCG-style mix to pseudo-randomize but remain stable
-  let x = (key ^ 0x9e3779b9) >>> 0;
-  x = (x + 0x7f4a7c15) >>> 0;
-  x = Math.imul(x ^ (x >>> 15), 0x85ebca6b) >>> 0;
-  x ^= x >>> 13;
-  x = Math.imul(x, 0xc2b2ae35) >>> 0;
-  x ^= x >>> 16;
-  // ~1 in 6 days highlighted
-  return x % 6 === 0;
+// Normalize a date to YYYY-MM-DD for set membership
+function ymd(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -68,6 +60,87 @@ export default function Calendar() {
 
   const [selected, setSelected] = React.useState<Date | null>(today);
   const [sheetOpen, setSheetOpen] = React.useState(false);
+
+  // Days that have a group the user is involved in
+  const [highlightDays, setHighlightDays] = React.useState<Set<string>>(
+    new Set()
+  );
+
+  // Load involvement days between rangeStart and rangeEnd
+  React.useEffect(() => {
+    let mounted = true;
+    const supa = createClient();
+
+    async function load() {
+      try {
+        const { data: auth } = await supa.auth.getUser();
+        const uid = auth?.user?.id || null;
+        if (!uid) {
+          if (mounted) setHighlightDays(new Set());
+          return;
+        }
+        const fromIso = new Date(rangeStart).toISOString();
+        const toIso = new Date(rangeEnd).toISOString();
+
+        // Host
+        const hostQ = supa
+          .from("groups")
+          .select("start_time")
+          .eq("host_id", uid)
+          .in("status", ["active", "in_progress"]) // live groups
+          .gte("start_time", fromIso)
+          .lte("start_time", toIso);
+
+        // Co-host (array contains user id)
+        const cohostQ = supa
+          .from("groups")
+          .select("start_time")
+          .contains("cohost_ids", [uid])
+          .in("status", ["active", "in_progress"]) // live groups
+          .gte("start_time", fromIso)
+          .lte("start_time", toIso);
+
+        // Attendee (accepted), join groups to filter by status + time
+        const attendeeQ = supa
+          .from("group_attendees")
+          .select("groups:groups!inner(start_time,status)")
+          .eq("user_id", uid)
+          .eq("status", "accepted")
+          .in("groups.status", ["active", "in_progress"]) // live groups
+          .gte("groups.start_time", fromIso)
+          .lte("groups.start_time", toIso);
+
+        const [hostRes, cohostRes, attRes] = await Promise.all([
+          hostQ,
+          cohostQ,
+          attendeeQ,
+        ]);
+
+        const set = new Set<string>();
+        (hostRes.data || []).forEach((r: any) => {
+          if (r?.start_time) set.add(ymd(new Date(r.start_time)));
+        });
+        (cohostRes.data || []).forEach((r: any) => {
+          if (r?.start_time) set.add(ymd(new Date(r.start_time)));
+        });
+        (attRes.data || []).forEach((r: any) => {
+          const t = r?.groups?.start_time;
+          if (t) set.add(ymd(new Date(t)));
+        });
+
+        if (mounted) setHighlightDays(set);
+      } catch (e) {
+        if (mounted) setHighlightDays(new Set());
+        // eslint-disable-next-line no-console
+        console.warn("[Calendar] failed to load highlight days", e);
+      }
+    }
+
+    load();
+    return () => {
+      mounted = false;
+    };
+  }, [rangeStart, rangeEnd]);
 
   const selectedTitle = React.useMemo(() => {
     const d = selected ?? today;
@@ -168,7 +241,9 @@ export default function Calendar() {
                       const isToday = isSameDay(date, today);
                       const isSelected = selected && isSameDay(date, selected);
                       const highlight =
-                        !disabled && !outsideMonth && shouldHighlight(date);
+                        !disabled &&
+                        !outsideMonth &&
+                        highlightDays.has(ymd(date));
 
                       return (
                         <button
