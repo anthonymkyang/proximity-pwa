@@ -2,7 +2,7 @@
 
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { updateGroup } from "@/app/api/groups/actions";
+import { updateGroup } from "@/lib/groups/client";
 import { z } from "zod";
 import React from "react";
 import { createClient } from "@/utils/supabase/client";
@@ -34,7 +34,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 
-import { MapPin, Loader2, ArrowRight } from "lucide-react";
+import { MapPin, Loader2 } from "lucide-react";
 
 type FormData = z.infer<typeof locationFormSchema>;
 

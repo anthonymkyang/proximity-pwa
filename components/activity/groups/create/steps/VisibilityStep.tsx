@@ -19,7 +19,7 @@ import { Loader2, CheckCircle2, XCircle, MapPin } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import getAvatarPublicUrl from "@/lib/profiles/getAvatarPublicUrl";
+import getAvatarPublicUrl from "@/lib/profiles/getAvatarProxyUrl";
 
 type Summary = {
   title: string | null;

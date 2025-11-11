@@ -1,4 +1,4 @@
-import { createDraftGroup } from "@/app/api/groups/actions";
+import { createDraftGroup } from "@/app/api/groups/actions/route";
 import Wizard from "@/components/activity/groups/create/Wizard";
 import TopBar from "@/components/nav/TopBar";
 import BackButton from "@/components/ui/back-button";

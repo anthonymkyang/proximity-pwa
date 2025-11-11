@@ -5,7 +5,7 @@ import { createClient } from "@/utils/supabase/client";
 import { ChevronDownIcon, Loader2, ArrowRight } from "lucide-react";
 
 import { useForm } from "react-hook-form";
-import { updateGroup } from "@/app/api/groups/actions";
+import { updateGroup } from "@/lib/groups/client";
 
 import {
   Form,

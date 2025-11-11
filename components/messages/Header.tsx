@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { MoreVertical, ShieldAlert, Ban, OctagonAlert } from "lucide-react";
+import Badge24 from "@/components/shadcn-studio/badge/badge-24";
 
 export type HeaderMessage = {
   id: string;
@@ -26,6 +27,22 @@ export type HeaderMessage = {
     position?: { label?: string | null } | null;
   } | null;
 };
+
+function toHeaderPresence(
+  row: { status?: string | null; updated_at?: string | null } | null
+): "online" | "away" | "recently" | "offline" {
+  if (!row?.updated_at) return "offline";
+  const t = Date.parse(row.updated_at);
+  if (!Number.isFinite(t)) return "offline";
+  const minutes = (Date.now() - t) / 60000;
+  if (minutes > 60) return "offline"; // inactive -> no dot
+  if (minutes > 5) return "recently"; // 5–60 min -> grey dot
+  // <= 5 minutes: prefer explicit status when present
+  if (row.status === "away") return "away";
+  if (row.status === "online") return "online";
+  // if status is offline but timestamp is fresh, still consider recently
+  return "recently";
+}
 
 export default function Header({
   messages,
@@ -63,6 +80,17 @@ export default function Header({
     const withTitle = messages.find((m) => m.profiles?.profile_title);
     return withTitle?.profiles?.profile_title ?? "Conversation";
   }, [messages]);
+
+  const headerInitials = useMemo(() => {
+    const t = title || "?";
+    return t
+      .split(" ")
+      .map((w) => w?.trim?.()[0] ?? "")
+      .filter(Boolean)
+      .slice(0, 2)
+      .join("")
+      .toUpperCase();
+  }, [title]);
 
   const metaLine = useMemo(() => {
     if (!otherProfile) return "";
@@ -111,15 +139,10 @@ export default function Header({
     let mounted = true;
 
     const statusFromRow = (row: any) => {
-      if (!row)
-        return { status: "offline" as const, lastSeen: null as string | null };
-      const raw = typeof row.status === "string" ? row.status : "";
-      const updated = row.updated_at ?? row.updatedAt ?? null;
-      // Map raw -> presence; "recently" is computed client-side from updated_at
-      let status: "online" | "away" | "recently" | "offline" = "offline";
-      if (raw === "online" || raw === "away") status = raw as any;
-      else status = "offline";
-      return { status, lastSeen: updated };
+      return toHeaderPresence({
+        status: row?.status ?? null,
+        updated_at: row?.updated_at ?? null,
+      });
     };
 
     // Initial fetch
@@ -129,29 +152,10 @@ export default function Header({
       .eq("user_id", otherUserId)
       .maybeSingle()
       .then(({ data }) => {
-        const { status, lastSeen } = statusFromRow(data);
         if (!mounted) return;
-        // If they've been seen in the last hour, present as "recently"
-        if (status === "offline" && lastSeen) {
-          try {
-            const t = new Date(lastSeen).getTime();
-            if (!isNaN(t)) {
-              const mins = (Date.now() - t) / 60000;
-              if (mins <= 60) {
-                setPresenceStatus("recently");
-              } else {
-                setPresenceStatus("offline");
-              }
-            } else {
-              setPresenceStatus("offline");
-            }
-          } catch {
-            setPresenceStatus("offline");
-          }
-        } else {
-          setPresenceStatus(status);
-        }
-        setLastSeen(lastSeen);
+        const next = statusFromRow(data);
+        setPresenceStatus(next);
+        setLastSeen(data?.updated_at ?? null);
       });
 
     // Realtime subscribe
@@ -166,25 +170,11 @@ export default function Header({
           filter: `user_id=eq.${otherUserId}`,
         },
         (payload: any) => {
-          const row = payload?.new ?? null;
-          const { status, lastSeen } = statusFromRow(row);
           if (!mounted) return;
-          if (status === "offline" && lastSeen) {
-            try {
-              const t = new Date(lastSeen).getTime();
-              if (!isNaN(t)) {
-                const mins = (Date.now() - t) / 60000;
-                setPresenceStatus(mins <= 60 ? "recently" : "offline");
-              } else {
-                setPresenceStatus("offline");
-              }
-            } catch {
-              setPresenceStatus("offline");
-            }
-          } else {
-            setPresenceStatus(status);
-          }
-          setLastSeen(lastSeen);
+          const row = payload?.new ?? payload?.old ?? null;
+          const next = statusFromRow(row);
+          setPresenceStatus(next);
+          setLastSeen(row?.updated_at ?? null);
         }
       );
     channel.subscribe();
@@ -196,14 +186,12 @@ export default function Header({
     };
   }, [otherUserId]);
 
-  const presenceDot =
-    presenceStatus === "online"
-      ? "bg-emerald-500"
-      : presenceStatus === "away"
-      ? "bg-amber-400"
-      : presenceStatus === "recently"
-      ? "bg-gray-400"
-      : "";
+  const badgePresence =
+    presenceStatus === "recently"
+      ? "recent"
+      : presenceStatus === "offline"
+      ? null
+      : presenceStatus;
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-card/95 backdrop-blur supports-backdrop-filter:bg-card/80 px-4 py-3 flex items-center justify-between gap-3">
@@ -214,28 +202,14 @@ export default function Header({
             href={`/app/profile/${otherUserId}`}
             className="flex items-center gap-3"
           >
-            {headerAvatarUrl ? (
-              <div className="relative overflow-visible w-11 h-11">
-                <img
-                  src={headerAvatarUrl}
-                  alt={title || "User avatar"}
-                  className="w-11 h-11 rounded-full border border-muted object-cover block"
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).src =
-                      "/avatar-fallback.png";
-                  }}
-                />
-                {presenceStatus !== "offline" ? (
-                  <span
-                    className={
-                      "absolute top-0.5 left-0.5 h-2 w-2 rounded-full ring-1 ring-background z-10 pointer-events-none " +
-                      presenceDot
-                    }
-                    aria-hidden="true"
-                  />
-                ) : null}
-              </div>
-            ) : null}
+            <Badge24
+              src={headerAvatarUrl || undefined}
+              alt={title || "User avatar"}
+              fallback={headerInitials}
+              presence={badgePresence}
+              className="h-11 w-11"
+              ring
+            />
             <div className="flex-1">
               <h1 className="text-sm font-semibold">{title}</h1>
               {metaLine ? (
@@ -245,28 +219,14 @@ export default function Header({
           </Link>
         ) : (
           <>
-            {headerAvatarUrl ? (
-              <div className="relative overflow-visible w-11 h-11">
-                <img
-                  src={headerAvatarUrl}
-                  alt={title || "User avatar"}
-                  className="w-11 h-11 rounded-full border border-muted object-cover block"
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).src =
-                      "/avatar-fallback.png";
-                  }}
-                />
-                {presenceStatus !== "offline" ? (
-                  <span
-                    className={
-                      "absolute top-0.5 left-0.5 h-2 w-2 rounded-full ring-1 ring-background z-10 pointer-events-none " +
-                      presenceDot
-                    }
-                    aria-hidden="true"
-                  />
-                ) : null}
-              </div>
-            ) : null}
+            <Badge24
+              src={headerAvatarUrl || undefined}
+              alt={title || "User avatar"}
+              fallback={headerInitials}
+              presence={badgePresence}
+              className="h-11 w-11"
+              ring
+            />
             <div className="flex-1">
               <h1 className="text-sm font-semibold">{title}</h1>
               {metaLine ? (

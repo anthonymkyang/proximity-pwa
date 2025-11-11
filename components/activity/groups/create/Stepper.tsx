@@ -1,7 +1,5 @@
 "use client";
 
-import { cn } from "@/lib/utils";
-
 type Step = { key: string; label: string };
 
 export default function Stepper({

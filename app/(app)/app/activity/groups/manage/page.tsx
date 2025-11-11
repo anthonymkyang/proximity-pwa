@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/server";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Item,
   ItemActions,
@@ -25,6 +24,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 
 type GroupRow = {
   id: string;
@@ -44,6 +44,55 @@ type CategoryRow = {
   id: string;
   name: string;
 };
+
+type Attendee = {
+  id: string;
+  name: string | null;
+  username: string | null;
+  avatar_url: string | null;
+};
+
+function initialsFrom(text?: string | null): string {
+  if (!text) return "U";
+  const parts = String(text).trim().split(/\s+/);
+  const first = parts[0]?.[0] ?? "";
+  const last = parts.length > 1 ? parts[parts.length - 1][0] ?? "" : "";
+  return (first + last || first || "U").toUpperCase().slice(0, 2);
+}
+
+async function fetchAttendeesPreview(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  groupId: string,
+  limit = 4
+): Promise<Attendee[]> {
+  // Try a common schema first: group_attendees { group_id, user_id, joined_at }
+  const { data: joins } = await supabase
+    .from("group_attendees")
+    .select("user_id")
+    .eq("group_id", groupId)
+    .order("joined_at", { ascending: false })
+    .limit(limit);
+
+  const ids = (joins ?? []).map((j: any) => j.user_id).filter(Boolean);
+  if (!ids.length) return [];
+
+  const { data: profs } = await supabase
+    .from("profiles")
+    .select("id, profile_title, username, avatar_url")
+    .in("id", ids);
+
+  // Preserve order of ids
+  const byId = new Map((profs ?? []).map((p: any) => [p.id, p]));
+  return ids
+    .map((id: string) => byId.get(id))
+    .filter(Boolean)
+    .map((p: any) => ({
+      id: p.id,
+      name: p.profile_title,
+      username: p.username,
+      avatar_url: p.avatar_url,
+    }));
+}
 
 // --- helpers ---
 function fmtWhen(start?: string | null, end?: string | null) {
@@ -176,11 +225,22 @@ export default async function ManageGroupsPage() {
         raw: g.cover_image_url,
         resolved: coverUrl,
       });
+      const attendees = await fetchAttendeesPreview(supabase, g.id, 4);
+      const shown = attendees.length;
+      const extra = Math.max(0, (g.attendee_count ?? 0) - shown);
+
       return {
         ...g,
         category_name: g.category_id ? catMap.get(g.category_id) ?? null : null,
         coverUrl,
-      } as GroupRow & { category_name: string | null; coverUrl: string | null };
+        attendeesPreview: attendees,
+        attendeesExtra: extra,
+      } as GroupRow & {
+        category_name: string | null;
+        coverUrl: string | null;
+        attendeesPreview: Attendee[];
+        attendeesExtra: number;
+      };
     })
   );
 
@@ -254,6 +314,47 @@ export default async function ManageGroupsPage() {
                   </div>
                 </div>
               </div>
+
+              {/* Attendees preview */}
+              {g.attendeesPreview && g.attendeesPreview.length ? (
+                <div className="mt-2 flex justify-end">
+                  <div className="flex -space-x-2">
+                    {g.attendeesPreview.map((a) => {
+                      const raw = a.avatar_url;
+                      const isUrl =
+                        typeof raw === "string" && /^https?:\/\//i.test(raw);
+                      // For storage keys like "avatars/userid/file.jpg", rely on public bucket config
+                      // If your bucket is private, swap to signed URLs similar to resolveCoverUrl.
+                      const src = isUrl
+                        ? raw
+                        : raw
+                        ? `/api/storage/public/${encodeURIComponent(raw)}`
+                        : null;
+                      const name = a.name || a.username || "User";
+                      const fallback = initialsFrom(name);
+
+                      return (
+                        <Avatar
+                          key={a.id}
+                          className="ring-2 ring-background h-6 w-6"
+                        >
+                          {src ? <AvatarImage src={src} alt={name} /> : null}
+                          <AvatarFallback className="text-[10px]">
+                            {fallback}
+                          </AvatarFallback>
+                        </Avatar>
+                      );
+                    })}
+                    {g.attendeesExtra > 0 ? (
+                      <Avatar className="ring-2 ring-background h-6 w-6">
+                        <AvatarFallback className="text-[10px]">
+                          +{g.attendeesExtra}
+                        </AvatarFallback>
+                      </Avatar>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
             </ItemContent>
             <ItemActions>
               <DropdownMenu>
@@ -288,7 +389,10 @@ export default async function ManageGroupsPage() {
                   <DropdownMenuItem asChild>
                     <Link href={`/app/activity/groups/${g.id}`}>View</Link>
                   </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
+                  <DropdownMenuItem
+                    asChild
+                    className="text-destructive focus:text-destructive"
+                  >
                     <Link href={`/app/activity/groups/manage`}>Cancel</Link>
                   </DropdownMenuItem>
                 </DropdownMenuContent>

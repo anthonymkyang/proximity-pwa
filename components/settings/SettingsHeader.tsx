@@ -12,6 +12,23 @@ export default function SettingsHeader() {
   const [editingName, setEditingName] = useState(false);
   const nameRef = useRef<HTMLSpanElement | null>(null);
   const [savingName, setSavingName] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+
+  function resolveAvatarUrl(raw?: string | null): string | null {
+    if (!raw || typeof raw !== "string") return null;
+    if (/^https?:\/\//i.test(raw)) return raw;
+    // storage key like "avatars/uid/file.jpg" or "uid/file.jpg"
+    let path = raw.replace(/^\/+/, "");
+    if (path.toLowerCase().startsWith("avatars/")) {
+      path = path.slice("avatars/".length);
+    }
+    const origin =
+      typeof window !== "undefined" && window.location?.origin
+        ? window.location.origin
+        : "";
+    const base = origin ? `${origin}` : "";
+    return `${base}/api/photos/avatars?path=${encodeURIComponent(path)}`;
+  }
 
   // greeting
   useEffect(() => {
@@ -21,7 +38,7 @@ export default function SettingsHeader() {
     setGreeting(g);
   }, []);
 
-  // load profile (name only)
+  // load profile (name and avatar_url)
   useEffect(() => {
     const loadProfile = async () => {
       const supabase = createClient();
@@ -33,12 +50,14 @@ export default function SettingsHeader() {
       }
       const { data: profile } = await supabase
         .from("profiles")
-        .select("name")
+        .select("name, avatar_url")
         .eq("id", user.id)
         .maybeSingle();
       if (profile?.name && profile.name.trim().length > 0) {
         setName(profile.name);
       }
+      const resolved = resolveAvatarUrl(profile?.avatar_url);
+      setAvatarUrl(resolved);
       setNameLoading(false);
     };
     loadProfile();
@@ -86,7 +105,7 @@ export default function SettingsHeader() {
     <>
       {/* Header row */}
       <div className="flex items-center gap-3">
-        <AvatarButton fallbackName={name} />
+        <AvatarButton fallbackName={name} src={avatarUrl ?? undefined} />
         <div className="leading-tight">
           <p className="text-sm text-muted-foreground">{greeting},</p>
           <div className="flex items-center gap-1">

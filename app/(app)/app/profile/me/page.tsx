@@ -6,7 +6,7 @@ import { createClient } from "@/utils/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
-import getAvatarPublicUrl from "@/lib/profiles/getAvatarPublicUrl";
+import getAvatarPublicUrl from "@/lib/profiles/getAvatarProxyUrl";
 
 // ---------- Types ----------
 interface Profile {

@@ -3,7 +3,7 @@
 import * as React from "react";
 import { createClient } from "@/utils/supabase/client";
 import { useForm } from "react-hook-form";
-import { updateGroup } from "@/app/api/groups/actions";
+import { updateGroup } from "@/lib/groups/client";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -22,19 +22,11 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
-import {
-  UserPlus,
-  ChevronRight,
-  Plus,
-  Minus,
-  X,
-  ArrowRight,
-  Loader2,
-} from "lucide-react";
+import { UserPlus, ChevronRight, Plus, Minus, X, Loader2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import getAvatarPublicUrl from "@/lib/profiles/getAvatarPublicUrl";
+import getAvatarPublicUrl from "@/lib/profiles/getAvatarProxyUrl";
 
 type FormData = {
   cohost_ids: string[];

@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/input-group";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge24 } from "@/components/shadcn-studio/badge/badge-24";
 import TopBar from "@/components/nav/TopBar";
 import {
   DropdownMenu,
@@ -41,7 +41,7 @@ import {
   EmptyHeader,
   EmptyContent,
 } from "@/components/ui/empty";
-import getAvatarPublicUrl from "@/lib/profiles/getAvatarPublicUrl";
+import getAvatarProxyUrl from "@/lib/profiles/getAvatarProxyUrl";
 
 // -----------------------------------------------------------------------------
 // LOCAL MOCK
@@ -61,6 +61,21 @@ type DBConversation = {
   unreadCount?: number;
   presence?: "online" | "away" | "recent" | null;
 };
+
+// Map DB presence row -> UI presence value
+function toUiPresence(row?: {
+  status: string | null;
+  updated_at?: string | null;
+}): "online" | "away" | "recent" | null {
+  if (!row || !row.updated_at) return null;
+  const t = Date.parse(row.updated_at);
+  if (!Number.isFinite(t)) return null;
+  const minutes = (Date.now() - t) / 60000;
+  if (minutes > 60) return null; // long offline -> no dot
+  if (minutes > 5) return "recent"; // recently active -> grey dot
+  // <= 5 minutes: respect status online/away
+  return row.status === "away" ? "away" : "online";
+}
 
 // -----------------------------------------------------------------------------
 // REUSABLE ROW LAYOUT
@@ -229,6 +244,8 @@ export default function MessagesPage() {
   const [rawRows, setRawRows] = useState<any[] | null>(null);
   const convoIdsRef = useRef<Set<string>>(new Set());
   const [showDebug, setShowDebug] = useState(false);
+  // Ref mapping user_id -> conversation ids for 1:1
+  const userToConvoRef = useRef<Record<string, string[]>>({});
 
   // 👇 NEW: show what user the client thinks is logged in
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -453,6 +470,9 @@ export default function MessagesPage() {
           }
         }
 
+        // 1:1 user_id -> conversation id(s) mapping
+        const userToConvo: Record<string, string[]> = {};
+
         // 9) build the final display list
         const displayConvos = convoIds.map((convoId) => {
           const myRow = myMemberships.find(
@@ -486,12 +506,35 @@ export default function MessagesPage() {
               !isGroup && other
                 ? classifyPresence(presenceByUser[other.user_id])
                 : null;
+            // Record mapping for 1:1 threads
+            if (!isGroup && others[0]?.user_id) {
+              const ouid = others[0].user_id as string;
+              if (!userToConvo[ouid]) userToConvo[ouid] = [];
+              if (!userToConvo[ouid].includes(convoId))
+                userToConvo[ouid].push(convoId);
+            }
           }
 
           const latest = latestByConvo[convoId] ?? null;
           const lastMessage = latest?.body ?? null;
           const lastMessageAt = latest?.created_at ?? null;
           const lastMessageSenderId = latest?.sender_id ?? null;
+
+          // Fallback presence if we have no explicit presence row:
+          // Use last message recency to infer a lightweight status.
+          let effectivePresence = presence;
+          if (!isGroup) {
+            const ms = lastMessageAt
+              ? Date.now() - new Date(lastMessageAt).getTime()
+              : Number.POSITIVE_INFINITY;
+            const mins = Number.isFinite(ms)
+              ? ms / 60000
+              : Number.POSITIVE_INFINITY;
+            if (!effectivePresence) {
+              if (mins <= 5) effectivePresence = "online";
+              else if (mins <= 60) effectivePresence = "recent";
+            }
+          }
 
           let lastReceipt: {
             delivered_at: string | null;
@@ -514,11 +557,12 @@ export default function MessagesPage() {
             lastMessageSenderId,
             lastReceipt,
             unreadCount: unreadByConvo[convoId] ?? 0,
-            presence,
+            presence: effectivePresence,
           } as DBConversation;
         });
 
         setUserConversations(displayConvos);
+        userToConvoRef.current = userToConvo;
         initRealtime(convoIds);
         setLoadError(null);
         setLoading(false);
@@ -622,6 +666,32 @@ export default function MessagesPage() {
         }
       );
 
+      // Presence changes (DB: public.user_presence)
+      channel.on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "user_presence" },
+        (payload: any) => {
+          const row = (payload.new ?? payload.old) as {
+            user_id?: string;
+            status?: string | null;
+            updated_at?: string | null;
+          };
+          const uid = row?.user_id;
+          if (!uid) return;
+          const uiPresence = toUiPresence({
+            status: (row.status ?? null) as any,
+            updated_at: (row.updated_at ?? null) as any,
+          });
+          const convos = userToConvoRef.current[uid];
+          if (!convos || convos.length === 0) return;
+          setUserConversations((prev) =>
+            prev.map((c) =>
+              convos.includes(c.id) ? { ...c, presence: uiPresence } : c
+            )
+          );
+        }
+      );
+
       channel.subscribe((status) => {
         if (process.env.NODE_ENV !== "production") {
           // console.debug("realtime status", status);
@@ -657,9 +727,14 @@ export default function MessagesPage() {
         leftContent={
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <GlassButton ariaLabel="Menu">
-                <MoreHorizontal className="h-6 w-6 text-white" />
-              </GlassButton>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="rounded-full h-10 w-10"
+                aria-label="Menu"
+              >
+                <MoreHorizontal className="h-6 w-6" />
+              </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="start"
@@ -786,8 +861,20 @@ export default function MessagesPage() {
 
             const lastLine = c.lastMessage ? c.lastMessage : "No messages yet";
             const avatarUrl = c.avatar
-              ? getAvatarPublicUrl(c.avatar) || undefined
+              ? getAvatarProxyUrl(c.avatar) ?? undefined
               : undefined;
+
+            if (process.env.NODE_ENV !== "production") {
+              // eslint-disable-next-line no-console
+              console.log("[Messages] presence", {
+                id: c.id,
+                name: c.name,
+                presence: c.presence,
+                avatarUrl,
+                lastMessageAt: c.lastMessageAt,
+                updated_at: c.updated_at,
+              });
+            }
 
             return (
               <li key={c.id}>
@@ -815,37 +902,13 @@ export default function MessagesPage() {
                     )}
                     <ListItemRow
                       left={
-                        <div className="relative h-12 w-12">
-                          <Avatar className="h-12 w-12">
-                            <AvatarImage
-                              src={avatarUrl}
-                              alt={c.name}
-                              className="object-cover"
-                            />
-                            <AvatarFallback>
-                              {c.name?.slice(0, 2).toUpperCase() || "??"}
-                            </AvatarFallback>
-                          </Avatar>
-                          {c.presence ? (
-                            <span
-                              className={
-                                "absolute -top-0.5 -left-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-background " +
-                                (c.presence === "online"
-                                  ? "bg-emerald-500"
-                                  : c.presence === "away"
-                                  ? "bg-amber-400"
-                                  : "bg-gray-400")
-                              }
-                              aria-label={
-                                c.presence === "online"
-                                  ? "Online"
-                                  : c.presence === "away"
-                                  ? "Away"
-                                  : "Online recently"
-                              }
-                            />
-                          ) : null}
-                        </div>
+                        <Badge24
+                          src={avatarUrl}
+                          alt={c.name}
+                          fallback={c.name?.slice(0, 2).toUpperCase() || "??"}
+                          presence={c.presence}
+                          ring
+                        />
                       }
                       right={
                         <div className="min-w-0 grid grid-cols-[minmax(0,1fr)_auto] gap-x-3">

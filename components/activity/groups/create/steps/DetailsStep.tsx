@@ -37,8 +37,8 @@ export async function uploadCover(
 
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { detailsSchema } from "@/app/api/groups/validators";
-import { updateGroup } from "@/app/api/groups/actions";
+import { detailsSchema } from "@/lib/groups/schemas";
+import { updateGroup } from "@/lib/groups/client";
 import { z } from "zod";
 
 import {
@@ -50,7 +50,6 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
   InputGroup,
   InputGroupTextarea,
@@ -96,7 +95,6 @@ export default function DetailsStep({
       title: "",
       category_id: "",
       description: "",
-      cover_image_url: "",
     },
   });
   const [categories, setCategories] = useState<
@@ -105,6 +103,7 @@ export default function DetailsStep({
   const [loadingCats, setLoadingCats] = useState(true);
 
   const [coverPreview, setCoverPreview] = useState<string>("");
+  const [coverPath, setCoverPath] = useState<string>("");
   const [dragActive, setDragActive] = useState(false);
   const [cropOpen, setCropOpen] = useState(false);
   const [imageSrc, setImageSrc] = useState<string | null>(null);
@@ -115,7 +114,7 @@ export default function DetailsStep({
 
   function clearCover() {
     setCoverPreview("");
-    form.setValue("cover_image_url", "", { shouldDirty: true });
+    setCoverPath("");
     try {
       // persist removal immediately so DB row stays in sync
       void updateGroup(groupId, { cover_image_url: null });
@@ -161,8 +160,8 @@ export default function DetailsStep({
               : "",
           category_id: data.category_id ?? "",
           description: data.description ?? "",
-          cover_image_url: data.cover_image_url ?? "",
         });
+        setCoverPath(data.cover_image_url ?? "");
         // Hydrate preview from stored path if present
         const existingPath = data.cover_image_url ?? "";
         if (existingPath) {
@@ -179,8 +178,10 @@ export default function DetailsStep({
           } catch (e) {
             console.warn("Could not sign existing cover path", e);
           }
+          setCoverPath(existingPath);
         } else {
           setCoverPreview("");
+          setCoverPath("");
         }
       } catch {}
     })();
@@ -189,49 +190,7 @@ export default function DetailsStep({
     };
   }, [groupId]);
 
-  // Watch for changes to cover_image_url and sign if necessary
-  useEffect(() => {
-    const sub = form.watch(async (value, { name }) => {
-      if (name !== "cover_image_url") return;
-      const v = value?.cover_image_url as string | undefined;
-      if (!v) {
-        setCoverPreview("");
-        return;
-      }
-      // If it already looks like a URL, use it; otherwise sign the storage path
-      if (/^https?:\/\//i.test(v)) {
-        setCoverPreview(v);
-      } else {
-        try {
-          const supabase = createClient();
-          const { data, error } = await supabase.storage
-            .from("group-media")
-            .createSignedUrl(v, 60 * 60 * 24 * 30);
-          if (!error && data?.signedUrl) setCoverPreview(data.signedUrl);
-        } catch {}
-      }
-    });
-    return () => sub.unsubscribe?.();
-  }, [form]);
-
-  // Initialize preview on first mount if form already has a value and watcher did not run
-  useEffect(() => {
-    const v = form.getValues("cover_image_url");
-    if (!v) return;
-    (async () => {
-      if (/^https?:\/\//i.test(v)) {
-        setCoverPreview(v);
-      } else {
-        try {
-          const supa = createClient();
-          const { data } = await supa.storage
-            .from("group-media")
-            .createSignedUrl(v, 60 * 60 * 24 * 30);
-          if (data?.signedUrl) setCoverPreview(data.signedUrl);
-        } catch {}
-      }
-    })();
-  }, []);
+  // (Effects to watch cover_image_url and initialize preview removed)
 
   const readFile = (file: File) =>
     new Promise<string>((resolve, reject) => {
@@ -313,8 +272,7 @@ export default function DetailsStep({
     const signedForPreview = result?.signedUrl ?? "";
 
     if (signedForPreview) setCoverPreview(signedForPreview);
-    // Save to form and persist immediately so the row has the cover
-    form.setValue("cover_image_url", storagePath, { shouldDirty: true });
+    setCoverPath(storagePath);
     try {
       await updateGroup(groupId, { cover_image_url: storagePath });
     } catch (e) {
@@ -330,9 +288,6 @@ export default function DetailsStep({
       title: data.title?.trim() || "",
       category_id: data.category_id ? data.category_id : null,
       description: data.description?.trim() ? data.description : null,
-      cover_image_url: data.cover_image_url?.trim()
-        ? data.cover_image_url
-        : null,
     } as const;
 
     await updateGroup(groupId, patch);
@@ -369,8 +324,8 @@ export default function DetailsStep({
                   <Field>
                     <FieldLabel>Type of group</FieldLabel>
                     <Select
-                      value={field.value}
-                      onValueChange={field.onChange}
+                      value={field.value ?? undefined}
+                      onValueChange={(v) => field.onChange(v)}
                       disabled={loadingCats}
                     >
                       <SelectTrigger
@@ -407,7 +362,8 @@ export default function DetailsStep({
               control={form.control}
               name="description"
               render={({ field }) => {
-                const remaining = 1500 - (field.value?.length || 0);
+                const val = field.value ?? "";
+                const remaining = 1500 - val.length;
                 return (
                   <FormItem>
                     <FormLabel>Description</FormLabel>
@@ -415,6 +371,7 @@ export default function DetailsStep({
                       <InputGroup>
                         <TextareaAutosize
                           {...field}
+                          value={val}
                           data-slot="input-group-control"
                           className="flex field-sizing-content min-h-16 w-full resize-none rounded-md bg-transparent px-3 pt-3 pb-2.5 text-base transition-[color,box-shadow] outline-none md:text-sm"
                           placeholder="Describe what this group is about"
@@ -435,80 +392,73 @@ export default function DetailsStep({
           </div>
 
           <div className="rounded-lg bg-card p-4 shadow-sm">
-            <FormField
-              control={form.control}
-              name="cover_image_url"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Cover image</FormLabel>
-                  <FormControl>
-                    <div className="space-y-3">
-                      {coverPreview ? (
-                        <div className="relative aspect-video w-full overflow-hidden rounded-md border">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={coverPreview}
-                            alt="Cover preview"
-                            className="h-full w-full object-cover"
-                          />
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              clearCover();
-                            }}
-                            className="absolute top-1 right-1 md:top-2 md:right-2 z-50 inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white backdrop-blur-sm shadow-md ring-1 ring-black/20"
-                            aria-label="Remove cover image"
-                            title="Remove cover image"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      ) : (
-                        <div
-                          className={[
-                            "aspect-video w-full rounded-md border border-dashed grid place-items-center text-sm text-muted-foreground",
-                            dragActive ? "bg-muted/50" : "bg-transparent",
-                          ].join(" ")}
-                          onDragOver={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setDragActive(true);
-                          }}
-                          onDragLeave={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setDragActive(false);
-                          }}
-                          onDrop={onDrop}
-                          role="button"
-                          aria-label="Upload cover image"
-                        >
-                          <div className="flex flex-col items-center gap-2 p-4 text-center">
-                            <p>Drag and drop an image here, or choose a file</p>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={() => fileInputRef.current?.click()}
-                            >
-                              Choose file
-                            </Button>
-                            <input
-                              ref={fileInputRef}
-                              type="file"
-                              accept="image/*"
-                              hidden
-                              onChange={onInputChange}
-                            />
-                          </div>
-                        </div>
-                      )}
+            <FormItem>
+              <FormLabel>Cover image</FormLabel>
+              <FormControl>
+                <div className="space-y-3">
+                  {coverPreview ? (
+                    <div className="relative aspect-video w-full overflow-hidden rounded-md border">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={coverPreview}
+                        alt="Cover preview"
+                        className="h-full w-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          clearCover();
+                        }}
+                        className="absolute top-1 right-1 md:top-2 md:right-2 z-50 inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white backdrop-blur-sm shadow-md ring-1 ring-black/20"
+                        aria-label="Remove cover image"
+                        title="Remove cover image"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </div>
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+                  ) : (
+                    <div
+                      className={[
+                        "aspect-video w-full rounded-md border border-dashed grid place-items-center text-sm text-muted-foreground",
+                        dragActive ? "bg-muted/50" : "bg-transparent",
+                      ].join(" ")}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setDragActive(true);
+                      }}
+                      onDragLeave={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setDragActive(false);
+                      }}
+                      onDrop={onDrop}
+                      role="button"
+                      aria-label="Upload cover image"
+                    >
+                      <div className="flex flex-col items-center gap-2 p-4 text-center">
+                        <p>Drag and drop an image here, or choose a file</p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => fileInputRef.current?.click()}
+                        >
+                          Choose file
+                        </Button>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/*"
+                          hidden
+                          onChange={onInputChange}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </FormControl>
+            </FormItem>
           </div>
 
           <Dialog open={cropOpen} onOpenChange={setCropOpen}>

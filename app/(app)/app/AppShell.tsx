@@ -47,16 +47,25 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       try {
         lastWriteAtRef.current = Date.now();
         lastSentStatusRef.current = status;
-        await supabase.from("user_presence").upsert(
-          {
-            user_id: userId,
-            status,
-            last_seen: new Date().toISOString(),
-          },
-          { onConflict: "user_id" }
-        );
+        // Write via server API (service key), avoid REST CORS from browser
+        const res = await fetch("/api/presence", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: userId, status }),
+          // keepalive helps during rapid navigations (not for beforeunload)
+          keepalive: true,
+        });
+        if (!res.ok) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[presence] api/presence failed",
+            res.status,
+            await res.text()
+          );
+        }
       } catch (e) {
-        console.warn("presence upsert failed:", e);
+        // eslint-disable-next-line no-console
+        console.warn("[presence] upsertPresence exception", e);
       }
     },
     [supabase]
@@ -78,16 +87,27 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const userId = userIdRef.current;
     if (!userId) return;
     try {
-      await supabase.from("user_presence").upsert(
-        {
-          user_id: userId,
-          status: "offline",
-          last_seen: new Date().toISOString(),
-        },
-        { onConflict: "user_id" }
-      );
-    } catch {
-      // swallow
+      const payload = JSON.stringify({ user_id: userId, status: "offline" });
+      let sent = false;
+      if (
+        typeof navigator !== "undefined" &&
+        typeof navigator.sendBeacon === "function"
+      ) {
+        const blob = new Blob([payload], { type: "application/json" });
+        sent = navigator.sendBeacon("/api/presence", blob);
+      }
+      if (!sent) {
+        // Fallback if sendBeacon is unavailable
+        void fetch("/api/presence", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: payload,
+          keepalive: true,
+        });
+      }
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn("[presence] setOffline exception", e);
     }
   }, [supabase]);
 
@@ -99,10 +119,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       // load current user
       const { data } = await supabase.auth.getUser();
       userIdRef.current = data.user?.id ?? null;
+      // eslint-disable-next-line no-console
+      console.log("[presence] current user", { userId: userIdRef.current });
 
       // subscribe to auth changes too
       const auth = supabase.auth.onAuthStateChange((_evt, session) => {
         userIdRef.current = session?.user?.id ?? null;
+        // eslint-disable-next-line no-console
+        console.log("[presence] auth change", { userId: userIdRef.current });
         if (userIdRef.current) setOnline();
       });
       unsubAuth = () => auth.data.subscription.unsubscribe();

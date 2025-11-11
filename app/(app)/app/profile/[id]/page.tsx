@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import getAvatarPublicUrl from "@/lib/profiles/getAvatarPublicUrl";
+import getAvatarPublicUrl from "@/lib/profiles/getAvatarProxyUrl";
 import { ImageIcon } from "lucide-react";
 import {
   Ruler,
@@ -20,7 +20,7 @@ import {
   Smile,
   Gauge,
   Scissors,
-  X,
+  ChevronRight,
   Sparkles,
   ScrollText,
   Zap,
@@ -32,10 +32,6 @@ import {
   Flame,
   Hand,
   Droplet,
-  UserStar,
-  Share2,
-  MessageCircle,
-  ChevronRight,
 } from "lucide-react";
 
 import TopBar from "@/components/nav/TopBar";
@@ -115,17 +111,104 @@ const pickLabel = (row: any) =>
   row?.label ?? row?.name ?? row?.title ?? row?.value ?? null;
 
 export default function ProfilePage() {
+  // ---- Reactions (long-press) ----
+  type ReactionType = "fire" | "heart" | "slap" | "lick";
+
+  const REACTIONS: { key: ReactionType; label: string; Icon: any }[] = [
+    { key: "fire", label: "Fire", Icon: Flame },
+    { key: "heart", label: "Heart", Icon: Heart },
+    { key: "slap", label: "Slap", Icon: Hand },
+    { key: "lick", label: "Lick", Icon: Droplet },
+  ];
+
+  const [reactionMenu, setReactionMenu] = useState<{
+    open: boolean;
+    x: number;
+    y: number;
+    target: null | { toUserId: string; context?: string };
+  }>({ open: false, x: 0, y: 0, target: null });
+
+  const longPressTimerRef = useRef<number | null>(null);
+  const reactionBtnRef = useRef<HTMLButtonElement | null>(null);
+
+  const clearLongPressTimer = () => {
+    if (longPressTimerRef.current != null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const beginLongPress = useCallback(
+    (e: React.PointerEvent, target: { toUserId: string; context?: string }) => {
+      clearLongPressTimer();
+      const startX = e.clientX;
+      const startY = e.clientY;
+      longPressTimerRef.current = window.setTimeout(() => {
+        setReactionMenu({
+          open: true,
+          x: startX,
+          y: startY,
+          target,
+        });
+      }, 450);
+    },
+    []
+  );
+
   const params = useParams();
   const routeId = Array.isArray((params as any).id)
     ? (params as any).id[0]
     : (params as any).id ?? null;
 
+  const beginLongPressFromIcon = useCallback(
+    (e: React.PointerEvent) => {
+      clearLongPressTimer();
+      const el = e.currentTarget as HTMLElement;
+      const rect = el.getBoundingClientRect();
+      // Anchor the menu to the LEFT of the icon, vertically centered on the icon.
+      longPressTimerRef.current = window.setTimeout(() => {
+        setReactionMenu({
+          open: true,
+          x: rect.left - 8, // a small gap from the icon
+          y: rect.top + rect.height / 2,
+          target: { toUserId: String(routeId), context: "profile:react" },
+        });
+      }, 450);
+    },
+    [routeId]
+  );
+
+  const cancelLongPress = useCallback(() => {
+    clearLongPressTimer();
+  }, []);
+
+  const sendReaction = useCallback(
+    async (type: ReactionType) => {
+      const t = reactionMenu.target;
+      if (!t?.toUserId) return;
+      try {
+        await fetch("/api/reactions/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            to_user_id: t.toUserId,
+            type,
+            context: t.context ?? null,
+          }),
+        });
+      } catch {
+        // ignore
+      } finally {
+        setReactionMenu({ open: false, x: 0, y: 0, target: null });
+      }
+    },
+    [reactionMenu.target]
+  );
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [mainPhotoUrl, setMainPhotoUrl] = useState<string | null>(null);
-  const [stackPhotoUrls, setStackPhotoUrls] = useState<string[]>([]);
-  const [stackLoaded, setStackLoaded] = useState(false);
   const [mainLoading, setMainLoading] = useState<boolean>(true);
   const [heroLoaded, setHeroLoaded] = useState(false);
   // --- Realtime presence: show online/away/offline indicator driven by user_presence table ---
@@ -256,27 +339,35 @@ export default function ProfilePage() {
   // Publish our own presence location (debounced)
   const publishPresence = (lat: number, lng: number) => {
     if (!myUserId) return;
-    const supabase = createClient();
-
     // Debounce rapid GPS ticks
     if (presenceTimerRef.current != null) {
       window.clearTimeout(presenceTimerRef.current);
     }
     presenceTimerRef.current = window.setTimeout(async () => {
       try {
-        // Upsert by user_id; requires RLS policy: user_id = auth.uid()
-        await supabase.from("user_presence").upsert(
-          {
+        // Write via server API (service key), avoid REST CORS from browser
+        const res = await fetch("/api/presence", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
             user_id: myUserId,
             status: "online",
             lat,
             lng,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "user_id" }
-        );
-      } catch {
-        // ignore
+          }),
+          keepalive: true,
+        });
+        if (!res.ok) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[profile] /api/presence failed",
+            res.status,
+            await res.text()
+          );
+        }
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn("[profile] presence write error", e);
       } finally {
         presenceTimerRef.current = null;
       }
@@ -393,6 +484,10 @@ export default function ProfilePage() {
       if (requestTimerRef.current != null) {
         clearTimeout(requestTimerRef.current);
         requestTimerRef.current = null;
+      }
+      if (longPressTimerRef.current != null) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -600,52 +695,6 @@ export default function ProfilePage() {
       cancelled = true;
     };
   }, [routeId]);
-
-  // --------- Load up to 4 profile photos for the top-right stack ---------
-  useEffect(() => {
-    let cancelled = false;
-    const loadStackPhotos = async () => {
-      if (!routeId) return;
-      try {
-        const supabase = createClient();
-        const { data: rows, error: qErr } = await supabase
-          .from("profile_photos_public")
-          .select("object_key, is_main, position")
-          .eq("user_id", routeId as string)
-          .order("is_main", { ascending: false })
-          .order("position", { ascending: true })
-          .limit(4);
-        if (qErr) throw qErr;
-        const keys = (rows ?? [])
-          .map((r) => r.object_key)
-          .filter(Boolean) as string[];
-        if (!keys.length) {
-          if (!cancelled) setStackPhotoUrls([]);
-          return;
-        }
-        const signed = await Promise.all(
-          keys.map(async (k) => {
-            const { data } = await supabase.storage
-              .from("profile_public")
-              .createSignedUrl(k, 60 * 60);
-            return data?.signedUrl || null;
-          })
-        );
-        const urls = signed.filter(Boolean) as string[];
-        if (!cancelled) setStackPhotoUrls(urls);
-      } catch {
-        if (!cancelled) setStackPhotoUrls([]);
-      }
-    };
-    loadStackPhotos();
-    return () => {
-      cancelled = true;
-    };
-  }, [routeId]);
-  useEffect(() => {
-    // reset fade-in when the stack photo set changes
-    setStackLoaded(false);
-  }, [stackPhotoUrls]);
 
   // --------- Load safer sex info for this user ---------
   useEffect(() => {
@@ -924,178 +973,6 @@ export default function ProfilePage() {
     null | "type" | "action" | "kinks" | "scenarios"
   >(null);
   const [profileDrawerOpen, setProfileDrawerOpen] = useState(false);
-  // Drawer for favoriting / connection actions
-  const [favoriteDrawerOpen, setFavoriteDrawerOpen] = useState(false);
-  // Interactive flame toggle
-  const [flameActive, setFlameActive] = useState(false);
-  const router = useRouter();
-  const [chatLoading, setChatLoading] = useState(false);
-
-  // Lightbox state
-  const [lightboxOpen, setLightboxOpen] = useState(false);
-  const [lightboxIndex, setLightboxIndex] = useState(0);
-  // Sliding/drag state for lightbox
-  const [dragX, setDragX] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
-  const [animating, setAnimating] = useState(false);
-
-  const lightboxPhotos = useMemo(() => {
-    if (stackPhotoUrls && stackPhotoUrls.length > 0) return stackPhotoUrls;
-    return mainPhotoUrl ? [mainPhotoUrl] : [];
-  }, [mainPhotoUrl, stackPhotoUrls]);
-
-  // Swipe state for lightbox navigation
-  const swipeStartXRef = useRef<number | null>(null);
-  const swipeStartYRef = useRef<number | null>(null);
-  // Handlers for sliding lightbox
-  const onTouchStart = (e: React.TouchEvent) => {
-    const target = e.target as HTMLElement | null;
-    if (target && target.closest && target.closest("[data-nodrag]")) return;
-    const t = e.touches[0];
-    swipeStartXRef.current = t.clientX;
-    swipeStartYRef.current = t.clientY;
-    setIsDragging(true);
-    setAnimating(false);
-    setDragX(0);
-  };
-  const onTouchMove = (e: React.TouchEvent) => {
-    const target = e.target as HTMLElement | null;
-    if (target && target.closest && target.closest("[data-nodrag]")) return;
-    if (!isDragging) return;
-    const t = e.touches[0];
-    const sx = swipeStartXRef.current ?? t.clientX;
-    const sy = swipeStartYRef.current ?? t.clientY;
-    const dx = t.clientX - sx;
-    const dy = t.clientY - sy;
-    // Only act on mostly horizontal gestures
-    if (Math.abs(dx) > Math.abs(dy)) {
-      e.preventDefault();
-      setDragX(dx);
-    }
-  };
-  const onTouchEnd = (e: React.TouchEvent) => {
-    const target = e.target as HTMLElement | null;
-    if (target && target.closest && target.closest("[data-nodrag]")) return;
-    const sx = swipeStartXRef.current;
-    const sy = swipeStartYRef.current;
-    swipeStartXRef.current = null;
-    swipeStartYRef.current = null;
-    setIsDragging(false);
-    const t = e.changedTouches[0];
-    if (sx == null || sy == null) {
-      setAnimating(true);
-      setDragX(0);
-      setTimeout(() => setAnimating(false), 220);
-      return;
-    }
-    const dx = t.clientX - sx;
-    const dy = t.clientY - sy;
-    const width = typeof window !== "undefined" ? window.innerWidth : 375;
-    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
-      // Commit to the swipe direction with a slide-out animation
-      setAnimating(true);
-      setDragX(dx < 0 ? -width : width);
-      setTimeout(() => {
-        setLightboxIndex((i) => {
-          const n = lightboxPhotos.length;
-          if (!n) return 0;
-          return dx < 0 ? (i + 1) % n : (i - 1 + n) % n;
-        });
-        setAnimating(false);
-        setDragX(0);
-      }, 200);
-    } else {
-      // Snap back
-      setAnimating(true);
-      setDragX(0);
-      setTimeout(() => setAnimating(false), 200);
-    }
-  };
-
-  useEffect(() => {
-    if (!lightboxOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setLightboxOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [lightboxOpen]);
-
-  useEffect(() => {
-    if (lightboxOpen) {
-      const prev = document.body.style.overflow;
-      document.body.style.overflow = "hidden";
-      return () => {
-        document.body.style.overflow = prev;
-      };
-    }
-  }, [lightboxOpen]);
-
-  const handleChat = useCallback(async () => {
-    if (chatLoading || !routeId) return;
-    setChatLoading(true);
-    try {
-      const supabase = createClient();
-
-      // 1) who am I?
-      const { data: auth } = await supabase.auth.getUser();
-      const me = auth?.user?.id ?? null;
-
-      // 2) Try to find an existing direct conversation with this user
-      if (me) {
-        const { data: mine, error: mineErr } = await supabase
-          .from("conversation_members")
-          .select("conversation_id")
-          .eq("user_id", me);
-
-        if (!mineErr && mine && mine.length) {
-          const convoIds = Array.from(
-            new Set(mine.map((m: any) => m.conversation_id))
-          );
-
-          // other user's memberships among my conversations
-          const { data: shared, error: sharedErr } = await supabase
-            .from("conversation_members")
-            .select("conversation_id")
-            .eq("user_id", routeId as string)
-            .in("conversation_id", convoIds);
-
-          if (!sharedErr && shared && shared.length) {
-            const sharedIds = shared.map((s: any) => s.conversation_id);
-            const { data: convos } = await supabase
-              .from("conversations")
-              .select("id, type, updated_at")
-              .in("id", sharedIds)
-              .eq("type", "direct")
-              .order("updated_at", { ascending: false })
-              .limit(1);
-
-            const existingId = convos?.[0]?.id as string | undefined;
-            if (existingId) {
-              router.push(`/app/messages/${existingId}`);
-              return;
-            }
-          }
-        }
-      }
-
-      // 3) Fallback: create/ensure a conversation and go there
-      const res = await fetch("/api/messages/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target_user_id: routeId }),
-      });
-      const json = await res.json();
-      const convoId = json?.conversation_id || routeId;
-      if (convoId) {
-        router.push(`/app/messages/${convoId}`);
-      }
-    } catch (err) {
-      console.error("start chat error", err);
-    } finally {
-      setChatLoading(false);
-    }
-  }, [chatLoading, routeId, router]);
 
   const currentCount = openDrawer ? (intoCounts as any)[openDrawer] ?? 0 : 0;
   const currentTitle = openDrawer ? intoTitles[openDrawer] : "";
@@ -1147,192 +1024,25 @@ export default function ProfilePage() {
               />
             ) : null}
 
-            {lightboxPhotos.length > 0 && mainPhotoUrl ? (
-              <button
-                type="button"
-                aria-label="Open photo lightbox"
-                className="absolute inset-0 z-10 cursor-zoom-in"
-                onClick={() => {
-                  setLightboxIndex(0);
-                  setLightboxOpen(true);
-                }}
-              />
-            ) : null}
-
             {/* Top bar overlay */}
             <TopBar
-              className="absolute top-0 left-0 right-0 z-30 px-4 bg-transparent backdrop-blur-0 border-0 shadow-none"
-              leftContent={
-                <div className="group flex items-center justify-center h-8 w-8 rounded-full backdrop-blur-xl ring-1 ring-white/25 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.35),0_6px_20px_rgba(0,0,0,0.25)] bg-[linear-gradient(to_bottom,rgba(255,255,255,0.25),rgba(255,255,255,0.06))] hover:bg-[linear-gradient(to_bottom,rgba(255,255,255,0.35),rgba(255,255,255,0.1))] transition">
-                  <BackButton />
-                </div>
-              }
+              className="absolute top-0 left-0 right-0 z-30 bg-transparent px-4"
+              leftContent={<BackButton />}
               rightContent={
                 <Button
                   aria-label="More options"
                   variant="ghost"
                   size="icon"
-                  className="rounded-full p-2 backdrop-blur-xl ring-1 ring-white/25 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.35),0_6px_20px_rgba(0,0,0,0.25)] bg-[linear-gradient(to_bottom,rgba(255,255,255,0.25),rgba(255,255,255,0.06))] hover:bg-[linear-gradient(to_bottom,rgba(255,255,255,0.35),rgba(255,255,255,0.1))] transition"
+                  className="rounded-full"
                 >
-                  <MoreVertical className="h-5 w-5 text-white/90" />
+                  <MoreVertical className="h-5 w-5 text-muted-foreground" />
                 </Button>
               }
             />
 
-            {/* Top-right stacked portrait images (3:4, white border, angled, with fade-in) */}
-            {stackPhotoUrls.length > 0 ? (
-              <div className="absolute right-2 top-16 z-30 cursor-zoom-in">
-                <button
-                  type="button"
-                  aria-label="Open secondary photos"
-                  className="relative w-20 h-28"
-                  onClick={() => {
-                    setLightboxIndex(1);
-                    setLightboxOpen(true);
-                  }}
-                >
-                  {/* Background plate while images load */}
-                  <div
-                    className={`absolute inset-0 rounded-md bg-background ${
-                      stackLoaded ? "opacity-0" : "opacity-100"
-                    } transition-opacity duration-300`}
-                  />
-
-                  {/* Fading image stack */}
-                  <div
-                    className={`relative ${
-                      stackLoaded ? "opacity-100" : "opacity-0"
-                    } transition-opacity duration-300`}
-                  >
-                    {(() => {
-                      const stack = stackPhotoUrls.slice(
-                        0,
-                        Math.min(3, stackPhotoUrls.length)
-                      );
-                      const wrappers = [
-                        "w-16 aspect-3/4 rounded-md overflow-hidden ring-2 ring-white shadow-2xl rotate-8 absolute top-8 right-4",
-                        "w-16 aspect-3/4 rounded-md overflow-hidden ring-2 ring-white shadow-2xl absolute top-6 right-6 z-10",
-                        "w-16 aspect-3/4 rounded-md overflow-hidden ring-2 ring-white shadow-2xl absolute top-6 right-8 -rotate-8",
-                      ];
-                      return stack.map((url, i) => (
-                        <div key={i} className={wrappers[i]}>
-                          <Image
-                            src={url || (avatarUrl as string)}
-                            alt={`Profile image ${i + 1}`}
-                            fill
-                            sizes="60px"
-                            className="object-cover"
-                            unoptimized
-                            onLoadingComplete={() => setStackLoaded(true)}
-                          />
-                        </div>
-                      ));
-                    })()}
-                  </div>
-                </button>
-              </div>
-            ) : null}
-
-            {lightboxOpen && lightboxPhotos.length > 0 ? (
-              <div
-                className="fixed inset-0 z-50 bg-black/90 touch-none pointer-events-auto"
-                onTouchStart={onTouchStart}
-                onTouchMove={onTouchMove}
-                onTouchEnd={onTouchEnd}
-              >
-                <button
-                  type="button"
-                  aria-label="Close"
-                  data-nodrag
-                  className="absolute top-4 right-4 z-60 rounded-full p-2 bg-white/10 hover:bg-white/20 ring-1 ring-white/25 pointer-events-auto"
-                  onClick={() => setLightboxOpen(false)}
-                  onTouchStart={(e) => e.stopPropagation()}
-                  onPointerDown={(e) => e.stopPropagation()}
-                >
-                  <X className="h-6 w-6 text-white" />
-                </button>
-                <div className="absolute inset-0 overflow-hidden">
-                  {(() => {
-                    const n = lightboxPhotos.length;
-                    const curr = lightboxIndex;
-                    const goingLeft = dragX < 0; // user swiping left -> next image appears from right
-                    const neighbor = goingLeft
-                      ? (curr + 1) % n
-                      : (curr - 1 + n) % n;
-                    const transition = animating
-                      ? "transform 200ms ease-out"
-                      : undefined;
-
-                    const currentStyle: React.CSSProperties = {
-                      transform: `translateX(${dragX}px)`,
-                      transition,
-                    };
-                    const neighborStyle: React.CSSProperties = {
-                      transform: `translateX(${
-                        (goingLeft ? 1 : -1) *
-                          (typeof window !== "undefined"
-                            ? window.innerWidth
-                            : 375) +
-                        dragX
-                      }px)`,
-                      transition,
-                    };
-
-                    return (
-                      <>
-                        {/* Current image */}
-                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                          <Image
-                            key={`lightbox-${curr}`}
-                            src={lightboxPhotos[curr]}
-                            alt={`Photo ${curr + 1}`}
-                            width={0}
-                            height={0}
-                            sizes="100vw"
-                            style={{
-                              width: "100vw",
-                              height: "auto",
-                              maxHeight: "100vh",
-                              objectFit: "contain",
-                              ...currentStyle,
-                            }}
-                            className="select-none"
-                            draggable={false}
-                            unoptimized
-                          />
-                        </div>
-                        {/* Neighbor image in the drag direction */}
-                        {n > 1 ? (
-                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                            <Image
-                              key={`lightbox-neighbor-${neighbor}`}
-                              src={lightboxPhotos[neighbor]}
-                              alt={`Photo ${neighbor + 1}`}
-                              width={0}
-                              height={0}
-                              sizes="100vw"
-                              style={{
-                                width: "100vw",
-                                height: "auto",
-                                maxHeight: "100vh",
-                                objectFit: "contain",
-                                ...neighborStyle,
-                              }}
-                              className="select-none"
-                              draggable={false}
-                              unoptimized
-                            />
-                          </div>
-                        ) : null}
-                      </>
-                    );
-                  })()}
-                </div>
-              </div>
-            ) : null}
             {/* Hero text overlay */}
             <div className="absolute left-4 bottom-4 z-40 text-white space-y-1">
-              <div className="text-xl font-semibold drop-shadow-md">
+              <div className="text-2xl font-semibold drop-shadow-md">
                 {heroTitle}
               </div>
               {heroSubline ? (
@@ -1342,8 +1052,8 @@ export default function ProfilePage() {
               ) : null}
             </div>
 
-            {/* Avatar overlay + static Flame reaction button */}
-            <div className="absolute right-4 bottom-4 z-40 flex flex-col items-center gap-6">
+            {/* Avatar overlay + Reaction trigger (moved up) */}
+            <div className="absolute right-4 bottom-24 z-40 flex flex-col items-end gap-2">
               <button
                 type="button"
                 onClick={() => setProfileDrawerOpen(true)}
@@ -1351,7 +1061,7 @@ export default function ProfilePage() {
                 aria-label="Open profile info"
               >
                 <div className="relative">
-                  <Avatar className="h-10 w-10 ring-2 ring-white shadow-xl">
+                  <Avatar className="h-16 w-16 ring-2 ring-white shadow-md">
                     <AvatarImage
                       src={avatarUrl}
                       alt={
@@ -1373,7 +1083,7 @@ export default function ProfilePage() {
                     </AvatarFallback>
                   </Avatar>
                   <span
-                    className={`absolute top-1 left-0 h-2.5 w-2.5 rounded-full ${
+                    className={`absolute top-1 left-1 h-3.5 w-3.5 rounded-full ${
                       isOnline === "online"
                         ? "bg-emerald-500"
                         : isOnline === "away"
@@ -1390,46 +1100,21 @@ export default function ProfilePage() {
                   />
                 </div>
               </button>
+
+              {/* Reaction trigger button (press & hold to open menu) */}
               <button
+                ref={reactionBtnRef}
                 type="button"
-                aria-label="React with flame"
-                className="relative p-0 hover:scale-110 transition-transform mx-auto"
-                onClick={() => setFlameActive((prev) => !prev)}
+                aria-label="React"
+                className="relative rounded-full bg-background/80 backdrop-blur p-2 shadow ring-1 ring-border hover:bg-background"
+                onPointerDown={beginLongPressFromIcon}
+                onPointerUp={cancelLongPress}
+                onPointerCancel={cancelLongPress}
+                onPointerLeave={cancelLongPress}
+                onContextMenu={(e) => e.preventDefault()}
               >
-                <Flame
-                  className={`h-6 w-6 ${
-                    flameActive
-                      ? "fill-orange-500 text-orange-500"
-                      : "text-primary"
-                  }`}
-                  aria-hidden="true"
-                />
-              </button>
-              <button
-                type="button"
-                aria-label="Favorite user"
-                className="relative p-0 hover:scale-110 transition-transform mx-auto"
-                onClick={() => setFavoriteDrawerOpen(true)}
-              >
-                <UserStar className="h-6 w-6 text-primary" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                aria-label="Share profile"
-                className="relative p-0 hover:scale-110 transition-transform mx-auto"
-              >
-                <Share2 className="h-6 w-6 text-primary" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                aria-label="Chat"
-                className="relative p-0 hover:scale-110 transition-transform mx-auto"
-                onClick={handleChat}
-                aria-busy={chatLoading}
-                disabled={chatLoading}
-              >
-                <MessageCircle
-                  className="h-6 w-6 text-primary"
+                <Smile
+                  className="h-5 w-5 text-foreground/70"
                   aria-hidden="true"
                 />
               </button>
@@ -2009,41 +1694,6 @@ export default function ProfilePage() {
                     </div>
                   </DrawerContent>
                 </Drawer>
-                <Drawer
-                  open={favoriteDrawerOpen}
-                  onOpenChange={setFavoriteDrawerOpen}
-                >
-                  <DrawerContent className="max-h-[85dvh]">
-                    <DrawerHeader>
-                      <DrawerTitle>Favorite</DrawerTitle>
-                      <DrawerDescription>
-                        Add this user to your favorites
-                      </DrawerDescription>
-                    </DrawerHeader>
-                    <div className="px-5 pb-6">
-                      <div className="flex items-center gap-3">
-                        <Button
-                          type="button"
-                          className="rounded-full"
-                          onClick={() => {
-                            // TODO: call API to favorite this user
-                            setFavoriteDrawerOpen(false);
-                          }}
-                        >
-                          Add to favorites
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          className="rounded-full"
-                          onClick={() => setFavoriteDrawerOpen(false)}
-                        >
-                          Close
-                        </Button>
-                      </div>
-                    </div>
-                  </DrawerContent>
-                </Drawer>
                 <div className="mb-14" />
                 <Drawer
                   open={!!openDrawer}
@@ -2092,7 +1742,35 @@ export default function ProfilePage() {
             </>
           )}
         </div>
-        {/* Static flame reaction button replaces floating reaction menu */}
+        {/* Floating Reactions Menu (anchored to reaction icon, slides out to the left) */}
+        {reactionMenu.open ? (
+          <>
+            <button
+              aria-label="Close reactions"
+              className="fixed inset-0 z-99"
+              onClick={() =>
+                setReactionMenu({ open: false, x: 0, y: 0, target: null })
+              }
+            />
+            <div
+              className="fixed z-100 -translate-x-full -translate-y-1/2 rounded-2xl bg-popover border shadow-lg px-2 py-1 flex gap-1 animate-in fade-in-0 zoom-in-95 slide-in-from-right-2"
+              style={{ left: reactionMenu.x, top: reactionMenu.y }}
+              role="menu"
+            >
+              {REACTIONS.map(({ key, label, Icon }) => (
+                <button
+                  key={key}
+                  onClick={() => sendReaction(key)}
+                  className="p-2 rounded-xl bg-card hover:bg-accent focus:outline-none focus:ring-2 focus:ring-primary/30 border"
+                  title={label}
+                  aria-label={label}
+                >
+                  <Icon className="h-6 w-6 text-primary" />
+                </button>
+              ))}
+            </div>
+          </>
+        ) : null}
       </main>
     </div>
   );

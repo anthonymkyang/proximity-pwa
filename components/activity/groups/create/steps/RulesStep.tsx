@@ -3,7 +3,7 @@
 import { useState } from "react";
 import React from "react";
 import { createClient } from "@/utils/supabase/client";
-import { updateGroup } from "@/app/api/groups/actions";
+import { updateGroup } from "@/lib/groups/client";
 import { X, Plus, Loader2 } from "lucide-react";
 import {
   InputGroup,
