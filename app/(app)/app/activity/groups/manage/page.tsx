@@ -17,6 +17,7 @@ import {
   Plus,
 } from "lucide-react";
 import TopBar from "@/components/nav/TopBar";
+import BackButton from "@/components/ui/back-button";
 import GlassButton from "@/components/ui/header-button";
 import {
   DropdownMenu,
@@ -246,26 +247,24 @@ export default async function ManageGroupsPage() {
 
   return (
     <div className="mx-auto w-full max-w-xl px-4 pb-[calc(72px+env(safe-area-inset-bottom))]">
-      <TopBar>
-        <div className="flex items-center justify-between w-full">
-          <GlassButton ariaLabel="More options">
-            <Ellipsis className="h-5 w-5 text-white" />
-          </GlassButton>
-          <Link href="/app/activity/groups/create">
-            <Button className="h-8 w-8 rounded-full p-0" size="sm">
-              <Plus className="h-5 w-5" />
-            </Button>
-          </Link>
-        </div>
-      </TopBar>
+      <TopBar
+        leftContent={<BackButton />}
+        rightContent={
+          <Button
+            variant="default"
+            size="icon"
+            className="rounded-full h-9 w-9 p-0"
+          >
+            <Plus className="h-5 w-5" />
+          </Button>
+        }
+      />
 
       <div className="mt-4">
         <h1 className="px-1 pb-1 text-4xl font-extrabold tracking-tight">
           Manage groups
         </h1>
-        <h2 className="px-1 pb-2 text-lg font-medium text-muted-foreground">
-          Your groups
-        </h2>
+        <h2 className="mt-4 px-1 pb-2 text-lg font-medium">Your groups</h2>
       </div>
 
       {!error && groups.length === 0 ? (
@@ -364,6 +363,7 @@ export default async function ManageGroupsPage() {
                     className="rounded-full h-8 w-8 p-0"
                     variant="outline"
                     aria-label="Open menu"
+                    suppressHydrationWarning
                   >
                     <EllipsisVertical className="h-4 w-4" />
                   </Button>

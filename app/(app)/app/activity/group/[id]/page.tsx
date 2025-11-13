@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -208,15 +209,8 @@ function normalizeStringArray(input: unknown): string[] | null {
 }
 
 export default function GroupPage() {
-  const params = useParams();
-  const rawId = (params as any)?.id;
-  const groupId: string | null = Array.isArray(rawId)
-    ? typeof rawId[0] === "string"
-      ? rawId[0]
-      : null
-    : typeof rawId === "string"
-    ? rawId
-    : null;
+  const params = useParams() as { id?: string };
+  const groupId: string | null = params.id ?? null;
 
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -436,15 +430,34 @@ export default function GroupPage() {
     if (!groupId || requesting || requested) return;
     try {
       setRequesting(true);
-      // Example: insert pending request for current user
-      await supabase.from("group_attendees").upsert({
-        group_id: groupId as string,
-        status: "pending",
-        message: requestMsg,
-      } as any);
+
+      const res = await fetch(`/api/groups/${groupId}/attendees/request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: requestMsg }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        const msg = (data as any)?.error || "Failed to send request";
+        console.error("requestToJoinGroup error", msg);
+        setError(msg);
+        return;
+      }
+
+      const data = await res.json().catch(() => null);
+      const status =
+        typeof (data as any)?.status === "string"
+          ? ((data as any).status as string).toLowerCase()
+          : null;
+
       setRequested(true);
-    } catch {
-      // ignore for now
+      if (status === "accepted" || status === "approved") {
+        setAccepted(true);
+      }
+    } catch (e: any) {
+      console.error("requestToJoinGroup exception", e);
+      setError(e?.message || "Failed to send request");
     } finally {
       setRequesting(false);
     }
@@ -654,14 +667,15 @@ export default function GroupPage() {
           <div className="w-full aspect-video rounded-xl bg-muted flex items-center justify-center text-sm text-muted-foreground overflow-hidden">
             {coverUrl ? (
               <div className="relative w-full h-full">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
+                <Image
                   key={coverUrl || "cover"}
                   src={coverUrl || ""}
                   alt="Group cover"
-                  className="w-full h-full object-cover"
-                  loading="lazy"
-                  referrerPolicy="no-referrer"
+                  fill
+                  sizes="(max-width: 768px) 100vw, 960px"
+                  className="object-cover"
+                  unoptimized
+                  priority={false}
                 />
                 {/* Vignette overlay */}
                 <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0)_0%,rgba(0,0,0,0.35)_60%,rgba(0,0,0,0.7)_100%)]" />
@@ -721,13 +735,27 @@ export default function GroupPage() {
             ) : (
               <>
                 {/* Host & Co-hosts */}
-                <div className="grid grid-cols-2 gap-8 md:gap-8 mb-8">
+                <div
+                  className={`grid ${
+                    cohosts.length ? "grid-cols-2" : "grid-cols-1"
+                  } gap-8 md:gap-8 mb-8`}
+                >
                   {/* Host column */}
                   <div className="col-span-1 rounded-lg">
                     <h2 className="text-xs font-bold tracking-wider text-muted-foreground uppercase mb-2">
                       Host
                     </h2>
-                    <div className="flex items-center gap-3">
+                    <Link
+                      href={
+                        host?.user_id ? `/app/profile/${host.user_id}` : "#"
+                      }
+                      className="flex items-center gap-3"
+                      aria-label={
+                        (host?.profile?.profile_title ||
+                          host?.profile?.name ||
+                          "Host") + " profile"
+                      }
+                    >
                       <Avatar04
                         src={resolveAvatarUrl(host?.profile?.avatar_url) || ""}
                         name={
@@ -740,7 +768,7 @@ export default function GroupPage() {
                         )}
                       />
                       <div className="min-w-0">
-                        <p className="font-medium leading-tight truncate">
+                        <p className="font-medium leading-tight truncate underline-offset-2 hover:underline">
                           {host?.profile?.profile_title ||
                             host?.profile?.name ||
                             "Host"}
@@ -749,43 +777,50 @@ export default function GroupPage() {
                           Host
                         </p>
                       </div>
-                    </div>
+                    </Link>
                   </div>
-                  {/* Co-hosts column */}
-                  <div className="col-span-1 rounded-lg">
-                    <h2 className="text-xs font-bold tracking-wider text-muted-foreground uppercase mb-2">
-                      Co-hosts
-                    </h2>
-                    {cohosts.length ? (
+
+                  {/* Co-hosts column, only when present */}
+                  {cohosts.length ? (
+                    <div className="col-span-1 rounded-lg">
+                      <h2 className="text-xs font-bold tracking-wider text-muted-foreground uppercase mb-2">
+                        Co-hosts
+                      </h2>
                       <div className="flex items-center gap-3">
                         <div className="flex -space-x-2">
-                          {cohosts.slice(0, 3).map((h, i) => (
-                            <Avatar15
-                              key={h.user_id + i}
-                              avatars={[
-                                {
-                                  src:
-                                    resolveAvatarUrl(h.profile?.avatar_url) ||
-                                    "",
-                                  name:
-                                    h.profile?.profile_title ||
-                                    h.profile?.name ||
-                                    "Co-host",
-                                  fallback: initials(
-                                    h.profile?.profile_title || h.profile?.name
-                                  ),
-                                },
-                              ]}
-                            />
-                          ))}
+                          {cohosts.slice(0, 3).map((h, i) => {
+                            const displayName =
+                              h.profile?.profile_title ||
+                              h.profile?.name ||
+                              "Co-host";
+                            return (
+                              <Link
+                                key={h.user_id + i}
+                                href={
+                                  h.user_id ? `/app/profile/${h.user_id}` : "#"
+                                }
+                                aria-label={`${displayName} profile`}
+                                className="inline-block"
+                              >
+                                <Avatar15
+                                  avatars={[
+                                    {
+                                      src:
+                                        resolveAvatarUrl(
+                                          h.profile?.avatar_url
+                                        ) || "",
+                                      name: displayName,
+                                      fallback: initials(displayName),
+                                    },
+                                  ]}
+                                />
+                              </Link>
+                            );
+                          })}
                         </div>
                       </div>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">
-                        No co-hosts yet.
-                      </p>
-                    )}
-                  </div>
+                    </div>
+                  ) : null}
                 </div>
                 {/* Attendees */}
                 <h2 className="text-xs font-semibold tracking-wider text-muted-foreground uppercase mb-2">

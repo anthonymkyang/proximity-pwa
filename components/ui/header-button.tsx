@@ -1,22 +1,22 @@
 "use client";
 
-import { ReactNode } from "react";
+import * as React from "react";
+import { cn } from "@/lib/utils";
 import Button32 from "@/components/shadcn-studio/button/button-32";
 
-interface HeaderButtonProps {
-  onClick?: () => void;
-  ariaLabel?: string;
-  children: ReactNode;
-}
+export interface HeaderButtonProps
+  extends React.ButtonHTMLAttributes<HTMLButtonElement> {}
 
-export default function HeaderButton({
-  onClick,
-  ariaLabel = "Header button",
-  children,
-}: HeaderButtonProps) {
-  return (
-    <Button32 aria-label={ariaLabel} onClick={onClick}>
-      {children}
-    </Button32>
-  );
-}
+const HeaderButton = React.forwardRef<HTMLButtonElement, HeaderButtonProps>(
+  ({ className, children, ...props }, ref) => {
+    return (
+      <Button32 ref={ref} type="button" className={cn(className)} {...props}>
+        {children}
+      </Button32>
+    );
+  }
+);
+
+HeaderButton.displayName = "HeaderButton";
+
+export default HeaderButton;

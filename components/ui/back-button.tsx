@@ -7,15 +7,21 @@ import Button32 from "@/components/shadcn-studio/button/button-32";
 interface BackButtonProps {
   useWizardNavigation?: boolean;
   onWizardBack?: () => void;
+  onClick?: () => void;
 }
 
 export default function BackButton({
   useWizardNavigation = false,
   onWizardBack,
+  onClick,
 }: BackButtonProps) {
   const router = useRouter();
 
   const handleClick = () => {
+    if (onClick) {
+      onClick();
+      return;
+    }
     if (useWizardNavigation && onWizardBack) {
       onWizardBack();
     } else {

@@ -137,7 +137,9 @@ export default function ActivityPage() {
               sideOffset={8}
               className="min-w-56"
             >
-              <DropdownMenuItem>Manage groups</DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <a href="/app/activity/groups/manage">Manage groups</a>
+              </DropdownMenuItem>
               <DropdownMenuItem>Manage calendar</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

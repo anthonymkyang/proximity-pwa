@@ -4,12 +4,16 @@ import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { createClient } from "@/utils/supabase/client";
 
 import * as React from "react";
+import Sheet01 from "../shadcn-studio/sheet/sheet-01";
+import { Button } from "@/components/ui/button";
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 
 // Simple date utils (Mon-first weeks)
 const MS_PER_DAY = 86_400_000;
@@ -17,6 +21,12 @@ const addDays = (d: Date, n: number) =>
   new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 const startOfDay = (d: Date) =>
   new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+function utcStartOfDay(d: Date) {
+  return new Date(
+    Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0)
+  );
+}
 const isSameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() &&
   a.getMonth() === b.getMonth() &&
@@ -48,6 +58,13 @@ function ymd(d: Date) {
   return `${y}-${m}-${day}`;
 }
 
+function dayRangeISO(d: Date) {
+  // Use UTC day bounds to avoid local timezone shifting rows out of the day.
+  const startUTC = utcStartOfDay(d);
+  const endExclusiveUTC = new Date(startUTC.getTime() + 24 * 60 * 60 * 1000);
+  return { from: startUTC.toISOString(), to: endExclusiveUTC.toISOString() };
+}
+
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export default function Calendar() {
@@ -66,6 +83,46 @@ export default function Calendar() {
     new Set()
   );
 
+  type DayEvent = {
+    id: string;
+    title: string;
+    time: string | null; // start_time ISO
+    end: string | null; // end_time ISO
+    role: "hosting" | "co-hosting" | "attending";
+    cover: string | null; // cover_image_url
+  };
+
+  // Cache all events in range so the sheet can render without re-querying
+  const [allEvents, setAllEvents] = React.useState<DayEvent[] | null>(null);
+
+  // Memoized derived list of events for the selected day
+  const dayEvents = React.useMemo(() => {
+    if (!allEvents) return null;
+    const d = selected ?? today;
+    const items = allEvents.filter((ev) => {
+      if (!ev.time) return false;
+      const t = new Date(ev.time);
+      return isSameDay(t, d);
+    });
+    items.sort((a, b) => {
+      const ta = a.time ? Date.parse(a.time) : Number.POSITIVE_INFINITY;
+      const tb = b.time ? Date.parse(b.time) : Number.POSITIVE_INFINITY;
+      return ta - tb;
+    });
+    return items;
+  }, [allEvents, selected, today]);
+
+  // Optional developer logging for diagnosis
+  React.useEffect(() => {
+    if (!sheetOpen) return;
+    // eslint-disable-next-line no-console
+    console.log(
+      "[Calendar] dayEvents for",
+      selected?.toDateString(),
+      dayEvents
+    );
+  }, [sheetOpen, selected, dayEvents]);
+
   // Load involvement days between rangeStart and rangeEnd
   React.useEffect(() => {
     let mounted = true;
@@ -76,39 +133,42 @@ export default function Calendar() {
         const { data: auth } = await supa.auth.getUser();
         const uid = auth?.user?.id || null;
         if (!uid) {
-          if (mounted) setHighlightDays(new Set());
+          if (mounted) {
+            setHighlightDays(new Set());
+            setAllEvents([]);
+          }
           return;
         }
-        const fromIso = new Date(rangeStart).toISOString();
-        const toIso = new Date(rangeEnd).toISOString();
+        const fromIso = utcStartOfDay(rangeStart).toISOString();
+        const toIso = utcStartOfDay(addDays(rangeEnd, 1)).toISOString(); // exclusive end
 
-        // Host
+        // Fetch full details once for the range
         const hostQ = supa
           .from("groups")
-          .select("start_time")
+          .select("id, title, start_time, end_time, cover_image_url")
           .eq("host_id", uid)
-          .in("status", ["active", "in_progress"]) // live groups
+          .in("status", ["active", "in_progress"])
           .gte("start_time", fromIso)
-          .lte("start_time", toIso);
+          .lt("start_time", toIso);
 
-        // Co-host (array contains user id)
         const cohostQ = supa
           .from("groups")
-          .select("start_time")
+          .select("id, title, start_time, end_time, cover_image_url")
           .contains("cohost_ids", [uid])
-          .in("status", ["active", "in_progress"]) // live groups
+          .in("status", ["active", "in_progress"])
           .gte("start_time", fromIso)
-          .lte("start_time", toIso);
+          .lt("start_time", toIso);
 
-        // Attendee (accepted), join groups to filter by status + time
         const attendeeQ = supa
           .from("group_attendees")
-          .select("groups:groups!inner(start_time,status)")
+          .select(
+            "groups:groups!inner(id,title,start_time,end_time,status,cover_image_url)"
+          )
           .eq("user_id", uid)
           .eq("status", "accepted")
-          .in("groups.status", ["active", "in_progress"]) // live groups
+          .in("groups.status", ["active", "in_progress"])
           .gte("groups.start_time", fromIso)
-          .lte("groups.start_time", toIso);
+          .lt("groups.start_time", toIso);
 
         const [hostRes, cohostRes, attRes] = await Promise.all([
           hostQ,
@@ -116,23 +176,78 @@ export default function Calendar() {
           attendeeQ,
         ]);
 
-        const set = new Set<string>();
-        (hostRes.data || []).forEach((r: any) => {
-          if (r?.start_time) set.add(ymd(new Date(r.start_time)));
-        });
-        (cohostRes.data || []).forEach((r: any) => {
-          if (r?.start_time) set.add(ymd(new Date(r.start_time)));
-        });
-        (attRes.data || []).forEach((r: any) => {
-          const t = r?.groups?.start_time;
-          if (t) set.add(ymd(new Date(t)));
+        const byId = new Map<string, DayEvent>();
+
+        // Priority: hosting > co-hosting > attending
+        (hostRes.data || []).forEach((g: any) => {
+          if (!g?.id) return;
+          byId.set(g.id, {
+            id: g.id,
+            title: g.title || "Untitled group",
+            time: g.start_time || null,
+            end: g.end_time || null,
+            role: "hosting",
+            cover: g.cover_image_url || null,
+          });
         });
 
-        if (mounted) setHighlightDays(set);
+        (cohostRes.data || []).forEach((g: any) => {
+          if (!g?.id) return;
+          if (!byId.has(g.id)) {
+            byId.set(g.id, {
+              id: g.id,
+              title: g.title || "Untitled group",
+              time: g.start_time || null,
+              end: g.end_time || null,
+              role: "co-hosting",
+              cover: g.cover_image_url || null,
+            });
+          }
+        });
+
+        const attendeeGroups =
+          (attRes.data || [])
+            .map((r: any) => r.groups)
+            .filter((g: any) => g && g.id) || [];
+
+        attendeeGroups.forEach((g: any) => {
+          if (!g?.id) return;
+          if (!byId.has(g.id)) {
+            byId.set(g.id, {
+              id: g.id,
+              title: g.title || "Untitled group",
+              time: g.start_time || null,
+              end: g.end_time || null,
+              role: "attending",
+              cover: g.cover_image_url || null,
+            });
+          }
+        });
+
+        const items: DayEvent[] = Array.from(byId.values());
+        items.sort((a, b) => {
+          const ta = a.time ? Date.parse(a.time) : Number.POSITIVE_INFINITY;
+          const tb = b.time ? Date.parse(b.time) : Number.POSITIVE_INFINITY;
+          return ta - tb;
+        });
+
+        // Compute highlight days from these items
+        const set = new Set<string>();
+        items.forEach((ev) => {
+          if (ev.time) set.add(ymd(new Date(ev.time)));
+        });
+
+        if (mounted) {
+          setHighlightDays(set);
+          setAllEvents(items);
+        }
       } catch (e) {
-        if (mounted) setHighlightDays(new Set());
+        if (mounted) {
+          setHighlightDays(new Set());
+          setAllEvents([]);
+        }
         // eslint-disable-next-line no-console
-        console.warn("[Calendar] failed to load highlight days", e);
+        console.warn("[Calendar] failed to load involvement/events", e);
       }
     }
 
@@ -154,13 +269,21 @@ export default function Calendar() {
         ? "rd"
         : "th";
     const month = d.toLocaleDateString(undefined, { month: "long" });
-    return `${day}${suffix} ${month}`;
+    const year = d.getFullYear();
+    return `${day}${suffix} ${month}, ${year}`;
   }, [selected, today]);
 
   const selectedWeekday = React.useMemo(() => {
     const d = selected ?? today;
     return d.toLocaleDateString(undefined, { weekday: "long" });
   }, [selected, today]);
+
+  const dayDescription = React.useMemo(() => {
+    const count = dayEvents ? dayEvents.length : 0;
+    if (count === 0) return "You have nothing on today.";
+    if (count === 1) return "You have 1 event today.";
+    return `You have ${count} events today.`;
+  }, [dayEvents]);
 
   // Build a list of months intersecting the range
   const months: { key: string; monthDate: Date }[] = React.useMemo(() => {
@@ -180,6 +303,105 @@ export default function Calendar() {
     }
     return list;
   }, [rangeStart, rangeEnd]);
+
+  const sheetContent = (
+    <div className="mt-3 space-y-2 px-">
+      {!allEvents && sheetOpen ? (
+        <div className="space-y-2">
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="rounded-lg border bg-card px-3 py-3 flex items-start gap-3 animate-pulse"
+            >
+              <div className="h-8 w-8 rounded-full bg-muted/40" />
+              <div className="flex-1 space-y-2">
+                <div className="h-3 w-1/2 bg-muted/40 rounded" />
+                <div className="h-3 w-1/3 bg-muted/40 rounded" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : dayEvents && dayEvents.length > 0 ? (
+        <ul className="space-y-2 px-1">
+          {dayEvents.map((ev) => {
+            const start = ev.time ? new Date(ev.time) : null;
+            const end = ev.end ? new Date(ev.end) : null;
+
+            function fmt12(d: Date | null) {
+              if (!d) return "";
+              let h = d.getHours();
+              const m = d.getMinutes();
+              const ampm = h >= 12 ? "pm" : "am";
+              h = h % 12;
+              if (h === 0) h = 12;
+              const mins = m === 0 ? "" : `:${String(m).padStart(2, "0")}`;
+              return `${h}${mins}${ampm}`;
+            }
+
+            const timeText =
+              start && end
+                ? `${fmt12(start)} until ${fmt12(end)}`
+                : fmt12(start);
+
+            return (
+              <li
+                key={ev.id}
+                className="rounded-2xl bg-muted/20 hover:bg-muted/30 transition border border-border px-4 py-3"
+              >
+                <div className="flex items-center gap-3">
+                  <span
+                    className="w-1 self-stretch rounded-full bg-violet-500"
+                    aria-hidden="true"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-base font-semibold leading-6 truncate">
+                      {ev.title}
+                    </p>
+                    <p className="text-sm text-muted-foreground mt-0.5">
+                      {timeText}
+                    </p>
+                  </div>
+                  {ev.cover ? (
+                    <img
+                      src={`/api/groups/storage?path=${encodeURIComponent(
+                        ev.cover
+                      )}`}
+                      alt={ev.title}
+                      className="h-10 w-10 rounded-lg object-cover border border-border"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).style.display =
+                          "none";
+                      }}
+                    />
+                  ) : null}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <div className="py-8">
+          <Empty>
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <CalendarIcon className="h-6 w-6" />
+              </EmptyMedia>
+              <EmptyTitle>No plans this day</EmptyTitle>
+              <EmptyDescription>
+                Pick another date or host a group.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        </div>
+      )}
+    </div>
+  );
+
+  const sheetFooter = (
+    <Button className="w-full" onClick={() => setSheetOpen(false)}>
+      Done
+    </Button>
+  );
 
   return (
     <>
@@ -289,69 +511,14 @@ export default function Calendar() {
         </section>
       </div>
 
-      {/* Day details sheet */}
-      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent
-          side="right"
-          className="h-full w-[90%] overflow-y-auto border-l bg-card text-card-foreground shadow-xl px-4 pb-6"
-        >
-          <SheetHeader>
-            <SheetTitle>{selectedTitle}</SheetTitle>
-          </SheetHeader>
-
-          <ul className="space-y-0">
-            <h3 className="text-xs font-semibold uppercase text-muted-foreground tracking-wide mb-1 px-1">
-              {selectedWeekday}
-            </h3>
-            {[
-              {
-                icon: MessageCircle,
-                title: "Chat: Coffee Crew plans",
-                subtitle: "Sort tomorrow’s meetup?",
-                time: "10:00",
-              },
-              {
-                icon: CalendarIcon,
-                title: "Event: Queer Hikers route scout",
-                subtitle: "Meet at Parliament Hill",
-                time: "14:00",
-              },
-              {
-                icon: Users,
-                title: "Group: After Hours",
-                subtitle: "Poll closes tonight",
-                time: "20:30",
-              },
-            ].map((n, i) => (
-              <li key={`sched-${i}`} className={`py-2 px-4 -mx-4 rounded-lg`}>
-                <div className="flex items-start gap-3">
-                  <div className="relative mt-0.5 h-10 w-10 rounded-full bg-muted flex items-center justify-center">
-                    <n.icon className="h-5 w-5 text-muted-foreground" />
-                    <div className="absolute -bottom-1 -right-1 h-5 w-5 ring-2 ring-card">
-                      <Avatar className="h-5 w-5">
-                        <AvatarImage src="" alt="avatar" />
-                        <AvatarFallback className="text-[8px] uppercase">
-                          {String.fromCharCode(65 + ((i * 3) % 26))}
-                          {String.fromCharCode(65 + ((i * 7) % 26))}
-                        </AvatarFallback>
-                      </Avatar>
-                    </div>
-                  </div>
-                  <div className="min-w-0 flex-1 pt-1">
-                    <p className="text-sm font-medium truncate">{n.title}</p>
-                    <p className="text-xs text-muted-foreground truncate mt-0.5">
-                      {n.subtitle}
-                    </p>
-                  </div>
-                  <div className="text-[10px] text-muted-foreground shrink-0">
-                    {n.time}
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </SheetContent>
-      </Sheet>
+      <Sheet01
+        open={sheetOpen}
+        onOpenChange={setSheetOpen}
+        title={selectedTitle}
+        description={dayDescription}
+        content={sheetContent}
+        footer={sheetFooter}
+      />
     </>
   );
 }

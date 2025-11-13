@@ -17,6 +17,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import Link from "next/link";
+import Image from "next/image";
 import { createClient } from "@/utils/supabase/client";
 
 type MyGroupCard = {
@@ -86,6 +87,16 @@ function resolveAvatarUrl(path?: string | null): string | undefined {
   const s = String(path);
   if (s.startsWith("http://") || s.startsWith("https://")) return s;
   return `/api/photos/avatars?path=${encodeURIComponent(s)}`;
+}
+
+function resolveCoverUrl(path?: string | null): string | undefined {
+  if (!path) return undefined;
+  const s = String(path);
+  if (s.startsWith("http://") || s.startsWith("https://")) return s;
+  // Proxy through our storage API, which supports private or public buckets
+  return `/api/groups/storage?path=${encodeURIComponent(
+    s.replace(/^\/+/, "")
+  )}`;
 }
 
 export default function Groups() {
@@ -606,17 +617,15 @@ export default function Groups() {
                     {/* Square thumb area uses cover image or fallback color */}
                     <div className="absolute inset-0 rounded-lg overflow-hidden bg-muted">
                       {g.cover_image_url ? (
-                        <img
-                          src={`/api/groups/storage?path=${encodeURIComponent(
-                            g.cover_image_url
-                          )}`}
+                        <Image
+                          src={resolveCoverUrl(g.cover_image_url)!}
                           alt={g.name}
-                          className="absolute inset-0 h-full w-full object-cover"
-                          onError={(e) => {
-                            (
-                              e.currentTarget as HTMLImageElement
-                            ).style.display = "none";
-                          }}
+                          fill
+                          sizes="(max-width: 768px) 192px, 192px"
+                          className="absolute inset-0 object-cover"
+                          priority={false}
+                          loading="lazy"
+                          unoptimized
                         />
                       ) : (
                         <div className={`absolute inset-0 ${g.colorClass}`} />
@@ -803,17 +812,15 @@ export default function Groups() {
                           {/* Square thumb with cover image (fallback to color) */}
                           <div className="relative h-10 w-10 rounded-lg overflow-hidden bg-muted shrink-0">
                             {g.cover_image_url ? (
-                              <img
-                                src={`/api/groups/storage?path=${encodeURIComponent(
-                                  g.cover_image_url || ""
-                                )}`}
+                              <Image
+                                src={resolveCoverUrl(g.cover_image_url)!}
                                 alt={g.name}
-                                className="absolute inset-0 h-full w-full object-cover"
-                                onError={(e) => {
-                                  (
-                                    e.currentTarget as HTMLImageElement
-                                  ).style.display = "none";
-                                }}
+                                fill
+                                sizes="(max-width: 768px) 40px, 40px"
+                                className="absolute inset-0 object-cover"
+                                priority={false}
+                                loading="lazy"
+                                unoptimized
                               />
                             ) : (
                               <div
@@ -922,17 +929,15 @@ export default function Groups() {
                     {/* Square thumb with cover image if present */}
                     <div className="relative h-10 w-10 rounded-lg overflow-hidden bg-muted shrink-0">
                       {g.cover_image_url ? (
-                        <img
-                          src={`/api/groups/storage?path=${encodeURIComponent(
-                            g.cover_image_url || ""
-                          )}`}
+                        <Image
+                          src={resolveCoverUrl(g.cover_image_url)!}
                           alt={g.name}
-                          className="absolute inset-0 h-full w-full object-cover"
-                          onError={(e) => {
-                            (
-                              e.currentTarget as HTMLImageElement
-                            ).style.display = "none";
-                          }}
+                          fill
+                          sizes="(max-width: 768px) 40px, 40px"
+                          className="absolute inset-0 object-cover"
+                          priority={false}
+                          loading="lazy"
+                          unoptimized
                         />
                       ) : (
                         <div className="absolute inset-0 bg-muted" />
