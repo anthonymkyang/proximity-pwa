@@ -192,7 +192,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       >
         <div
           className={`flex-1 min-h-0 overflow-auto ${
-            isMapPage ? "pointer-events-auto" : ""
+            isMapPage ? "pointer-events-none" : ""
           }`}
         >
           {children}
