@@ -106,6 +106,8 @@ export async function GET(
     age: number | null;
     sexuality: { label: string } | null;
     position: { label: string } | null;
+    presence?: string | null;
+    user_id?: string | null;
   } | null = null;
 
   if (otherUserId) {
@@ -125,6 +127,11 @@ export async function GET(
 
     if (other) {
       const age = calcAge((other as any).date_of_birth ?? null);
+      const { data: presenceRow } = await supabase
+        .from("user_presence")
+        .select("status")
+        .eq("user_id", otherUserId)
+        .maybeSingle();
       otherMeta = {
         profile_title: (other as any).profile_title ?? null,
         avatar_url: (other as any).avatar_url ?? null,
@@ -135,6 +142,8 @@ export async function GET(
         position: (other as any).position?.label
           ? { label: (other as any).position.label }
           : null,
+        presence: presenceRow?.status ?? null,
+        user_id: otherUserId,
       };
     }
   }
@@ -239,7 +248,10 @@ export async function GET(
     };
   });
 
-  return NextResponse.json({ messages: enriched }, { status: 200 });
+  return NextResponse.json(
+    { messages: enriched, other: otherMeta ?? null },
+    { status: 200 }
+  );
 }
 
 // POST /api/messages/:id -> send message and create sender self-receipt (delivered+read)

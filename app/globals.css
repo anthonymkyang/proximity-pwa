@@ -1,7 +1,21 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "maplibre-gl/dist/maplibre-gl.css";
 @import "react-image-crop/dist/ReactCrop.css";
+/* Make StackSansNotch available to canvas-based renderers (OpenLayers labels) */
+@font-face {
+  font-family: "StackSansNotch";
+  src: url("/fonts/StackSansNotch-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "StackSansNotch";
+  src: url("/fonts/StackSansNotch-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
 
 @custom-variant dark (&:is(.dark *));
 

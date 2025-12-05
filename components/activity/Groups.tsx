@@ -593,15 +593,33 @@ export default function Groups() {
       <section className="mt-4">
         <div className="px-1 mb-3 flex items-center justify-between">
           <h3 className="text-lg font-semibold">Your groups</h3>
-          <Link
-            href="/app/activity/groups/create"
-            aria-label="Host a new group or event"
-          >
-            <Button variant="ghost" size="sm" className="rounded-full gap-2">
-              <Plus className="h-4 w-4" />
-              Host
-            </Button>
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/app/activity/groups/manage"
+              aria-label="Manage your groups"
+            >
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-full gap-2"
+              >
+                Manage
+              </Button>
+            </Link>
+            <Link
+              href="/app/activity/groups/create"
+              aria-label="Host a new group or event"
+            >
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-full gap-2"
+              >
+                <Plus className="h-4 w-4" />
+                Host
+              </Button>
+            </Link>
+          </div>
         </div>
         <div className="flex gap-3 overflow-x-auto -mx-4 px-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           {Array.isArray(myGroups) && myGroups.length > 0 ? (

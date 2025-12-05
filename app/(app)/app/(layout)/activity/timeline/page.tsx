@@ -1,0 +1,12 @@
+"use client";
+
+import Timeline from "@/components/activity/Timeline";
+
+export default function ActivityTimelinePage() {
+  return (
+    <>
+      <h1 className="px-1 pb-3 text-3xl font-bold tracking-tight">Timeline</h1>
+      <Timeline />
+    </>
+  );
+}

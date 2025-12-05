@@ -12,8 +12,8 @@ const nextConfig: NextConfig = {
       },
     ],
     localPatterns: [
-      { pathname: "/api/groups/storage", search: "path=**" },
-      { pathname: "/api/photos/avatars", search: "path=**" },
+      { pathname: "/api/groups/storage", search: "?path=**" },
+      { pathname: "/api/photos/avatars", search: "?path=**" },
     ],
   },
 };

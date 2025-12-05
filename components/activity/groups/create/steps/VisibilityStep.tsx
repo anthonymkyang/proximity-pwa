@@ -25,6 +25,7 @@ type Summary = {
   title: string | null;
   category_id: string | null;
   category_name: string | null;
+  status: string | null;
   start_time: string | null;
   end_time: string | null;
   location_text: string | null;
@@ -113,6 +114,7 @@ export default function VisibilityStep({
     title: null,
     category_id: null,
     category_name: null,
+    status: null,
     start_time: null,
     end_time: null,
     location_text: null,
@@ -144,7 +146,7 @@ export default function VisibilityStep({
         const { data: g, error } = await supabase
           .from("groups")
           .select(
-            "title, category_id, start_time, end_time, location_text, postcode, is_public, hide_address_on_listing, description, display_on_map, display_address_on_day, house_rules, provided_items, location_lat, location_lng, cohost_ids"
+            "title, category_id, status, start_time, end_time, location_text, postcode, is_public, hide_address_on_listing, description, display_on_map, display_address_on_day, house_rules, provided_items, location_lat, location_lng, cohost_ids"
           )
           .eq("id", groupId)
           .maybeSingle();
@@ -191,6 +193,10 @@ export default function VisibilityStep({
             title: g.title ?? null,
             category_id: g.category_id ?? null,
             category_name,
+            status:
+              (g as any)?.status === "active"
+                ? "published"
+                : (g as any)?.status ?? null,
             start_time: g.start_time ?? null,
             end_time: g.end_time ?? null,
             location_text: g.location_text ?? null,
@@ -301,6 +307,7 @@ export default function VisibilityStep({
 
     // Map app statuses to enum in DB
     const statusValue = nextStatus === "draft" ? "draft" : "active";
+    const nextUiStatus = nextStatus === "draft" ? "draft" : "published";
 
     const { error } = await supabase
       .from("groups")
@@ -321,6 +328,11 @@ export default function VisibilityStep({
       }
       throw error;
     }
+
+    setSummary((prev) => ({
+      ...prev,
+      status: nextUiStatus,
+    }));
 
     router.push("/app/activity/groups/manage");
   }
@@ -612,10 +624,10 @@ export default function VisibilityStep({
           {savingDraft ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Save draft
+              {summary.status === "published" ? "Setting as draft" : "Saving draft"}
             </>
           ) : (
-            <>Save draft</>
+            <>{summary.status === "published" ? "Set as draft" : "Save draft"}</>
           )}
         </Button>
 
@@ -638,10 +650,10 @@ export default function VisibilityStep({
           {publishing ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Publish
+              {summary.status === "published" ? "Saving changes" : "Publishing"}
             </>
           ) : (
-            <>Publish</>
+            <>{summary.status === "published" ? "Edit post" : "Publish"}</>
           )}
         </Button>
       </div>

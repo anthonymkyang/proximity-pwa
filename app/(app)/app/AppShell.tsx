@@ -23,6 +23,7 @@ const MIN_WRITE_MS = 12_000; // throttle presence writes
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isMapPage = pathname === "/app";
+  const hideAppBar = pathname?.startsWith("/app/messages/");
 
   const supabase = useRef(createClient()).current;
 
@@ -173,6 +174,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, [setOnline, setAway, setOffline, upsertPresence, supabase]);
 
   // --- existing UI shell (map + app bar + content) ---
+  const appBarHeight = hideAppBar ? 0 : 72;
   return (
     <div className="relative min-h-screen">
       <div className="fixed inset-0 z-0">
@@ -180,14 +182,24 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       <main
-        className={`relative min-h-[calc(100dvh-56px)] overflow-y-auto ${
+        className={`relative flex min-h-screen flex-col overflow-hidden ${
           isMapPage ? "bg-transparent pointer-events-none" : "bg-background"
         }`}
+        style={{
+          paddingTop: "env(safe-area-inset-top, 0px)",
+          paddingBottom: "env(safe-area-inset-bottom, 0px)",
+        }}
       >
-        <div className={isMapPage ? "pointer-events-auto" : ""}>{children}</div>
+        <div
+          className={`flex-1 min-h-0 overflow-auto ${
+            isMapPage ? "pointer-events-auto" : ""
+          }`}
+        >
+          {children}
+        </div>
       </main>
 
-      <AppBar />
+      {!hideAppBar && <AppBar />}
     </div>
   );
 }

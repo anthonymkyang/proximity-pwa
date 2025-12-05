@@ -93,7 +93,7 @@ export default function DetailsStep({
     resolver: zodResolver(detailsSchema),
     defaultValues: {
       title: "",
-      category_id: "",
+      category_id: undefined,
       description: "",
     },
   });
@@ -138,18 +138,63 @@ export default function DetailsStep({
   }, []);
 
   // Hydrate form with current group values
+  // Hydrate form with current group values
   useEffect(() => {
+    if (!groupId) {
+      console.warn("[DetailsStep] Missing groupId, skipping hydrate");
+      return;
+    }
+
     let active = true;
-    (async () => {
+
+    const load = async () => {
       try {
+        console.log("[DetailsStep] hydrate for groupId =", groupId);
+
         const supabase = createClient();
-        const { data, error } = await supabase
+
+        // First attempt: use the incoming groupId prop
+        let idToUse = groupId;
+        let { data, error } = await supabase
           .from("groups")
-          .select("title, category_id, description, cover_image_url")
-          .eq("id", groupId)
+          .select("id, title, category_id, description, cover_image_url")
+          .eq("id", idToUse)
           .maybeSingle();
-        if (error) return;
-        if (!active || !data) return;
+
+        // If nothing found, try falling back to `id` from the URL (for older links)
+        if (!data && typeof window !== "undefined") {
+          const url = new URL(window.location.href);
+          const fallbackId = url.searchParams.get("id");
+          if (fallbackId && fallbackId !== idToUse) {
+            console.log(
+              "[DetailsStep] no row for groupId, retrying with fallback id from URL",
+              fallbackId
+            );
+            idToUse = fallbackId;
+            const retry = await supabase
+              .from("groups")
+              .select("id, title, category_id, description, cover_image_url")
+              .eq("id", idToUse)
+              .maybeSingle();
+            data = retry.data;
+            error = retry.error;
+          }
+        }
+
+        console.log("[DetailsStep] hydrate result =", { data, error });
+
+        if (!active) return;
+
+        if (error) {
+          console.error("[DetailsStep] hydrate error", error);
+          return;
+        }
+        if (!data) {
+          console.warn("[DetailsStep] no group row found for id", groupId);
+          return;
+        }
+
+        // Populate form fields
         form.reset({
           // Do not pre-populate title; show empty unless a real title exists
           title:
@@ -158,33 +203,49 @@ export default function DetailsStep({
             data.title.trim().toLowerCase() !== "untitled group"
               ? data.title
               : "",
-          category_id: data.category_id ?? "",
+          category_id: data.category_id ?? undefined,
           description: data.description ?? "",
         });
+
+        // Cover path + preview
         setCoverPath(data.cover_image_url ?? "");
-        // Hydrate preview from stored path if present
+
         const existingPath = data.cover_image_url ?? "";
         if (existingPath) {
           try {
             if (/^https?:\/\//i.test(existingPath)) {
+              // Already a full URL
               setCoverPreview(existingPath);
             } else {
-              const supa = createClient();
-              const { data: sig } = await supa.storage
+              const { data: sig, error: signErr } = await supabase.storage
                 .from("group-media")
                 .createSignedUrl(existingPath, 60 * 60 * 24 * 30);
-              if (sig?.signedUrl) setCoverPreview(sig.signedUrl);
+
+              if (signErr) {
+                console.warn(
+                  "[DetailsStep] could not sign existing cover path",
+                  signErr
+                );
+              } else if (sig?.signedUrl) {
+                setCoverPreview(sig.signedUrl);
+              }
             }
           } catch (e) {
-            console.warn("Could not sign existing cover path", e);
+            console.warn("[DetailsStep] error signing existing cover path", e);
           }
-          setCoverPath(existingPath);
         } else {
           setCoverPreview("");
           setCoverPath("");
         }
-      } catch {}
-    })();
+      } catch (e) {
+        if (active) {
+          console.error("[DetailsStep] unexpected hydrate error", e);
+        }
+      }
+    };
+
+    load();
+
     return () => {
       active = false;
     };

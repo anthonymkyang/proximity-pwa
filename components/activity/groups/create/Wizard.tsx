@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Stepper from "./Stepper";
 import DetailsStep from "./steps/DetailsStep";
 import ScheduleStep from "./steps/ScheduleStep";
@@ -18,48 +18,65 @@ const steps = [
   { key: "review", label: "Review" },
 ];
 
-export default function Wizard({ groupId }: { groupId: string }) {
-  // Lock the incoming groupId for the lifetime of the wizard to avoid accidental draft re-creation
-  const [gid] = useState<string>(groupId);
+type WizardProps = {
+  groupId: string;
+  persistToUrl?: boolean;
+  onStepChange?: (index: number) => void;
+  externalBackSignal?: number;
+};
 
-  // Persist gid in URL and localStorage so refreshes and child flows keep pointing to the same row
-  useEffect(() => {
-    try {
-      if (typeof window === "undefined") return;
-      const url = new URL(window.location.href);
-      if (url.searchParams.get("gid") !== gid) {
-        url.searchParams.set("gid", gid);
-        window.history.replaceState(
-          null,
-          "",
-          `${url.pathname}?${url.searchParams.toString()}`
-        );
-      }
-      localStorage.setItem("groupDraftId", gid);
-    } catch {}
-  }, [gid]);
+export default function Wizard({
+  groupId,
+  persistToUrl = true,
+  onStepChange,
+  externalBackSignal,
+}: WizardProps) {
+  // Lock the incoming groupId for the lifetime of the wizard
+  const [id] = useState<string>(groupId);
 
-  // Step index, persisted to the URL so deep links and refreshes keep position
+  // Step index, persisted to URL so refreshes keep position
   const [idx, setIdx] = useState(() => {
-    if (typeof window === "undefined") return 0;
-    const url = new URL(window.location.href);
-    const q = url.searchParams.get("step");
-    const n = q ? parseInt(q, 10) : 0;
-    return Number.isFinite(n) ? Math.max(0, Math.min(n, steps.length - 1)) : 0;
+    if (typeof window === "undefined" || !persistToUrl) return 0;
+    try {
+      const url = new URL(window.location.href);
+      const q = url.searchParams.get("step");
+      const n = q ? parseInt(q, 10) : 0;
+      return Number.isFinite(n)
+        ? Math.max(0, Math.min(n, steps.length - 1))
+        : 0;
+    } catch {
+      return 0;
+    }
   });
 
+  // Keep id + step in the URL, so deep links and refresh work.
   useEffect(() => {
+    if (typeof window === "undefined" || !persistToUrl) return;
     try {
-      if (typeof window === "undefined") return;
       const url = new URL(window.location.href);
+
+      // Ensure id param is present and correct
+      if (url.searchParams.get("id") !== id) {
+        url.searchParams.set("id", id);
+      }
+
+      // Persist step
       url.searchParams.set("step", String(idx));
+
       window.history.replaceState(
         null,
         "",
         `${url.pathname}?${url.searchParams.toString()}`
       );
-    } catch {}
-  }, [idx]);
+
+      // Optional: remember last draft id locally
+      try {
+        localStorage.setItem("groupDraftId", id);
+      } catch {}
+    } catch {
+      // ignore URL errors
+    }
+  }, [id, idx, persistToUrl]);
 
   const [isClient, setIsClient] = useState(false);
   useEffect(() => {
@@ -69,17 +86,29 @@ export default function Wizard({ groupId }: { groupId: string }) {
   const next = () => setIdx((i) => Math.min(i + 1, steps.length - 1));
   const back = () => setIdx((i) => Math.max(i - 1, 0));
 
-  // Keep all steps mounted to avoid form re-inits when e.g. image crop closes
+  useEffect(() => {
+    onStepChange?.(idx);
+  }, [idx, onStepChange]);
+
+  const prevBackSignal = useRef(externalBackSignal);
+  useEffect(() => {
+    if (externalBackSignal === undefined) return;
+    if (prevBackSignal.current === externalBackSignal) return;
+    prevBackSignal.current = externalBackSignal;
+    setIdx((i) => Math.max(i - 1, 0));
+  }, [externalBackSignal]);
+
+  // Keep all steps mounted to avoid form re-inits
   const stepViews = useMemo(
     () => [
-      <DetailsStep key="details" groupId={gid} onNext={next} />,
-      <ScheduleStep key="schedule" groupId={gid} onNext={next} onBack={back} />,
-      <LocationStep key="location" groupId={gid} onNext={next} onBack={back} />,
-      <HostsStep key="hosts" groupId={gid} onNext={next} onBack={back} />,
-      <RulesStep key="rules" groupId={gid} onNext={next} onBack={back} />,
-      <VisibilityStep key="review" groupId={gid} onBack={back} onNext={next} />,
+      <DetailsStep key="details" groupId={id} onNext={next} />,
+      <ScheduleStep key="schedule" groupId={id} onNext={next} onBack={back} />,
+      <LocationStep key="location" groupId={id} onNext={next} onBack={back} />,
+      <HostsStep key="hosts" groupId={id} onNext={next} onBack={back} />,
+      <RulesStep key="rules" groupId={id} onNext={next} onBack={back} />,
+      <VisibilityStep key="review" groupId={id} onBack={back} onNext={next} />,
     ],
-    [gid]
+    [id]
   );
 
   return (
