@@ -25,12 +25,7 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@/components/ui/drawer";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 const LINE_COLORS: Record<string, string> = {
@@ -110,7 +105,10 @@ const sanitizeFeatures = (
       );
       return {
         type: "Feature",
-        geometry: { type: "Point", coordinates: [lon, lat] as [number, number] },
+        geometry: {
+          type: "Point",
+          coordinates: [lon, lat] as [number, number],
+        },
         properties: {
           ...(f.properties as Record<string, unknown>),
           displayName,
@@ -119,6 +117,13 @@ const sanitizeFeatures = (
     })
     .filter(Boolean) as GeoJSON.Feature[];
   return { type: "FeatureCollection", features };
+};
+
+const isPointGeometry = (
+  geometry: GeoJSON.Geometry | null | undefined
+): geometry is GeoJSON.Point => {
+  if (!geometry) return false;
+  return geometry.type === "Point" && Array.isArray(geometry.coordinates);
 };
 
 const hasRefToken = (field: unknown) => {
@@ -232,14 +237,17 @@ const formatDuration = (minutes: number | undefined | null) => {
   if (minutes < 60) return `${minutes} min`;
   const hrs = Math.floor(minutes / 60);
   const mins = Math.round(minutes % 60);
-    if (mins === 0) return `${hrs} hr${hrs > 1 ? "s" : ""}`;
-    return `${hrs} hr ${mins} min`;
-  };
+  if (mins === 0) return `${hrs} hr${hrs > 1 ? "s" : ""}`;
+  return `${hrs} hr ${mins} min`;
+};
 
-  const normalizeCssColor = (input: string | null | undefined, fallback: string) => {
-    if (typeof window === "undefined") return fallback;
-    const canvas = document.createElement("canvas");
-    canvas.width = 1;
+const normalizeCssColor = (
+  input: string | null | undefined,
+  fallback: string
+) => {
+  if (typeof window === "undefined") return fallback;
+  const canvas = document.createElement("canvas");
+  canvas.width = 1;
   canvas.height = 1;
   const ctx = canvas.getContext("2d");
   if (!ctx) return fallback;
@@ -266,6 +274,13 @@ const resolveCssVarColor = (varName: string, fallback: string) => {
     .trim();
   if (!raw) return fallback;
   return normalizeCssColor(raw, fallback);
+};
+
+type JourneyLeg = {
+  mode: string;
+  normalizedMode: string;
+  summary: string;
+  duration?: number;
 };
 
 const InstructionWithLineBadges = ({ text }: { text: string }) => {
@@ -387,12 +402,7 @@ const addRoundelIcons = async (map: MaplibreMap) => {
           }
 
           ctx.drawImage(img, paddingPx, paddingPx, drawWidth, drawHeight);
-          const imageData = ctx.getImageData(
-            0,
-            0,
-            canvas.width,
-            canvas.height
-          );
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
           map.addImage(
             id,
             {
@@ -435,7 +445,9 @@ const fetchStopsFromUrl = async (
       if (!res.ok) break;
       const json = await res.json();
       const stopPointsRaw = json?.stopPoints ?? json ?? [];
-      const stopPoints: any[] = Array.isArray(stopPointsRaw) ? stopPointsRaw : [];
+      const stopPoints: any[] = Array.isArray(stopPointsRaw)
+        ? stopPointsRaw
+        : [];
       all.push(...stopPoints);
       if (stopPoints.length < 1000) break; // pagination ends
     }
@@ -462,16 +474,28 @@ const fetchStopsFromUrl = async (
       }
     }
 
-    let features = Array.from(bestByStation.values()).map((sp) => ({
+    type StationFeature = GeoJSON.Feature<
+      GeoJSON.Point,
+      Record<string, unknown>
+    >;
+
+    const toStationFeature = (sp: any): StationFeature => ({
       type: "Feature",
-      geometry: { type: "Point", coordinates: [sp.lon, sp.lat] },
+      geometry: {
+        type: "Point",
+        coordinates: [Number(sp.lon), Number(sp.lat)] as [number, number],
+      },
       properties: {
         id: sp.id,
         name: sp.commonName,
         modes: sp.modes,
         lines: (sp.lines ?? []).map((l: any) => l?.name).filter(Boolean),
       },
-    }));
+    });
+
+    let features: StationFeature[] = Array.from(bestByStation.values()).map(
+      toStationFeature
+    );
 
     // if filtering left us empty, fall back to any stop with coords
     if (features.length === 0) {
@@ -483,19 +507,7 @@ const fetchStopsFromUrl = async (
             Number.isFinite(Number(sp.lat)) &&
             Number.isFinite(Number(sp.lon))
         )
-        .map((sp) => ({
-          type: "Feature",
-          geometry: {
-            type: "Point",
-            coordinates: [Number(sp.lon), Number(sp.lat)],
-          },
-          properties: {
-            id: sp.id,
-            name: sp.commonName,
-            modes: sp.modes,
-            lines: (sp.lines ?? []).map((l: any) => l?.name).filter(Boolean),
-          },
-        }));
+        .map(toStationFeature);
       // eslint-disable-next-line no-console
       console.log("[map] fallback to unfiltered TfL stops", features.length);
     }
@@ -541,7 +553,7 @@ const addTflStations = async (map: MaplibreMap) => {
         minzoom: 12.5,
         layout: {
           "text-field": ["coalesce", ["get", "displayName"], ["get", "name"]],
-          "text-font": ["Quicksand Regular"],
+          "text-font": ["Quicksand Bold"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 12, 10.5, 16, 13],
           "text-anchor": "top",
           "text-offset": [0, 0.9],
@@ -572,15 +584,23 @@ const addTflStations = async (map: MaplibreMap) => {
             "roundel-overground",
             ["in", "dlr", ["get", "modes"]],
             "roundel-dlr",
-          ["in", "national-rail", ["get", "modes"]],
-          "roundel-rail",
-          "roundel-rail",
-        ],
-        "icon-size": ["interpolate", ["linear"], ["zoom"], 11, 0.34, 16, 0.48],
-        "icon-anchor": "center",
-        "icon-allow-overlap": true,
-        "text-allow-overlap": false,
-        "symbol-placement": "point",
+            ["in", "national-rail", ["get", "modes"]],
+            "roundel-rail",
+            "roundel-rail",
+          ],
+          "icon-size": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            11,
+            0.34,
+            16,
+            0.48,
+          ],
+          "icon-anchor": "center",
+          "icon-allow-overlap": true,
+          "text-allow-overlap": false,
+          "symbol-placement": "point",
         },
         paint: {
           "icon-opacity": 0,
@@ -780,10 +800,11 @@ export default function MapCanvas() {
 
       const handleStationClick = (e: maplibregl.MapLayerMouseEvent) => {
         const feature = e.features?.[0];
-        if (!feature) return;
+        if (!feature || !feature.geometry) return;
         const props = (feature.properties ?? {}) as Record<string, any>;
-        const coords = Array.isArray(feature.geometry?.coordinates)
-          ? (feature.geometry?.coordinates as [number, number])
+        const geometry = feature.geometry as GeoJSON.Geometry | undefined;
+        const coords = isPointGeometry(geometry)
+          ? (geometry.coordinates as [number, number])
           : undefined;
         setSelectedStation({
           name: props.name ?? props.displayName ?? "Station",
@@ -892,7 +913,7 @@ export default function MapCanvas() {
           ? data.journeys
           : [];
         const journeys = journeysRaw.slice(0, 4).map((journey, idx) => {
-          const legs = (journey?.legs ?? []).map((leg: any) => {
+          const legs: JourneyLeg[] = (journey?.legs ?? []).map((leg: any) => {
             const modeName = leg?.mode?.name ?? "travel";
             const normalizedMode = normalizeMode(String(modeName));
             return {
@@ -908,7 +929,8 @@ export default function MapCanvas() {
           });
 
           const hasLongWalk = legs.some(
-            (l) => l.normalizedMode === "walking" && (l.duration ?? 0) > 5
+            (leg: JourneyLeg) =>
+              leg.normalizedMode === "walking" && (leg.duration ?? 0) > 5
           );
 
           const journeyId =
@@ -983,6 +1005,8 @@ export default function MapCanvas() {
   return (
     <div className="relative h-full w-full" aria-hidden>
       <div ref={containerRef} className="h-full w-full bg-background" />
+
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-linear-to-b from-background to-transparent" />
 
       <div className="pointer-events-none absolute left-4 top-4">
         <Button
@@ -1071,7 +1095,9 @@ export default function MapCanvas() {
         <DrawerContent>
           <DrawerHeader>
             <DrawerTitle>
-              {selectedStation?.displayName || selectedStation?.name || "Station"}
+              {selectedStation?.displayName ||
+                selectedStation?.name ||
+                "Station"}
             </DrawerTitle>
           </DrawerHeader>
           <div className="flex flex-col gap-3 px-4 pb-4">
@@ -1121,71 +1147,74 @@ export default function MapCanvas() {
                 {directions.message}
               </span>
             )}
-            {directions.status === "ready" && directions.journeys.length > 0 && (
-              <Tabs
-                defaultValue={directions.journeys[0]?.id}
-                className="w-full"
-              >
-                <TabsList className="mb-2">
-                  {directions.journeys.map((journey) => {
-                    return (
-                      <TabsTrigger
-                        key={journey.id}
-                        value={journey.id}
-                        className="flex items-center gap-1.5 rounded-full border border-border/60 bg-background px-3 py-1 text-xs font-medium"
-                      >
-                        <span>{formatDuration(journey.durationMins)}</span>
-                      </TabsTrigger>
-                    );
-                  })}
-                </TabsList>
-                <div className="relative">
-                  <div
-                    ref={instructionsRef}
-                    className="h-72 w-full overflow-y-auto [::-webkit-scrollbar]:hidden"
-                    style={{ scrollbarWidth: "none" }}
-                  >
-                    {directions.journeys.map((journey) => (
-                      <TabsContent key={journey.id} value={journey.id}>
-                        <ul className="space-y-2 text-xs text-muted-foreground">
-                          {journey.legs.map((leg, idx) => (
-                            <li
-                              key={`${journey.id}-${leg.summary}-${idx}`}
-                              className="rounded-lg border border-border/60 bg-muted/20 p-3"
-                            >
-                              <div className="flex items-center justify-between gap-3">
-                                <span className="flex items-center gap-2 font-semibold capitalize text-foreground">
-                                  <span className="text-muted-foreground">
-                                    {getModeIcon(leg.normalizedMode)}
+            {directions.status === "ready" &&
+              directions.journeys.length > 0 && (
+                <Tabs
+                  defaultValue={directions.journeys[0]?.id}
+                  className="w-full"
+                >
+                  <TabsList className="mb-2">
+                    {directions.journeys.map((journey) => {
+                      return (
+                        <TabsTrigger
+                          key={journey.id}
+                          value={journey.id}
+                          className="flex items-center gap-1.5 rounded-full border border-border/60 bg-background px-3 py-1 text-xs font-medium"
+                        >
+                          <span>{formatDuration(journey.durationMins)}</span>
+                        </TabsTrigger>
+                      );
+                    })}
+                  </TabsList>
+                  <div className="relative">
+                    <div
+                      ref={instructionsRef}
+                      className="h-72 w-full overflow-y-auto [::-webkit-scrollbar]:hidden"
+                      style={{ scrollbarWidth: "none" }}
+                    >
+                      {directions.journeys.map((journey) => (
+                        <TabsContent key={journey.id} value={journey.id}>
+                          <ul className="space-y-2 text-xs text-muted-foreground">
+                            {journey.legs.map((leg, idx) => (
+                              <li
+                                key={`${journey.id}-${leg.summary}-${idx}`}
+                                className="rounded-lg border border-border/60 bg-muted/20 p-3"
+                              >
+                                <div className="flex items-center justify-between gap-3">
+                                  <span className="flex items-center gap-2 font-semibold capitalize text-foreground">
+                                    <span className="text-muted-foreground">
+                                      {getModeIcon(leg.normalizedMode)}
+                                    </span>
+                                    {formatModeLabel(leg.mode)}
                                   </span>
-                                  {formatModeLabel(leg.mode)}
-                                </span>
-                                {leg.duration ? (
-                                  <span className="text-muted-foreground text-[11px]">
-                                    {leg.duration} min
-                                  </span>
-                                ) : null}
-                              </div>
-                              <div className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-                                <InstructionWithLineBadges text={leg.summary} />
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
-                      </TabsContent>
-                    ))}
+                                  {leg.duration ? (
+                                    <span className="text-muted-foreground text-[11px]">
+                                      {leg.duration} min
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <div className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+                                  <InstructionWithLineBadges
+                                    text={leg.summary}
+                                  />
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        </TabsContent>
+                      ))}
+                    </div>
+                    <div
+                      className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-linear-to-t from-background to-transparent transition-opacity duration-200"
+                      style={{ opacity: showScrollFadeBottom ? 1 : 0 }}
+                    />
+                    <div
+                      className="pointer-events-none absolute inset-x-0 top-0 h-10 bg-linear-to-b from-background to-transparent transition-opacity duration-200"
+                      style={{ opacity: showScrollFadeTop ? 1 : 0 }}
+                    />
                   </div>
-                  <div
-                    className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background to-transparent transition-opacity duration-200"
-                    style={{ opacity: showScrollFadeBottom ? 1 : 0 }}
-                  />
-                  <div
-                    className="pointer-events-none absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-background to-transparent transition-opacity duration-200"
-                    style={{ opacity: showScrollFadeTop ? 1 : 0 }}
-                  />
-                </div>
-              </Tabs>
-            )}
+                </Tabs>
+              )}
           </div>
         </DrawerContent>
       </Drawer>
