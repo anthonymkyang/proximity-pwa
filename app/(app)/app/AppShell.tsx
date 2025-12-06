@@ -1,11 +1,12 @@
 // app/(app)/app/AppShell.tsx
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/utils/supabase/client";
 import { usePathname } from "next/navigation";
 import MapCanvas from "@/components/map/MapCanvas";
 import AppBar from "@/components/nav/AppBar";
+import { Button } from "@/components/ui/button";
 
 /**
  * Presence strategy:
@@ -24,6 +25,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isMapPage = pathname === "/app";
   const hideAppBar = pathname?.startsWith("/app/messages/");
+
+  const [locationStatus, setLocationStatus] = useState<
+    "checking" | "granted" | "prompt" | "denied"
+  >("checking");
+  const [locationMessage, setLocationMessage] = useState<string | null>(null);
 
   const supabase = useRef(createClient()).current;
 
@@ -172,6 +178,89 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       void setOffline();
     };
   }, [setOnline, setAway, setOffline, upsertPresence, supabase]);
+
+  // --- request location before rendering ---
+  useEffect(() => {
+    let active = true;
+    const init = async () => {
+      if (typeof navigator === "undefined" || !navigator.geolocation) {
+        if (active) {
+          setLocationStatus("denied");
+          setLocationMessage("Location is not available on this device.");
+        }
+        return;
+      }
+
+      const setFromPermission = (state: PermissionState) => {
+        if (!active) return;
+        if (state === "granted") setLocationStatus("granted");
+        else setLocationStatus("prompt");
+      };
+
+      try {
+        if ("permissions" in navigator && navigator.permissions?.query) {
+          const perm = await navigator.permissions.query({
+            // @ts-expect-error geolocation is valid here
+            name: "geolocation",
+          });
+          setFromPermission(perm.state);
+          perm.onchange = () => setFromPermission(perm.state);
+          return;
+        }
+      } catch {
+        // fall through to prompt
+      }
+
+      setLocationStatus("prompt");
+    };
+
+    void init();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const requestLocationAccess = useCallback(async () => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setLocationStatus("denied");
+      setLocationMessage("Location is not available on this device.");
+      return;
+    }
+    setLocationStatus("checking");
+    setLocationMessage(null);
+    navigator.geolocation.getCurrentPosition(
+      () => setLocationStatus("granted"),
+      (err) => {
+        setLocationStatus("denied");
+        setLocationMessage(
+          err?.message || "Location was denied. Please enable it to continue."
+        );
+      },
+      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 }
+    );
+  }, []);
+
+  if (locationStatus !== "granted") {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background px-6 text-center text-foreground">
+        <div className="space-y-2">
+          <h1 className="text-xl font-semibold">Enable location to continue</h1>
+          <p className="text-muted-foreground text-sm">
+            We use your location to center the map and show nearby stations.
+          </p>
+          {locationMessage ? (
+            <p className="text-destructive text-sm">{locationMessage}</p>
+          ) : null}
+        </div>
+        <Button size="lg" onClick={() => void requestLocationAccess()}>
+          Allow location
+        </Button>
+        {locationStatus === "checking" ? (
+          <p className="text-muted-foreground text-xs">Requesting location…</p>
+        ) : null}
+      </div>
+    );
+  }
 
   // --- existing UI shell (map + app bar + content) ---
   const appBarHeight = hideAppBar ? 0 : 72;

@@ -1,13 +1,78 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import maplibregl, {
   type GeoJSONSource,
   type Map as MaplibreMap,
   type StyleSpecification,
 } from "maplibre-gl";
-import { Compass, Grid, Minus, Plus } from "lucide-react";
+import {
+  BusFront,
+  Compass,
+  AlertCircle,
+  Footprints,
+  Grid,
+  Minus,
+  Plus,
+  TrainFront,
+  TrainFrontTunnel,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+} from "@/components/ui/drawer";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
+
+const LINE_COLORS: Record<string, string> = {
+  bakerloo: "#B36305",
+  central: "#E32017",
+  circle: "#FFD300",
+  district: "#00782A",
+  "hammersmith & city": "#F3A9BB",
+  jubilee: "#A0A5A9",
+  metropolitan: "#9B0056",
+  northern: "#000000",
+  piccadilly: "#003688",
+  victoria: "#0098D4",
+  "waterloo & city": "#95CDBA",
+  dlr: "#00AFAD",
+  "elizabeth line": "#6950A1",
+  "london overground": "#EE7C0E",
+  overground: "#EE7C0E",
+  tram: "#66CC00",
+};
+
+const getLineColor = (name: string) => {
+  const key = name.trim().toLowerCase();
+  return LINE_COLORS[key] ?? "#374151";
+};
+
+const getContrastingText = (color: string) => {
+  const hex = color.replace("#", "");
+  const normalized =
+    hex.length === 3
+      ? hex
+          .split("")
+          .map((c) => c + c)
+          .join("")
+      : hex;
+  if (normalized.length !== 6) return "#0b0b0b";
+  const r = parseInt(normalized.slice(0, 2), 16);
+  const g = parseInt(normalized.slice(2, 4), 16);
+  const b = parseInt(normalized.slice(4, 6), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.7 ? "#0b0b0b" : "#ffffff";
+};
 
 const OPENFREEMAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
 const LOCAL_STYLE_PATH = "/maps/proximity-dark.json"; // place your Maputnik JSON here
@@ -85,10 +150,96 @@ const STOP_TYPE_PRIORITY = new Map([
   ["NaptanLightRailStation", 2],
 ]);
 
-const normalizeCssColor = (input: string | null | undefined, fallback: string) => {
-  if (typeof window === "undefined") return fallback;
-  const canvas = document.createElement("canvas");
-  canvas.width = 1;
+const MODE_PRIORITY: Record<string, number> = {
+  walking: 1,
+  walk: 1,
+  bicycle: 2,
+  cycle: 2,
+  bus: 3,
+  coach: 3,
+  tram: 3,
+  dlr: 4,
+  tube: 4,
+  "london-overground": 4,
+  overground: 4,
+  "elizabeth-line": 4,
+  rail: 5,
+  train: 5,
+  "national-rail": 5,
+};
+
+const normalizeMode = (mode: string) => mode.toLowerCase().replace(/\s+/g, "-");
+
+const formatModeLabel = (mode: string) => {
+  const normalized = normalizeMode(mode);
+  switch (normalized) {
+    case "walking":
+    case "walk":
+      return "Walk";
+    case "bus":
+      return "Bus";
+    case "tube":
+      return "Tube";
+    case "dlr":
+      return "DLR";
+    case "london-overground":
+    case "overground":
+      return "Overground";
+    case "elizabeth-line":
+      return "Elizabeth line";
+    case "tram":
+      return "Tram";
+    case "rail":
+    case "train":
+    case "national-rail":
+      return "Train";
+    case "bicycle":
+    case "cycle":
+      return "Cycle";
+    case "coach":
+      return "Coach";
+    default:
+      return mode || "Route";
+  }
+};
+
+const getModeIcon = (normalizedMode: string) => {
+  switch (normalizedMode) {
+    case "walking":
+    case "walk":
+      return <Footprints className="h-4 w-4" />;
+    case "bus":
+    case "coach":
+      return <BusFront className="h-4 w-4" />;
+    case "tube":
+    case "dlr":
+    case "tram":
+    case "london-overground":
+    case "overground":
+    case "elizabeth-line":
+      return <TrainFrontTunnel className="h-4 w-4" />;
+    case "rail":
+    case "train":
+    case "national-rail":
+      return <TrainFront className="h-4 w-4" />;
+    default:
+      return null;
+  }
+};
+
+const formatDuration = (minutes: number | undefined | null) => {
+  if (!minutes || Number.isNaN(minutes)) return "";
+  if (minutes < 60) return `${minutes} min`;
+  const hrs = Math.floor(minutes / 60);
+  const mins = Math.round(minutes % 60);
+    if (mins === 0) return `${hrs} hr${hrs > 1 ? "s" : ""}`;
+    return `${hrs} hr ${mins} min`;
+  };
+
+  const normalizeCssColor = (input: string | null | undefined, fallback: string) => {
+    if (typeof window === "undefined") return fallback;
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
   canvas.height = 1;
   const ctx = canvas.getContext("2d");
   if (!ctx) return fallback;
@@ -115,6 +266,60 @@ const resolveCssVarColor = (varName: string, fallback: string) => {
     .trim();
   if (!raw) return fallback;
   return normalizeCssColor(raw, fallback);
+};
+
+const InstructionWithLineBadges = ({ text }: { text: string }) => {
+  if (!text) return null;
+  const result: React.ReactNode[] = [];
+  const tokenRegex =
+    /(\b[A-Za-z]+ line\b)|(\b(?:[NC]?\d{1,3}[A-Z]?|[A-Z]\d{1,2})\b)/gi;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = tokenRegex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      result.push(text.slice(lastIndex, match.index));
+    }
+    const [full, lineMatch, busMatch] = match;
+    if (lineMatch) {
+      const lineName = lineMatch.replace(/ line/i, "").trim();
+      const bg = getLineColor(lineName);
+      const fg = getContrastingText(bg);
+      result.push(
+        <span
+          key={`${lineMatch}-${match.index}`}
+          className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold align-middle"
+          style={{ backgroundColor: bg, color: fg }}
+        >
+          {lineMatch}
+        </span>
+      );
+    } else if (busMatch) {
+      result.push(
+        <span
+          key={`${busMatch}-${match.index}`}
+          className="inline-flex items-center rounded-full bg-red-600 px-2 py-0.5 text-[11px] font-semibold text-white align-middle"
+        >
+          {busMatch}
+        </span>
+      );
+    } else {
+      result.push(full);
+    }
+    lastIndex = tokenRegex.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    result.push(text.slice(lastIndex));
+  }
+
+  return (
+    <span className="whitespace-pre-wrap leading-relaxed">
+      {result.map((node, idx) => (
+        <React.Fragment key={idx}>{node}</React.Fragment>
+      ))}
+    </span>
+  );
 };
 
 const addRoundelIcons = async (map: MaplibreMap) => {
@@ -400,6 +605,113 @@ export default function MapCanvas() {
   const mapRef = useRef<MaplibreMap | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [bearing, setBearing] = useState(0);
+  const [locationError, setLocationError] = useState(false);
+  const [selectedStation, setSelectedStation] = useState<{
+    name: string;
+    displayName?: string;
+    modes?: string[];
+    lines?: string[];
+    coordinates?: [number, number];
+  } | null>(null);
+  const [directions, setDirections] = useState<
+    | { status: "idle" }
+    | { status: "loading" }
+    | { status: "error"; message: string }
+    | {
+        status: "ready";
+        journeys: {
+          id: string;
+          durationMins: number;
+          legs: {
+            mode: string;
+            normalizedMode: string;
+            summary: string;
+            duration?: number;
+          }[];
+        }[];
+      }
+  >({ status: "idle" });
+  const instructionsRef = useRef<HTMLDivElement | null>(null);
+  const [showScrollFadeBottom, setShowScrollFadeBottom] = useState(false);
+  const [showScrollFadeTop, setShowScrollFadeTop] = useState(false);
+
+  const requestLocation = async (forcePrompt = false) => {
+    if (typeof window === "undefined" || !("geolocation" in navigator)) {
+      throw new Error("Geolocation unavailable");
+    }
+
+    const getOnce = () =>
+      new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10_000,
+          maximumAge: forcePrompt ? 0 : 30_000,
+        });
+      });
+
+    const promptWithWatch = () =>
+      new Promise<GeolocationPosition>((resolve, reject) => {
+        const watchId = navigator.geolocation.watchPosition(
+          (pos) => {
+            navigator.geolocation.clearWatch(watchId);
+            resolve(pos);
+          },
+          (err) => {
+            navigator.geolocation.clearWatch(watchId);
+            reject(err);
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 10_000,
+            maximumAge: 0,
+          }
+        );
+        setTimeout(() => {
+          navigator.geolocation.clearWatch(watchId);
+          reject(new Error("Location timeout"));
+        }, 12_000);
+      });
+
+    try {
+      return await getOnce();
+    } catch (err) {
+      if (forcePrompt) {
+        return await promptWithWatch();
+      }
+      throw err;
+    }
+  };
+
+  const centerToUser = async (forcePrompt = false) => {
+    try {
+      setLocationError(false);
+      const pos = await requestLocation(forcePrompt);
+      const lng = pos.coords.longitude;
+      const lat = pos.coords.latitude;
+      if (Number.isFinite(lng) && Number.isFinite(lat)) {
+        if (mapRef.current) {
+          mapRef.current.easeTo({
+            center: [lng, lat],
+            zoom: REQUESTED_ZOOM,
+            pitch: MAP_PITCH,
+            duration: 500,
+          });
+        }
+        return;
+      }
+      throw new Error("Invalid coordinates");
+    } catch {
+      setLocationError(true);
+      if (mapRef.current) {
+        mapRef.current.easeTo({
+          center: [FALLBACK_VIEW.lng, FALLBACK_VIEW.lat],
+          zoom: FALLBACK_VIEW.zoom,
+          pitch: MAP_PITCH,
+          duration: 500,
+        });
+      }
+    }
+  };
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -446,54 +758,68 @@ export default function MapCanvas() {
       map.on("rotate", handleRotate);
       map.on("pitch", handleRotate);
 
-      const setView = (
-        lng: number,
-        lat: number,
-        zoom = REQUESTED_ZOOM,
-        pitch = MAP_PITCH
-      ) => {
-        if (!mapRef.current) return;
-        mapRef.current.easeTo({
-          center: [lng, lat],
-          zoom,
-          pitch,
-          duration: 500,
-        });
-      };
+      void centerToUser();
 
-      const centerToUser = () => {
-        if (!("geolocation" in navigator)) {
-          setView(FALLBACK_VIEW.lng, FALLBACK_VIEW.lat, FALLBACK_VIEW.zoom);
-          return;
+      const toArray = (value: unknown): string[] => {
+        if (Array.isArray(value)) return value.map((v) => String(v));
+        if (value == null) return [];
+        if (typeof value === "string") {
+          const trimmed = value.trim();
+          if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+            try {
+              const parsed = JSON.parse(trimmed);
+              if (Array.isArray(parsed)) return parsed.map((v) => String(v));
+            } catch {
+              // fall back to wrapping
+            }
+          }
+          return [trimmed];
         }
-        navigator.geolocation.getCurrentPosition(
-          (pos) =>
-            setView(
-              pos.coords.longitude,
-              pos.coords.latitude,
-              REQUESTED_ZOOM,
-              MAP_PITCH
-            ),
-          () =>
-            setView(
-              FALLBACK_VIEW.lng,
-              FALLBACK_VIEW.lat,
-              FALLBACK_VIEW.zoom,
-              MAP_PITCH
-            ),
-          { enableHighAccuracy: true, timeout: 10_000, maximumAge: 30_000 }
-        );
+        return [String(value)];
       };
 
-      centerToUser();
+      const handleStationClick = (e: maplibregl.MapLayerMouseEvent) => {
+        const feature = e.features?.[0];
+        if (!feature) return;
+        const props = (feature.properties ?? {}) as Record<string, any>;
+        const coords = Array.isArray(feature.geometry?.coordinates)
+          ? (feature.geometry?.coordinates as [number, number])
+          : undefined;
+        setSelectedStation({
+          name: props.name ?? props.displayName ?? "Station",
+          displayName: props.displayName,
+          modes: toArray(props.modes),
+          lines: toArray(props.lines),
+          coordinates: coords,
+        });
+        setDirections({ status: "loading" });
+      };
+      const handleStationMouseEnter = () => {
+        map.getCanvas().style.cursor = "pointer";
+      };
+      const handleStationMouseLeave = () => {
+        map.getCanvas().style.cursor = "";
+      };
 
       const handleResize = () => map.resize();
       window.addEventListener("resize", handleResize);
+      map.on("click", "tfl-stations-icon", handleStationClick);
+      map.on("click", "tfl-stations-label", handleStationClick);
+      map.on("mouseenter", "tfl-stations-icon", handleStationMouseEnter);
+      map.on("mouseenter", "tfl-stations-label", handleStationMouseEnter);
+      map.on("mouseleave", "tfl-stations-icon", handleStationMouseLeave);
+      map.on("mouseleave", "tfl-stations-label", handleStationMouseLeave);
 
       return () => {
         window.removeEventListener("resize", handleResize);
         map.off("rotate", handleRotate);
         map.off("pitch", handleRotate);
+        map.off("click", "tfl-stations-icon", handleStationClick);
+        map.off("click", "tfl-stations-label", handleStationClick);
+        map.off("mouseenter", "tfl-stations-icon", handleStationMouseEnter);
+        map.off("mouseenter", "tfl-stations-label", handleStationMouseEnter);
+        map.off("mouseleave", "tfl-stations-icon", handleStationMouseLeave);
+        map.off("mouseleave", "tfl-stations-label", handleStationMouseLeave);
         map.remove();
         mapRef.current = null;
       };
@@ -507,6 +833,152 @@ export default function MapCanvas() {
       });
     };
   }, []);
+
+  useEffect(() => {
+    let canceled = false;
+    const run = async () => {
+      if (!selectedStation?.coordinates) {
+        setDirections({ status: "idle" });
+        return;
+      }
+      setDirections({ status: "loading" });
+
+      const getPosition = () =>
+        new Promise<GeolocationPosition>((resolve, reject) => {
+          if (!("geolocation" in navigator)) {
+            reject(new Error("Geolocation unavailable"));
+            return;
+          }
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 10_000,
+            maximumAge: 30_000,
+          });
+        });
+
+      let userPos: GeolocationPosition;
+      try {
+        userPos = await getPosition();
+      } catch {
+        if (!canceled) {
+          setDirections({
+            status: "error",
+            message: "Turn on location to get directions.",
+          });
+        }
+        return;
+      }
+
+      const [stationLon, stationLat] = selectedStation.coordinates;
+      const url = new URL("/api/tfl-journey", window.location.origin);
+      url.searchParams.set("fromLat", userPos.coords.latitude.toString());
+      url.searchParams.set("fromLon", userPos.coords.longitude.toString());
+      url.searchParams.set("toLat", stationLat.toString());
+      url.searchParams.set("toLon", stationLon.toString());
+      url.searchParams.set(
+        "toName",
+        selectedStation.displayName || selectedStation.name || "Station"
+      );
+
+      try {
+        const res = await fetch(url.toString(), { cache: "no-store" });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(
+            data?.error || `Directions request failed ${res.status}`
+          );
+        }
+        const journeysRaw: any[] = Array.isArray(data?.journeys)
+          ? data.journeys
+          : [];
+        const journeys = journeysRaw.slice(0, 4).map((journey, idx) => {
+          const legs = (journey?.legs ?? []).map((leg: any) => {
+            const modeName = leg?.mode?.name ?? "travel";
+            const normalizedMode = normalizeMode(String(modeName));
+            return {
+              mode: modeName,
+              normalizedMode,
+              summary:
+                leg?.instruction?.summary ??
+                leg?.instruction?.detailed ??
+                leg?.departurePoint?.commonName ??
+                "Continue",
+              duration: leg?.duration,
+            };
+          });
+
+          const hasLongWalk = legs.some(
+            (l) => l.normalizedMode === "walking" && (l.duration ?? 0) > 5
+          );
+
+          const journeyId =
+            (journey?.startDateTime || journey?.arrivalDateTime || "journey") +
+            `-${idx}`;
+
+          return {
+            id: journeyId,
+            durationMins: journey?.duration ?? 0,
+            legs,
+            hasLongWalk,
+          };
+        });
+        if (journeys.length === 0) throw new Error("No journeys found");
+        journeys.sort((a, b) => {
+          const aMode = a.legs[0]?.normalizedMode ?? "travel";
+          const bMode = b.legs[0]?.normalizedMode ?? "travel";
+          const aPri = MODE_PRIORITY[aMode] ?? 99;
+          const bPri = MODE_PRIORITY[bMode] ?? 99;
+          if (aPri !== bPri) return aPri - bPri;
+          return (a.durationMins ?? 0) - (b.durationMins ?? 0);
+        });
+        if (!canceled) {
+          setDirections({
+            status: "ready",
+            journeys,
+          });
+        }
+      } catch (err: any) {
+        if (!canceled) {
+          setDirections({
+            status: "error",
+            message:
+              err?.message && typeof err.message === "string"
+                ? err.message
+                : "Directions unavailable right now.",
+          });
+        }
+      }
+    };
+
+    void run();
+    return () => {
+      canceled = true;
+    };
+  }, [selectedStation]);
+
+  useEffect(() => {
+    const el = instructionsRef.current;
+    if (!el) {
+      setShowScrollFadeBottom(false);
+      setShowScrollFadeTop(false);
+      return;
+    }
+    const update = () => {
+      if (!instructionsRef.current) return;
+      const { scrollTop, scrollHeight, clientHeight } = instructionsRef.current;
+      const canScroll = scrollHeight > clientHeight + 1;
+      const atBottom = scrollTop + clientHeight >= scrollHeight - 1;
+      setShowScrollFadeBottom(canScroll && !atBottom);
+      setShowScrollFadeTop(canScroll && scrollTop > 1);
+    };
+    update();
+    el.addEventListener("scroll", update);
+    window.addEventListener("resize", update);
+    return () => {
+      el.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, [directions]);
 
   return (
     <div className="relative h-full w-full" aria-hidden>
@@ -569,6 +1041,154 @@ export default function MapCanvas() {
           </Button>
         </div>
       </div>
+
+      {locationError ? (
+        <div className="pointer-events-none absolute right-4 top-4">
+          <Button
+            size="icon-sm"
+            variant="outline"
+            className="pointer-events-auto h-9 w-9 rounded-full border-destructive/70 text-destructive bg-background/80 backdrop-blur"
+            onClick={() => {
+              setLocationError(false);
+              void centerToUser(true);
+            }}
+            aria-label="Retry location access"
+          >
+            <AlertCircle className="h-4 w-4" />
+          </Button>
+        </div>
+      ) : null}
+
+      <Drawer
+        open={!!selectedStation}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedStation(null);
+            setDirections({ status: "idle" });
+          }
+        }}
+      >
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>
+              {selectedStation?.displayName || selectedStation?.name || "Station"}
+            </DrawerTitle>
+          </DrawerHeader>
+          <div className="flex flex-col gap-3 px-4 pb-4">
+            <div className="flex flex-wrap gap-2">
+              {(() => {
+                const lineTokens = Array.from(
+                  new Set(
+                    (selectedStation?.lines ?? [])
+                      .map((l) => (l ?? "").toString().trim())
+                      .filter(Boolean)
+                      .filter((l) => !/[0-9]/.test(l))
+                  )
+                );
+                if (lineTokens.length === 0) {
+                  return (
+                    <span className="text-muted-foreground text-sm">
+                      Line info unavailable
+                    </span>
+                  );
+                }
+                return lineTokens.map((line) => (
+                  <span
+                    key={line}
+                    className="rounded-full px-2 py-0.5 text-xs font-medium"
+                    style={{
+                      backgroundColor: getLineColor(line),
+                      color: getContrastingText(getLineColor(line)),
+                    }}
+                  >
+                    {line}
+                  </span>
+                ));
+              })()}
+            </div>
+            {directions.status === "loading" && (
+              <div className="space-y-2">
+                <div className="h-3.5 w-24 animate-pulse rounded bg-muted/70" />
+                <div className="space-y-2 rounded-lg border border-border/50 p-3">
+                  <div className="h-4 w-32 animate-pulse rounded bg-muted/70" />
+                  <div className="h-3 w-48 animate-pulse rounded bg-muted/60" />
+                  <div className="h-3 w-40 animate-pulse rounded bg-muted/60" />
+                </div>
+              </div>
+            )}
+            {directions.status === "error" && (
+              <span className="text-destructive text-sm">
+                {directions.message}
+              </span>
+            )}
+            {directions.status === "ready" && directions.journeys.length > 0 && (
+              <Tabs
+                defaultValue={directions.journeys[0]?.id}
+                className="w-full"
+              >
+                <TabsList className="mb-2">
+                  {directions.journeys.map((journey) => {
+                    return (
+                      <TabsTrigger
+                        key={journey.id}
+                        value={journey.id}
+                        className="flex items-center gap-1.5 rounded-full border border-border/60 bg-background px-3 py-1 text-xs font-medium"
+                      >
+                        <span>{formatDuration(journey.durationMins)}</span>
+                      </TabsTrigger>
+                    );
+                  })}
+                </TabsList>
+                <div className="relative">
+                  <div
+                    ref={instructionsRef}
+                    className="h-72 w-full overflow-y-auto [::-webkit-scrollbar]:hidden"
+                    style={{ scrollbarWidth: "none" }}
+                  >
+                    {directions.journeys.map((journey) => (
+                      <TabsContent key={journey.id} value={journey.id}>
+                        <ul className="space-y-2 text-xs text-muted-foreground">
+                          {journey.legs.map((leg, idx) => (
+                            <li
+                              key={`${journey.id}-${leg.summary}-${idx}`}
+                              className="rounded-lg border border-border/60 bg-muted/20 p-3"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="flex items-center gap-2 font-semibold capitalize text-foreground">
+                                  <span className="text-muted-foreground">
+                                    {getModeIcon(leg.normalizedMode)}
+                                  </span>
+                                  {formatModeLabel(leg.mode)}
+                                </span>
+                                {leg.duration ? (
+                                  <span className="text-muted-foreground text-[11px]">
+                                    {leg.duration} min
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+                                <InstructionWithLineBadges text={leg.summary} />
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </TabsContent>
+                    ))}
+                  </div>
+                  <div
+                    className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background to-transparent transition-opacity duration-200"
+                    style={{ opacity: showScrollFadeBottom ? 1 : 0 }}
+                  />
+                  <div
+                    className="pointer-events-none absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-background to-transparent transition-opacity duration-200"
+                    style={{ opacity: showScrollFadeTop ? 1 : 0 }}
+                  />
+                </div>
+              </Tabs>
+            )}
+          </div>
+        </DrawerContent>
+      </Drawer>
     </div>
   );
 }
