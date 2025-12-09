@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 const IDLE_MS = 90_000; // inactivity -> away
 const HEARTBEAT_MS = 60_000; // periodic heartbeat
 const MIN_WRITE_MS = 12_000; // throttle presence writes
+const SCROLL_FADE_THRESHOLD = 1;
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -39,6 +40,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const lastWriteAtRef = useRef(0);
   const lastSentStatusRef = useRef<"online" | "away" | "offline" | null>(null);
   const isMountedRef = useRef(true);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [isScrolled, setIsScrolled] = useState(false);
 
   // --- presence write helpers ---
   const canWriteNow = () => Date.now() - lastWriteAtRef.current >= MIN_WRITE_MS;
@@ -220,6 +223,23 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    const target = scrollRef.current;
+    const handler = () => {
+      const scrolled = target
+        ? target.scrollTop > SCROLL_FADE_THRESHOLD
+        : window.scrollY > SCROLL_FADE_THRESHOLD;
+      setIsScrolled(scrolled);
+    };
+    handler();
+    if (target) {
+      target.addEventListener("scroll", handler, { passive: true });
+      return () => target.removeEventListener("scroll", handler);
+    }
+    window.addEventListener("scroll", handler, { passive: true });
+    return () => window.removeEventListener("scroll", handler);
+  }, []);
+
   const requestLocationAccess = useCallback(async () => {
     if (typeof navigator === "undefined" || !navigator.geolocation) {
       setLocationStatus("denied");
@@ -269,6 +289,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <div className="fixed inset-0 z-0">
         <MapCanvas />
       </div>
+      <div
+        className={`pointer-events-none fixed inset-x-0 top-0 z-10 h-24 bg-gradient-to-b from-background/90 to-transparent transition-opacity duration-300 ${
+          isScrolled ? "opacity-100" : "opacity-0"
+        }`}
+      />
 
       <main
         className={`relative flex min-h-screen flex-col overflow-hidden ${
@@ -283,6 +308,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           className={`flex-1 min-h-0 overflow-auto ${
             isMapPage ? "pointer-events-none" : ""
           }`}
+          ref={scrollRef}
         >
           {children}
         </div>

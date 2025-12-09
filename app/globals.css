@@ -2,6 +2,19 @@
 @import "tw-animate-css";
 @import "react-image-crop/dist/ReactCrop.css";
 @import "maplibre-gl/dist/maplibre-gl.css";
+
+@keyframes map-avatar-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.map-avatar-spin {
+  animation: map-avatar-spin 10s linear infinite;
+}
 /* Make StackSansNotch available to canvas-based renderers (OpenLayers labels) */
 @font-face {
   font-family: "StackSansNotch";

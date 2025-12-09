@@ -7,6 +7,7 @@ import maplibregl, {
   type StyleSpecification,
 } from "maplibre-gl";
 import {
+  Clock,
   BusFront,
   Compass,
   AlertCircle,
@@ -14,8 +15,12 @@ import {
   Grid,
   Minus,
   Plus,
+  Globe,
   TrainFront,
   TrainFrontTunnel,
+  Navigation,
+  MessageCircle,
+  User as UserIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,6 +32,14 @@ import {
 } from "@/components/ui/drawer";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import MapWeather from "./MapWeather";
+import MapAvatar from "./MapAvatar";
+import MapPlace from "./MapPlace";
+import MapGroup from "./MapGroup";
+import MapFiltering from "./MapFiltering";
+import { createRoot, type Root } from "react-dom/client";
+import { createClient } from "@/utils/supabase/client";
+import { cn } from "@/lib/utils";
 
 const LINE_COLORS: Record<string, string> = {
   bakerloo: "#B36305",
@@ -74,6 +87,7 @@ const LOCAL_STYLE_PATH = "/maps/proximity-dark.json"; // place your Maputnik JSO
 const FALLBACK_VIEW = { lng: -0.1276, lat: 51.5074, zoom: 15 }; // London
 const REQUESTED_ZOOM = 15;
 const MAP_PITCH = 35;
+const BUILDING_SOURCE_ID = "openfreemap-buildings";
 const MAP_PADDING = { top: 16, right: 16, bottom: 96, left: 16 };
 const TFL_STATIONS_URL = "/api/tfl-stations";
 const TFL_DIRECT_URL =
@@ -142,6 +156,65 @@ const hideRoadNumbers = (map: MaplibreMap) => {
       map.setLayoutProperty(layer.id, "visibility", "none");
     }
   });
+};
+
+const addBuildingExtrusions = (map: MaplibreMap) => {
+  if (map.getSource(BUILDING_SOURCE_ID)) return;
+
+  const labelLayerId = map
+    .getStyle()
+    .layers?.find(
+      (layer) =>
+        layer.type === "symbol" &&
+        (layer.layout as { "text-field"?: unknown } | undefined)?.["text-field"]
+    )?.id;
+
+  map.addSource(BUILDING_SOURCE_ID, {
+    url: "https://tiles.openfreemap.org/planet",
+    type: "vector",
+  });
+
+  map.addLayer(
+    {
+      id: "3d-buildings",
+      source: BUILDING_SOURCE_ID,
+      "source-layer": "building",
+      type: "fill-extrusion",
+      minzoom: 15,
+      filter: ["!=", ["get", "hide_3d"], true],
+      paint: {
+        "fill-extrusion-color": [
+          "interpolate",
+          ["linear"],
+          ["get", "render_height"],
+          0,
+          "#0f1113",
+          120,
+          "#13171b",
+          300,
+          "#161b20",
+        ],
+        "fill-extrusion-height": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          15,
+          0,
+          16,
+          ["get", "render_height"],
+        ],
+        "fill-extrusion-base": [
+          "step",
+          ["zoom"],
+          0,
+          16,
+          ["coalesce", ["get", "render_min_height"], 0],
+        ],
+        "fill-extrusion-opacity": 0.4,
+      },
+    },
+    labelLayerId
+  );
 };
 
 const ALLOWED_STOP_TYPES = new Set([
@@ -550,7 +623,7 @@ const addTflStations = async (map: MaplibreMap) => {
         id: "tfl-stations-label",
         type: "symbol",
         source: "tfl-stations",
-        minzoom: 12.5,
+        minzoom: 14,
         layout: {
           "text-field": ["coalesce", ["get", "displayName"], ["get", "name"]],
           "text-font": ["Quicksand Bold"],
@@ -574,7 +647,7 @@ const addTflStations = async (map: MaplibreMap) => {
         id: "tfl-stations-icon",
         type: "symbol",
         source: "tfl-stations",
-        minzoom: 11,
+        minzoom: 13,
         layout: {
           "icon-image": [
             "case",
@@ -616,8 +689,10 @@ const addTflStations = async (map: MaplibreMap) => {
       map.setPaintProperty("tfl-stations-label", "text-opacity", 0.85);
       map.setPaintProperty("tfl-stations-icon", "icon-opacity", 0.95);
     }
+    return geojson;
   } catch {
     // swallow errors to keep map rendering
+    return EMPTY_FEATURE_COLLECTION;
   }
 };
 
@@ -626,12 +701,16 @@ export default function MapCanvas() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [bearing, setBearing] = useState(0);
   const [locationError, setLocationError] = useState(false);
+  const [userLocation, setUserLocation] = useState<[number, number] | null>(
+    null
+  );
   const [selectedStation, setSelectedStation] = useState<{
     name: string;
     displayName?: string;
     modes?: string[];
     lines?: string[];
     coordinates?: [number, number];
+    distanceKm?: number;
   } | null>(null);
   const [directions, setDirections] = useState<
     | { status: "idle" }
@@ -654,6 +733,249 @@ export default function MapCanvas() {
   const instructionsRef = useRef<HTMLDivElement | null>(null);
   const [showScrollFadeBottom, setShowScrollFadeBottom] = useState(false);
   const [showScrollFadeTop, setShowScrollFadeTop] = useState(false);
+  const friendMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const friendMarkerRootRef = useRef<Root | null>(null);
+  const friendMarker2Ref = useRef<maplibregl.Marker | null>(null);
+  const friendMarker2RootRef = useRef<Root | null>(null);
+  const friendMarker3Ref = useRef<maplibregl.Marker | null>(null);
+  const friendMarker3RootRef = useRef<Root | null>(null);
+  const friendMarker4Ref = useRef<maplibregl.Marker | null>(null);
+  const friendMarker4RootRef = useRef<Root | null>(null);
+  const friendMarker5Ref = useRef<maplibregl.Marker | null>(null);
+  const friendMarker5RootRef = useRef<Root | null>(null);
+  const friendMarker6Ref = useRef<maplibregl.Marker | null>(null);
+  const friendMarker6RootRef = useRef<Root | null>(null);
+  const groupMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const groupMarkerRootRef = useRef<Root | null>(null);
+  const placeMarkersRef = useRef<{ marker: maplibregl.Marker; root: Root }[]>(
+    []
+  );
+  const stationsRef = useRef<GeoJSON.FeatureCollection | null>(null);
+  const [profileName, setProfileName] = useState<string | null>(null);
+  const [selectedPerson, setSelectedPerson] = useState<{
+    name: string;
+    presence: "online" | "away" | "offline";
+    location?: [number, number];
+  } | null>(null);
+  const [places, setPlaces] = useState<
+    {
+      id: string;
+      name: string;
+      lat: number;
+      lng: number;
+      tz?: string | null;
+      logo_url?: string | null;
+      website?: string | null;
+      category?: { name?: string | null; slug?: string | null } | null;
+    }[]
+  >([]);
+  const [selectedPlace, setSelectedPlace] = useState<{
+    id: string;
+    name: string;
+    lat: number;
+    lng: number;
+    tz?: string | null;
+    logo_url?: string | null;
+    website?: string | null;
+    category?: { name?: string | null; slug?: string | null } | null;
+  } | null>(null);
+  const [placeHours, setPlaceHours] = useState<
+    {
+      day_of_week: number;
+      open_time: string;
+      close_time: string;
+      is_closed?: boolean | null;
+      is_24h?: boolean | null;
+    }[]
+  >([]);
+  const [placeHoursByPlace, setPlaceHoursByPlace] = useState<
+    Record<
+      string,
+      { day_of_week: number; open_time: string; close_time: string; is_24h?: boolean | null }[]
+    >
+  >({});
+  const computePlaceStatusFor = (
+    placeId: string,
+    tz: string | null | undefined
+  ) => {
+    const tzName = tz || "UTC";
+    const now = new Date();
+    const tzNow = new Date(now.toLocaleString("en-US", { timeZone: tzName }));
+    const minutesNow = tzNow.getHours() * 60 + tzNow.getMinutes();
+    const day = tzNow.getDay();
+    const entries = placeHoursByPlace[placeId];
+    if (!entries || entries.length === 0) return null;
+    const entry = entries.find((h) => h.day_of_week === day);
+    if (!entry) return null;
+    if (entry.is_24h) return "open" as const;
+    const parseMinutes = (t: string) => {
+      const [hh, mm] = t.split(":");
+      const h = Number(hh);
+      const m = Number(mm);
+      if (!Number.isFinite(h) || !Number.isFinite(m)) return NaN;
+      return h * 60 + m;
+    };
+    const openMins = parseMinutes(entry.open_time);
+    const closeMins = parseMinutes(entry.close_time);
+    if (!Number.isFinite(openMins) || !Number.isFinite(closeMins)) return null;
+
+    const crossesMidnight = closeMins <= openMins;
+    const isOpen = crossesMidnight
+      ? minutesNow >= openMins || minutesNow < closeMins
+      : minutesNow >= openMins && minutesNow < closeMins;
+
+    if (isOpen) {
+      const untilClose = crossesMidnight
+        ? minutesNow >= openMins
+          ? 24 * 60 - minutesNow + closeMins
+          : closeMins - minutesNow
+        : closeMins - minutesNow;
+      return untilClose <= 60 ? ("closing" as const) : ("open" as const);
+    }
+    return "closed" as const;
+  };
+  const [placeHoursLoading, setPlaceHoursLoading] = useState(false);
+  const [showDirectionsDrawer, setShowDirectionsDrawer] = useState(false);
+  const [showStationDrawer, setShowStationDrawer] = useState(false);
+  const [directionsTitle, setDirectionsTitle] = useState<string | null>(null);
+  const [showPlaceDrawer, setShowPlaceDrawer] = useState(false);
+  const [showGroupDrawer, setShowGroupDrawer] = useState(false);
+  const [showGridDrawer, setShowGridDrawer] = useState(false);
+  const gridScrollRef = useRef<HTMLDivElement | null>(null);
+  const [gridTopFade, setGridTopFade] = useState(false);
+  const [gridBottomFade, setGridBottomFade] = useState(false);
+
+  const findNearestStation = (
+    coords: [number, number]
+  ):
+    | {
+        name: string;
+        displayName: string;
+        coordinates: [number, number];
+        lines?: string[];
+        modes?: string[];
+        distanceKm?: number;
+      }
+    | null => {
+    const stations = stationsRef.current?.features ?? [];
+    if (!coords || stations.length === 0) return null;
+
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const [lon1, lat1] = coords;
+    let nearest: {
+      name: string;
+      displayName: string;
+      coordinates: [number, number];
+      lines?: string[];
+      modes?: string[];
+      distanceKm?: number;
+    } | null = null;
+    let best = Number.POSITIVE_INFINITY;
+
+    for (const feature of stations) {
+      if (
+        feature.geometry?.type !== "Point" ||
+        !Array.isArray(feature.geometry.coordinates)
+      ) {
+        continue;
+      }
+      const [lon2, lat2] = feature.geometry.coordinates as [number, number];
+      if (
+        !Number.isFinite(lon2) ||
+        !Number.isFinite(lat2) ||
+        !Number.isFinite(lon1) ||
+        !Number.isFinite(lat1)
+      ) {
+        continue;
+      }
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(lat1)) *
+          Math.cos(toRad(lat2)) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      const distanceKm = 6371 * c;
+      if (distanceKm < best) {
+        best = distanceKm;
+        const props = (feature.properties ?? {}) as Record<string, any>;
+        nearest = {
+          name: props.name || "Station",
+          displayName: props.displayName || props.name || "Station",
+          coordinates: [lon2, lat2],
+          lines: props.lines ?? [],
+          modes: props.modes ?? [],
+          distanceKm: distanceKm,
+        };
+      }
+    }
+    return nearest;
+  };
+
+  const computePlaceStatus = () => {
+    if (!selectedPlace) return null;
+    const tz = selectedPlace.tz || "UTC";
+    const now = new Date();
+    const tzNow = new Date(
+      now.toLocaleString("en-US", { timeZone: tz })
+    );
+    const minutesNow = tzNow.getHours() * 60 + tzNow.getMinutes();
+    const day = tzNow.getDay(); // 0 Sunday ... 6 Saturday
+
+    const entry = placeHours.find((h) => h.day_of_week === day);
+    if (!entry) return { state: "closed" as const };
+    if (entry.is_24h) return { state: "open" as const, closingSoon: false };
+
+    const parseMinutes = (t: string) => {
+      const [hh, mm] = t.split(":");
+      const h = Number(hh);
+      const m = Number(mm);
+      if (!Number.isFinite(h) || !Number.isFinite(m)) return NaN;
+      return h * 60 + m;
+    };
+
+    const openMins = parseMinutes(entry.open_time);
+    const closeMins = parseMinutes(entry.close_time);
+    if (!Number.isFinite(openMins) || !Number.isFinite(closeMins)) {
+      return { state: "closed" as const };
+    }
+
+    const crossesMidnight = closeMins <= openMins;
+    const isOpen = crossesMidnight
+      ? minutesNow >= openMins || minutesNow < closeMins
+      : minutesNow >= openMins && minutesNow < closeMins;
+
+    if (isOpen) {
+      const untilClose = crossesMidnight
+        ? minutesNow >= openMins
+          ? 24 * 60 - minutesNow + closeMins
+          : closeMins - minutesNow
+        : closeMins - minutesNow;
+      return {
+        state: untilClose <= 60 ? ("closing" as const) : ("open" as const),
+        closingSoon: untilClose <= 60,
+      };
+    }
+    return { state: "closed" as const };
+  };
+
+  const getStationIcon = (
+    lines?: string[] | null,
+    modes?: string[] | null
+  ): string => {
+    const lowerModes = (modes ?? []).map((m) => m.toLowerCase());
+    const lowerLines = (lines ?? []).map((l) => l.toLowerCase());
+
+    if (lowerModes.includes("national-rail")) return "/icons/national_rail.svg";
+    if (lowerModes.includes("dlr") || lowerLines.includes("dlr"))
+      return "/icons/dlr.svg";
+    if (lowerModes.includes("overground") || lowerLines.includes("overground"))
+      return "/icons/overground.svg";
+    // default to tube roundel
+    return "/icons/tube.svg";
+  };
 
   const requestLocation = async (forcePrompt = false) => {
     if (typeof window === "undefined" || !("geolocation" in navigator)) {
@@ -709,6 +1031,7 @@ export default function MapCanvas() {
       const lng = pos.coords.longitude;
       const lat = pos.coords.latitude;
       if (Number.isFinite(lng) && Number.isFinite(lat)) {
+        setUserLocation([lng, lat]);
         if (mapRef.current) {
           mapRef.current.easeTo({
             center: [lng, lat],
@@ -722,6 +1045,7 @@ export default function MapCanvas() {
       throw new Error("Invalid coordinates");
     } catch {
       setLocationError(true);
+      setUserLocation(null);
       if (mapRef.current) {
         mapRef.current.easeTo({
           center: [FALLBACK_VIEW.lng, FALLBACK_VIEW.lat],
@@ -760,6 +1084,8 @@ export default function MapCanvas() {
         center: [FALLBACK_VIEW.lng, FALLBACK_VIEW.lat],
         zoom: FALLBACK_VIEW.zoom,
         pitch: MAP_PITCH,
+        // @ts-expect-error antialias is supported by MapLibre at runtime
+        antialias: true,
         attributionControl: false,
       });
 
@@ -767,10 +1093,12 @@ export default function MapCanvas() {
 
       map.on("load", () => {
         hideRoadNumbers(map);
+        addBuildingExtrusions(map);
         map.setPadding(MAP_PADDING);
         void (async () => {
           await addRoundelIcons(map);
-          await addTflStations(map);
+          const stations = await addTflStations(map);
+          stationsRef.current = stations;
         })();
       });
 
@@ -813,6 +1141,7 @@ export default function MapCanvas() {
           lines: toArray(props.lines),
           coordinates: coords,
         });
+        setShowStationDrawer(true);
         setDirections({ status: "loading" });
       };
       const handleStationMouseEnter = () => {
@@ -852,8 +1181,531 @@ export default function MapCanvas() {
       void maybeCleanup?.then((cleanup) => {
         if (typeof cleanup === "function") cleanup();
       });
+      friendMarkerRef.current?.remove();
+      friendMarkerRef.current = null;
+      if (friendMarkerRootRef.current) {
+        requestAnimationFrame(() => friendMarkerRootRef.current?.unmount());
+        friendMarkerRootRef.current = null;
+      }
+      friendMarker2Ref.current?.remove();
+      friendMarker2Ref.current = null;
+      if (friendMarker2RootRef.current) {
+        requestAnimationFrame(() => friendMarker2RootRef.current?.unmount());
+        friendMarker2RootRef.current = null;
+      }
+      friendMarker3Ref.current?.remove();
+      friendMarker3Ref.current = null;
+      if (friendMarker3RootRef.current) {
+        requestAnimationFrame(() => friendMarker3RootRef.current?.unmount());
+        friendMarker3RootRef.current = null;
+      }
+      friendMarker4Ref.current?.remove();
+      friendMarker4Ref.current = null;
+      if (friendMarker4RootRef.current) {
+        requestAnimationFrame(() => friendMarker4RootRef.current?.unmount());
+        friendMarker4RootRef.current = null;
+      }
+      friendMarker5Ref.current?.remove();
+      friendMarker5Ref.current = null;
+      if (friendMarker5RootRef.current) {
+        requestAnimationFrame(() => friendMarker5RootRef.current?.unmount());
+        friendMarker5RootRef.current = null;
+      }
+      friendMarker6Ref.current?.remove();
+      friendMarker6Ref.current = null;
+      if (friendMarker6RootRef.current) {
+        requestAnimationFrame(() => friendMarker6RootRef.current?.unmount());
+        friendMarker6RootRef.current = null;
+      }
+      groupMarkerRef.current?.remove();
+      groupMarkerRef.current = null;
+      if (groupMarkerRootRef.current) {
+        requestAnimationFrame(() => groupMarkerRootRef.current?.unmount());
+        groupMarkerRootRef.current = null;
+      }
+      userMarkerRef.current?.remove();
+      userMarkerRef.current = null;
+      setDirectionsTitle(null);
+      setShowPlaceDrawer(false);
+      setShowGroupDrawer(false);
     };
   }, []);
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      const supabase = createClient();
+      const userId = "fb66cdef-296f-48f9-9c6e-29114cce6624";
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("profile_title,name")
+        .eq("id", userId)
+        .maybeSingle();
+      if (!error && data) {
+        setProfileName(data.profile_title || data.name || null);
+      }
+    };
+    void loadProfile();
+  }, []);
+
+  const userMarkerRef = useRef<maplibregl.Marker | null>(null);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (userLocation) {
+      let marker = userMarkerRef.current;
+      if (!marker) {
+        const container = document.createElement("div");
+        container.className =
+          "pointer-events-none relative flex items-center justify-center";
+
+        const ripple = document.createElement("span");
+        ripple.className =
+          "absolute inline-flex h-12 w-12 rounded-full bg-primary/35 animate-ping";
+        ripple.style.animationDuration = "1.8s";
+
+        const core = document.createElement("span");
+        core.className =
+          "relative inline-flex h-4 w-4 rounded-full bg-gradient-to-br from-primary via-primary to-primary/60";
+
+        container.appendChild(ripple);
+        container.appendChild(core);
+
+        marker = new maplibregl.Marker({ element: container });
+        userMarkerRef.current = marker;
+      }
+      marker.setLngLat(userLocation).addTo(map);
+    } else if (userMarkerRef.current) {
+      userMarkerRef.current.remove();
+      userMarkerRef.current = null;
+    }
+
+    return () => {
+      userMarkerRef.current?.remove();
+      userMarkerRef.current = null;
+    };
+  }, [userLocation, profileName]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !userLocation) return;
+
+    const [lon, lat] = userLocation;
+    const nearby: [number, number] = [lon + 0.0025, lat + 0.0012];
+    const nearby2: [number, number] = [lon - 0.002, lat + 0.0017];
+    const nearby3: [number, number] = [lon + 0.0015, lat - 0.0015];
+    const greenPark: [number, number] = [-0.1425, 51.5069];
+    // Brixton marker (random nearby street)
+    const brixton: [number, number] = [-0.1109, 51.4611];
+    const nottingHill: [number, number] = [-0.1967, 51.5094];
+    const stGilesHotel: [number, number] = [-0.1305, 51.5164];
+    const avatarUrl =
+      "/api/photos/avatars?path=fb66cdef-296f-48f9-9c6e-29114cce6624%2F1762977064388.jpg";
+    const displayName = profileName || "Nearby user";
+
+    let marker = friendMarkerRef.current;
+    let root = friendMarkerRootRef.current;
+    let marker2 = friendMarker2Ref.current;
+    let root2 = friendMarker2RootRef.current;
+    let marker3 = friendMarker3Ref.current;
+    let root3 = friendMarker3RootRef.current;
+    let marker4 = friendMarker4Ref.current;
+    let root4 = friendMarker4RootRef.current;
+    let marker5 = friendMarker5Ref.current;
+    let root5 = friendMarker5RootRef.current;
+    let marker6 = friendMarker6Ref.current;
+    let root6 = friendMarker6RootRef.current;
+    let groupMarker = groupMarkerRef.current;
+    let groupRoot = groupMarkerRootRef.current;
+
+    if (!marker) {
+      const container = document.createElement("div");
+      container.className =
+        "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
+      root = createRoot(container);
+      friendMarkerRootRef.current = root;
+      marker = new maplibregl.Marker({ element: container, anchor: "center" });
+      friendMarkerRef.current = marker;
+    }
+
+    if (!marker2) {
+      const container = document.createElement("div");
+      container.className =
+        "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
+      root2 = createRoot(container);
+      friendMarker2RootRef.current = root2;
+      marker2 = new maplibregl.Marker({
+        element: container,
+        anchor: "center",
+      });
+      friendMarker2Ref.current = marker2;
+    }
+
+    if (!marker3) {
+      const container = document.createElement("div");
+      container.className =
+        "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
+      root3 = createRoot(container);
+      friendMarker3RootRef.current = root3;
+      marker3 = new maplibregl.Marker({
+        element: container,
+        anchor: "center",
+      });
+      friendMarker3Ref.current = marker3;
+    }
+
+    if (!marker4) {
+      const container = document.createElement("div");
+      container.className =
+        "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
+      root4 = createRoot(container);
+      friendMarker4RootRef.current = root4;
+      marker4 = new maplibregl.Marker({
+        element: container,
+        anchor: "center",
+      });
+      friendMarker4Ref.current = marker4;
+    }
+
+    if (!marker5) {
+      const container = document.createElement("div");
+      container.className =
+        "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
+      root5 = createRoot(container);
+      friendMarker5RootRef.current = root5;
+      marker5 = new maplibregl.Marker({
+        element: container,
+        anchor: "center",
+      });
+      friendMarker5Ref.current = marker5;
+    }
+
+    if (!marker6) {
+      const container = document.createElement("div");
+      container.className =
+        "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
+      root6 = createRoot(container);
+      friendMarker6RootRef.current = root6;
+      marker6 = new maplibregl.Marker({
+        element: container,
+        anchor: "center",
+      });
+      friendMarker6Ref.current = marker6;
+    }
+
+    if (!groupMarker) {
+      const container = document.createElement("div");
+      container.className =
+        "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
+      groupRoot = createRoot(container);
+      groupMarkerRootRef.current = groupRoot;
+      groupMarker = new maplibregl.Marker({
+        element: container,
+        anchor: "center",
+      });
+      groupMarkerRef.current = groupMarker;
+    }
+
+    root?.render(
+      <MapAvatar
+        size={44}
+        avatarUrl={avatarUrl}
+        className="border-white/70 shadow-lg"
+        alt={displayName}
+        presence="away"
+        onClick={() =>
+          setSelectedPerson({
+            name: displayName,
+            presence: "away",
+            location:
+              (marker?.getLngLat().toArray() as [number, number]) ?? nearby,
+          })
+        }
+      />
+    );
+
+    root2?.render(
+      <MapAvatar
+        size={44}
+        avatarUrl={avatarUrl}
+        className="border-white/70 shadow-lg"
+        alt={displayName}
+        presence="online"
+        messages
+        newMessages
+        onClick={() =>
+          setSelectedPerson({
+            name: displayName,
+            presence: "online",
+            location:
+              (marker2?.getLngLat().toArray() as [number, number]) ?? nearby2,
+          })
+        }
+      />
+    );
+
+    root3?.render(
+      <MapAvatar
+        size={44}
+        avatarUrl={avatarUrl}
+        className="border-white/70 shadow-lg"
+        alt={displayName}
+        presence="offline"
+        messages
+        onClick={() =>
+          setSelectedPerson({
+            name: displayName,
+            presence: "offline",
+            location:
+              (marker3?.getLngLat().toArray() as [number, number]) ?? nearby3,
+          })
+        }
+      />
+    );
+
+    root4?.render(
+      <MapAvatar
+        size={44}
+        avatarUrl={avatarUrl}
+        className="border-white/70 shadow-lg"
+        alt={displayName}
+        presence="online"
+        onClick={() =>
+          setSelectedPerson({
+            name: displayName,
+            presence: "online",
+            location:
+              (marker4?.getLngLat().toArray() as [number, number]) ?? greenPark,
+          })
+        }
+      />
+    );
+
+    root5?.render(
+      <MapAvatar
+        size={44}
+        avatarUrl={avatarUrl}
+        className="border-white/70 shadow-lg"
+        alt={displayName}
+        presence="away"
+        onClick={() =>
+          setSelectedPerson({
+            name: displayName,
+            presence: "away",
+            location:
+              (marker5?.getLngLat().toArray() as [number, number]) ?? brixton,
+          })
+        }
+      />
+    );
+
+    root6?.render(
+      <MapAvatar
+        size={44}
+        avatarUrl={avatarUrl}
+        className="border-white/70 shadow-lg"
+        alt={displayName}
+        presence="online"
+        onClick={() =>
+          setSelectedPerson({
+            name: displayName,
+            presence: "online",
+            location:
+              (marker6?.getLngLat().toArray() as [number, number]) ??
+              nottingHill,
+          })
+        }
+      />
+    );
+
+    groupRoot?.render(
+      <MapGroup size={32} onClick={() => setShowGroupDrawer(true)} />
+    );
+
+    marker?.setLngLat(nearby).addTo(map);
+    marker2?.setLngLat(nearby2).addTo(map);
+    marker3?.setLngLat(nearby3).addTo(map);
+    marker4?.setLngLat(greenPark).addTo(map);
+    marker5?.setLngLat(brixton).addTo(map);
+    marker6?.setLngLat(nottingHill).addTo(map);
+    groupMarker?.setLngLat(stGilesHotel).addTo(map);
+
+    return () => {
+      marker?.remove();
+      marker2?.remove();
+      marker3?.remove();
+      marker4?.remove();
+      marker5?.remove();
+      marker6?.remove();
+      groupMarker?.remove();
+    };
+  }, [userLocation, profileName]);
+
+  useEffect(() => {
+    return () => {
+      setShowGroupDrawer(false);
+    };
+  }, []);
+
+  useEffect(() => {
+    const supabase = createClient();
+    let active = true;
+    const loadPlaces = async () => {
+      const { data, error } = await supabase
+        .from("places")
+        .select(
+          "id,name,lat,lng,tz,logo_url,website,category:places_categories(name,slug)"
+        )
+        .limit(100);
+      if (!active) return;
+      if (!error && Array.isArray(data)) {
+        setPlaces(
+          data
+            .map((p) => ({
+              id: p.id as string,
+              name: p.name as string,
+              lat: Number(p.lat),
+              lng: Number(p.lng),
+              tz: (p as any).tz ?? null,
+              logo_url: (p as any).logo_url ?? null,
+              website: (p as any).website ?? null,
+              category: (p as any).category ?? null,
+            }))
+            .filter(
+              (p) =>
+                Number.isFinite(p.lat) &&
+                Number.isFinite(p.lng) &&
+                typeof p.name === "string"
+            )
+        );
+      }
+    };
+    void loadPlaces();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    // cleanup old markers
+    placeMarkersRef.current.forEach(({ marker, root }) => {
+      marker.remove();
+      requestAnimationFrame(() => root.unmount());
+    });
+    placeMarkersRef.current = [];
+
+    const newMarkers: { marker: maplibregl.Marker; root: Root }[] = [];
+
+    places.forEach((place) => {
+      const status = computePlaceStatusFor(place.id, place.tz || "UTC");
+      const container = document.createElement("div");
+      container.className =
+        "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
+      const root = createRoot(container);
+      root.render(
+        <MapPlace
+          size={30}
+          imageUrl={place.logo_url || "/logos/prowler.svg"}
+          alt={place.name}
+          status={status}
+          onClick={() => {
+            setSelectedPlace(place);
+            setShowPlaceDrawer(true);
+          }}
+        />
+      );
+      const marker = new maplibregl.Marker({ element: container, anchor: "center" });
+      marker.setLngLat([place.lng, place.lat]).addTo(map);
+      newMarkers.push({ marker, root });
+    });
+
+    placeMarkersRef.current = newMarkers;
+
+    return () => {
+      newMarkers.forEach(({ marker, root }) => {
+        marker.remove();
+        requestAnimationFrame(() => root.unmount());
+      });
+    };
+  }, [places, placeHoursByPlace]);
+
+  useEffect(() => {
+    let active = true;
+    const fetchHours = async () => {
+      if (!selectedPlace?.id) {
+        setPlaceHours([]);
+        return;
+      }
+      setPlaceHoursLoading(true);
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("place_hours")
+        .select(
+          "day_of_week, open_time::text, close_time::text, interval_index, is_24h"
+        )
+        .eq("place_id", selectedPlace.id)
+        .order("day_of_week");
+      if (!active) return;
+      if (!error && Array.isArray(data)) {
+        setPlaceHours(
+          data.map((row) => ({
+            day_of_week: Number(row.day_of_week),
+            open_time: typeof row.open_time === "string" ? row.open_time : "",
+            close_time: typeof row.close_time === "string" ? row.close_time : "",
+            is_closed: false,
+            is_24h: (row as any).is_24h ?? false,
+          }))
+        );
+      } else {
+        setPlaceHours([]);
+      }
+      setPlaceHoursLoading(false);
+    };
+    void fetchHours();
+    return () => {
+      active = false;
+    };
+  }, [selectedPlace]);
+
+  useEffect(() => {
+    let active = true;
+    const fetchAllHours = async () => {
+      if (places.length === 0) {
+        setPlaceHoursByPlace({});
+        return;
+      }
+      const supabase = createClient();
+      const ids = places.map((p) => p.id);
+      const { data, error } = await supabase
+        .from("place_hours")
+        .select("place_id, day_of_week, open_time::text, close_time::text, is_24h");
+      if (!active) return;
+      if (!error && Array.isArray(data)) {
+        const grouped: Record<string, any[]> = {};
+        data.forEach((row: any) => {
+          const pid = row.place_id as string;
+          if (!grouped[pid]) grouped[pid] = [];
+          grouped[pid].push({
+            day_of_week: Number(row.day_of_week),
+            open_time: typeof row.open_time === "string" ? row.open_time : "",
+            close_time: typeof row.close_time === "string" ? row.close_time : "",
+            is_24h: row.is_24h ?? false,
+          });
+        });
+        setPlaceHoursByPlace(grouped);
+      } else {
+        setPlaceHoursByPlace({});
+      }
+    };
+    void fetchAllHours();
+    return () => {
+      active = false;
+    };
+  }, [places]);
 
   useEffect(() => {
     let canceled = false;
@@ -880,6 +1732,11 @@ export default function MapCanvas() {
       let userPos: GeolocationPosition;
       try {
         userPos = await getPosition();
+        const coords: [number, number] = [
+          userPos.coords.longitude,
+          userPos.coords.latitude,
+        ];
+        setUserLocation(coords);
       } catch {
         if (!canceled) {
           setDirections({
@@ -1002,20 +1859,38 @@ export default function MapCanvas() {
     };
   }, [directions]);
 
+  useEffect(() => {
+    const root = gridScrollRef.current;
+    const viewport = root?.querySelector(
+      '[data-slot="scroll-area-viewport"]'
+    ) as HTMLDivElement | null;
+    if (!viewport) return;
+    const update = () => {
+      const { scrollTop, scrollHeight, clientHeight } = viewport;
+      setGridTopFade(scrollTop > 1);
+      setGridBottomFade(scrollTop + clientHeight < scrollHeight - 1);
+    };
+    update();
+    viewport.addEventListener("scroll", update, { passive: true });
+    return () => viewport.removeEventListener("scroll", update);
+  }, [showGridDrawer]);
+
   return (
     <div className="relative h-full w-full" aria-hidden>
       <div ref={containerRef} className="h-full w-full bg-background" />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-linear-to-b from-background to-transparent" />
 
-      <div className="pointer-events-none absolute left-4 top-4">
+      <MapFiltering />
+
+      {userLocation ? <MapWeather coords={userLocation} className="top-20" /> : null}
+
+      <div className="pointer-events-none absolute left-4 top-20">
         <Button
           size="icon-sm"
           variant="outline"
           className="pointer-events-auto h-9 w-9 rounded-full bg-background/70 backdrop-blur border-border/60 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.35),0_8px_24px_rgba(0,0,0,0.35)]"
-          onClick={() => {
-            /* TODO: hook up grid action */
-          }}
+          onClick={() => setShowGridDrawer(true)}
         >
           <Grid className="h-4 w-4" />
         </Button>
@@ -1052,6 +1927,8 @@ export default function MapCanvas() {
             className="h-9 w-9 rounded-full bg-background/70 backdrop-blur border-border/60"
             onClick={() =>
               mapRef.current?.easeTo({
+                center: userLocation ?? [FALLBACK_VIEW.lng, FALLBACK_VIEW.lat],
+                zoom: REQUESTED_ZOOM,
                 bearing: 0,
                 pitch: MAP_PITCH,
                 duration: 400,
@@ -1065,6 +1942,392 @@ export default function MapCanvas() {
           </Button>
         </div>
       </div>
+
+      <Drawer open={showGridDrawer} onOpenChange={setShowGridDrawer}>
+        <DrawerContent>
+          <DrawerHeader className="sr-only">
+            <DrawerTitle>Grid</DrawerTitle>
+          </DrawerHeader>
+          <div className="relative px-4 pb-6 pt-2">
+            <div ref={gridScrollRef}>
+              <ScrollArea className="h-[60vh]">
+                <div className="grid grid-cols-3 gap-3 py-2 pr-2">
+                  {Array.from({ length: 36 }).map((_, idx) => (
+                    <div
+                      key={idx}
+                      className="flex h-16 items-center justify-center rounded-lg border border-border/50 bg-background/70 text-xs text-muted-foreground"
+                    >
+                      Placeholder {idx + 1}
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            </div>
+            <div
+              className={`pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background to-transparent transition-opacity duration-200 ${
+                gridBottomFade ? "opacity-100" : "opacity-0"
+              }`}
+            />
+            <div
+              className={`pointer-events-none absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-background to-transparent transition-opacity duration-200 ${
+                gridTopFade ? "opacity-100" : "opacity-0"
+              }`}
+            />
+          </div>
+        </DrawerContent>
+      </Drawer>
+
+      <Drawer
+        open={!!selectedPerson}
+        onOpenChange={(open) => {
+          if (!open) setSelectedPerson(null);
+        }}
+      >
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle className="flex items-center gap-2">
+              <span>{selectedPerson?.name ?? "User"}</span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-[11px] font-semibold text-white">
+                <Clock className="h-3 w-3" />
+                Right now
+              </span>
+            </DrawerTitle>
+            <DrawerDescription className="flex justify-start">
+              {selectedPerson ? (
+                <span className="inline-flex items-center gap-2 text-sm">
+                  <span
+                    className={cn(
+                      "h-2.5 w-2.5 rounded-full",
+                      selectedPerson.presence === "online"
+                        ? "bg-emerald-500"
+                        : selectedPerson.presence === "away"
+                          ? "bg-amber-400"
+                          : "bg-zinc-400"
+                    )}
+                    aria-hidden
+                  />
+                  <span className="text-foreground">
+                    {selectedPerson.presence === "online"
+                      ? "Online"
+                      : selectedPerson.presence === "away"
+                        ? "Away"
+                        : "Offline"}
+                  </span>
+                </span>
+              ) : null}
+            </DrawerDescription>
+          </DrawerHeader>
+          <div className="grid grid-cols-3 gap-3 px-4 pb-6">
+            <div className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90">
+              <UserIcon className="h-5 w-5 text-foreground" />
+              <span>Profile</span>
+            </div>
+            <div className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90">
+              <MessageCircle className="h-5 w-5 text-foreground" />
+              <span>Messages</span>
+            </div>
+            <div
+              className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90"
+              onClick={() => {
+                if (selectedPerson?.location) {
+                  const nearest = findNearestStation(selectedPerson.location);
+                  setSelectedStation(
+                    nearest ?? {
+                      name: selectedPerson.name,
+                      displayName: selectedPerson.name,
+                      lines: [],
+                      modes: [],
+                      coordinates: selectedPerson.location,
+                    }
+                  );
+                  setDirectionsTitle(`Directions to ${selectedPerson.name}`);
+                } else {
+                  setDirectionsTitle("Directions");
+                }
+                setShowStationDrawer(false);
+                setShowDirectionsDrawer(true);
+              }}
+            >
+              <Navigation className="h-5 w-5 text-foreground" />
+              <span>Directions</span>
+            </div>
+          </div>
+        </DrawerContent>
+      </Drawer>
+
+      <Drawer
+          open={showDirectionsDrawer}
+          onOpenChange={setShowDirectionsDrawer}
+        >
+          <DrawerContent>
+            <DrawerHeader>
+              <DrawerTitle>
+                {directionsTitle ||
+                  selectedStation?.displayName ||
+                  selectedStation?.name ||
+                  "Directions"}
+              </DrawerTitle>
+            </DrawerHeader>
+            <div className="flex flex-col gap-3 px-4 pb-4">
+            {selectedStation ? (
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  Closest station
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-card/80 px-3 py-1 text-xs font-semibold text-foreground shadow-[0_8px_18px_rgba(0,0,0,0.35)] backdrop-blur">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white -ml-1">
+                      <img
+                        src={getStationIcon(selectedStation?.lines, selectedStation?.modes)}
+                        alt="Station icon"
+                        className="h-4 w-4"
+                      />
+                    </span>
+                    <span className="text-sm">
+                      {selectedStation?.displayName ||
+                        selectedStation?.name ||
+                        "Nearest station"}
+                    </span>
+                  </span>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="pt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              Journey options
+            </div>
+
+            {directions.status === "loading" && (
+              <div className="space-y-2">
+                <div className="h-3.5 w-24 animate-pulse rounded bg-muted/70" />
+                <div className="space-y-2 rounded-lg border border-border/50 p-3">
+                  <div className="h-4 w-32 animate-pulse rounded bg-muted/70" />
+                  <div className="h-3 w-48 animate-pulse rounded bg-muted/60" />
+                  <div className="h-3 w-40 animate-pulse rounded bg-muted/60" />
+                </div>
+              </div>
+            )}
+            {directions.status === "error" && (
+              <span className="text-destructive text-sm">
+                {directions.message}
+              </span>
+            )}
+            {directions.status === "ready" &&
+              directions.journeys.length > 0 && (
+                <Tabs
+                  defaultValue={directions.journeys[0]?.id}
+                  className="w-full"
+                >
+                  <TabsList className="mb-2">
+                    {directions.journeys.map((journey) => {
+                      return (
+                        <TabsTrigger
+                          key={journey.id}
+                          value={journey.id}
+                          className="flex items-center gap-1.5 rounded-full border border-border/60 bg-background px-3 py-1 text-xs font-medium"
+                        >
+                          <span>{formatDuration(journey.durationMins)}</span>
+                        </TabsTrigger>
+                      );
+                    })}
+                  </TabsList>
+                  <div className="relative">
+                    <div
+                      className="h-72 w-full overflow-y-auto [::-webkit-scrollbar]:hidden"
+                      style={{ scrollbarWidth: "none" }}
+                    >
+                      {directions.journeys.map((journey) => (
+                        <TabsContent key={journey.id} value={journey.id}>
+                          <ul className="space-y-2 text-xs text-muted-foreground">
+                            {journey.legs.map((leg, idx) => (
+                              <li
+                                key={`${journey.id}-${leg.summary}-${idx}`}
+                                className="rounded-lg bg-muted/20 p-3"
+                              >
+                                <div className="flex items-center justify-between gap-3">
+                                  <span className="flex items-center gap-2 font-semibold capitalize text-foreground">
+                                    <span className="text-muted-foreground">
+                                      {getModeIcon(leg.normalizedMode)}
+                                    </span>
+                                    {formatModeLabel(leg.mode)}
+                                  </span>
+                                  {leg.duration ? (
+                                    <span className="text-muted-foreground text-[11px]">
+                                      {leg.duration} min
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <div className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+                                  <InstructionWithLineBadges
+                                    text={leg.summary}
+                                  />
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        </TabsContent>
+                      ))}
+                    </div>
+                  </div>
+                </Tabs>
+              )}
+          </div>
+        </DrawerContent>
+      </Drawer>
+
+      <Drawer
+        open={showPlaceDrawer}
+        onOpenChange={(open) => {
+          setShowPlaceDrawer(open);
+          if (!open) setSelectedPlace(null);
+        }}
+      >
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle className="flex items-center gap-2">
+              <span className="relative inline-flex items-center gap-2">
+                <span>{selectedPlace?.name ?? "Place"}</span>
+                <span className="rounded-full bg-primary px-2 py-0.5 text-[11px] font-semibold text-white">
+                  {selectedPlace?.category?.name || "Place"}
+                </span>
+                {(() => {
+                  const status = computePlaceStatus();
+                  if (!status || status.state === "closed") return null;
+                  return (
+                    <span
+                      className={cn(
+                        "absolute -right-4 -bottom-1 h-3 w-3 rounded-full border border-background/80 shadow",
+                        status.state === "closing"
+                          ? "bg-amber-400"
+                          : "bg-emerald-500"
+                      )}
+                    />
+                  );
+                })()}
+              </span>
+            </DrawerTitle>
+          </DrawerHeader>
+          <div className="space-y-3 px-4 pb-4 text-sm text-foreground">
+            <div className="rounded-lg border border-border/60 bg-background/70 p-3 shadow-sm">
+              <p className="font-semibold">Opening times</p>
+              {placeHoursLoading ? (
+                <div className="mt-2 space-y-1 text-muted-foreground">
+                  <div className="h-3 w-32 animate-pulse rounded bg-muted/70" />
+                  <div className="h-3 w-28 animate-pulse rounded bg-muted/70" />
+                  <div className="h-3 w-24 animate-pulse rounded bg-muted/70" />
+                </div>
+              ) : placeHours.length > 0 ? (
+                <ul className="mt-2 space-y-1 text-muted-foreground">
+                  {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(
+                    (label, idx) => {
+                      const entry = placeHours.find(
+                        (h) => h.day_of_week === ((idx + 1) % 7)
+                      );
+                      if (!entry)
+                        return (
+                          <li key={label} className="flex justify-between">
+                            <span>{label}</span>
+                            <span className="text-muted-foreground">—</span>
+                          </li>
+                        );
+                      return (
+                        <li key={label} className="flex justify-between">
+                          <span>{label}</span>
+                          {entry.is_24h ? (
+                            <span className="text-muted-foreground">Open 24 hours</span>
+                          ) : (
+                            <span className="text-muted-foreground">
+                              {entry.open_time?.slice(0, 5)} -{" "}
+                              {entry.close_time?.slice(0, 5)}
+                            </span>
+                          )}
+                        </li>
+                      );
+                    }
+                  )}
+                </ul>
+              ) : (
+                <p className="mt-2 text-muted-foreground text-sm">
+                  No hours provided.
+                </p>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90">
+                <Globe className="h-5 w-5 text-foreground" />
+                <button
+                  type="button"
+                  className="text-white"
+                  onClick={() => {
+                    if (selectedPlace?.website && typeof window !== "undefined") {
+                      const url = selectedPlace.website.startsWith("http")
+                        ? selectedPlace.website
+                        : `https://${selectedPlace.website}`;
+                      window.open(url, "_blank", "noopener,noreferrer");
+                    }
+                  }}
+                  disabled={!selectedPlace?.website}
+                >
+                  Website
+                </button>
+              </div>
+              <div
+                className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90"
+                onClick={() => {
+                  if (selectedPlace) {
+                    const coords: [number, number] = [
+                      selectedPlace.lng,
+                      selectedPlace.lat,
+                    ];
+                    const nearest = findNearestStation(coords);
+                    setSelectedStation(
+                      nearest ?? {
+                        name: selectedPlace.name,
+                        displayName: selectedPlace.name,
+                        lines: [],
+                        modes: [],
+                        coordinates: coords,
+                      }
+                    );
+                    setDirectionsTitle(`Directions to ${selectedPlace.name}`);
+                    setShowDirectionsDrawer(true);
+                  }
+                }}
+              >
+                <Navigation className="h-5 w-5 text-foreground" />
+                <span>Directions</span>
+              </div>
+            </div>
+          </div>
+        </DrawerContent>
+      </Drawer>
+
+      <Drawer open={showGroupDrawer} onOpenChange={setShowGroupDrawer}>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle className="flex items-center gap-2">
+              <span>TCR pump n dump</span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[11px] font-semibold text-white">
+                Pump n dump
+              </span>
+            </DrawerTitle>
+          </DrawerHeader>
+          <div className="grid grid-cols-3 gap-3 px-4 pb-6">
+            <div className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90">
+              <UserIcon className="h-5 w-5 text-foreground" />
+              <span>Details</span>
+            </div>
+            <div className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90">
+              <MessageCircle className="h-5 w-5 text-foreground" />
+              <span>Host</span>
+            </div>
+            <div className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90">
+              <Navigation className="h-5 w-5 text-foreground" />
+              <span>Directions</span>
+            </div>
+          </div>
+        </DrawerContent>
+      </Drawer>
 
       {locationError ? (
         <div className="pointer-events-none absolute right-4 top-4">
@@ -1084,17 +2347,18 @@ export default function MapCanvas() {
       ) : null}
 
       <Drawer
-        open={!!selectedStation}
+        open={showStationDrawer}
         onOpenChange={(open) => {
+          setShowStationDrawer(open);
+          // keep selectedStation so directions drawer can reuse it
           if (!open) {
-            setSelectedStation(null);
             setDirections({ status: "idle" });
           }
         }}
       >
         <DrawerContent>
-          <DrawerHeader>
-            <DrawerTitle>
+          <DrawerHeader className="items-start">
+            <DrawerTitle className="text-left">
               {selectedStation?.displayName ||
                 selectedStation?.name ||
                 "Station"}
