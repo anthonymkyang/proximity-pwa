@@ -30,6 +30,12 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@/components/ui/drawer";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import MapWeather from "./MapWeather";
@@ -102,6 +108,19 @@ const cleanStationName = (name: string | null | undefined) => {
   return name
     .replace(/\s+(Underground|Railway|Rail|DLR|Overground)\s+Station.*$/i, "")
     .trim();
+};
+
+const formatTime = (timeStr: string | null | undefined) => {
+  if (!timeStr) return "";
+  const [hh, mm] = timeStr.split(":");
+  const hours = Number(hh);
+  const minutes = Number(mm);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return timeStr;
+  const suffix = hours >= 12 ? "pm" : "am";
+  const hour12 = hours % 12 === 0 ? 12 : hours % 12;
+  if (minutes === 0) return `${hour12}${suffix}`;
+  const paddedMinutes = minutes.toString().padStart(2, "0");
+  return `${hour12}:${paddedMinutes}${suffix}`;
 };
 const sanitizeFeatures = (
   fc: GeoJSON.FeatureCollection
@@ -918,15 +937,10 @@ export default function MapCanvas() {
     if (!selectedPlace) return null;
     const tz = selectedPlace.tz || "UTC";
     const now = new Date();
-    const tzNow = new Date(
-      now.toLocaleString("en-US", { timeZone: tz })
-    );
+    const tzNow = new Date(now.toLocaleString("en-US", { timeZone: tz }));
     const minutesNow = tzNow.getHours() * 60 + tzNow.getMinutes();
     const day = tzNow.getDay(); // 0 Sunday ... 6 Saturday
-
-    const entry = placeHours.find((h) => h.day_of_week === day);
-    if (!entry) return { state: "closed" as const };
-    if (entry.is_24h) return { state: "open" as const, closingSoon: false };
+    const daysShort = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
     const parseMinutes = (t: string) => {
       const [hh, mm] = t.split(":");
@@ -936,29 +950,62 @@ export default function MapCanvas() {
       return h * 60 + m;
     };
 
-    const openMins = parseMinutes(entry.open_time);
-    const closeMins = parseMinutes(entry.close_time);
-    if (!Number.isFinite(openMins) || !Number.isFinite(closeMins)) {
-      return { state: "closed" as const };
-    }
+    const entryToday = placeHours.find((h) => h.day_of_week === day);
+    if (entryToday?.is_24h)
+      return { state: "open" as const, closingSoon: false, closeLabel: "24h", is24h: true };
 
-    const crossesMidnight = closeMins <= openMins;
-    const isOpen = crossesMidnight
-      ? minutesNow >= openMins || minutesNow < closeMins
-      : minutesNow >= openMins && minutesNow < closeMins;
+    const openMinsToday = entryToday ? parseMinutes(entryToday.open_time) : NaN;
+    const closeMinsToday = entryToday ? parseMinutes(entryToday.close_time) : NaN;
+
+    const isOpen = (() => {
+      if (!entryToday) return false;
+      if (!Number.isFinite(openMinsToday) || !Number.isFinite(closeMinsToday))
+        return false;
+      const crossesMidnight = closeMinsToday <= openMinsToday;
+      return crossesMidnight
+        ? minutesNow >= openMinsToday || minutesNow < closeMinsToday
+        : minutesNow >= openMinsToday && minutesNow < closeMinsToday;
+    })();
 
     if (isOpen) {
+      const crossesMidnight = closeMinsToday <= openMinsToday;
       const untilClose = crossesMidnight
-        ? minutesNow >= openMins
-          ? 24 * 60 - minutesNow + closeMins
-          : closeMins - minutesNow
-        : closeMins - minutesNow;
+        ? minutesNow >= openMinsToday
+          ? 24 * 60 - minutesNow + closeMinsToday
+          : closeMinsToday - minutesNow
+        : closeMinsToday - minutesNow;
+      const closeLabel = formatTime(entryToday.close_time);
       return {
         state: untilClose <= 60 ? ("closing" as const) : ("open" as const),
-        closingSoon: untilClose <= 60,
+        closingSoon: untilClose <= 30,
+        closeLabel,
       };
     }
-    return { state: "closed" as const };
+
+    // compute next opening
+    let nextOpenLabel: string | null = null;
+    for (let i = 0; i < 7; i++) {
+      const targetDay = (day + i) % 7;
+      const entry = placeHours.find((h) => h.day_of_week === targetDay);
+      if (!entry || entry.is_24h) {
+        if (entry?.is_24h) {
+          const dayLabel = i === 0 ? "today" : i === 1 ? "tomorrow" : daysShort[targetDay];
+          nextOpenLabel = `All day ${dayLabel}`;
+          break;
+        }
+        continue;
+      }
+      const openMins = parseMinutes(entry.open_time);
+      const closeMins = parseMinutes(entry.close_time);
+      if (!Number.isFinite(openMins) || !Number.isFinite(closeMins)) continue;
+      if (i === 0 && minutesNow >= closeMins) continue;
+      if (i === 0 && minutesNow >= openMins && minutesNow < closeMins) continue;
+      const dayLabel = i === 0 ? "today" : i === 1 ? "tomorrow" : daysShort[targetDay];
+      nextOpenLabel = `${formatTime(entry.open_time)} ${dayLabel}`;
+      break;
+    }
+
+    return { state: "closed" as const, nextOpenLabel };
   };
 
   const getStationIcon = (
@@ -1605,6 +1652,10 @@ export default function MapCanvas() {
       const container = document.createElement("div");
       container.className =
         "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
+      if (status?.state === "closed") {
+        container.style.opacity = "0.4";
+        container.style.filter = "grayscale(0.35)";
+      }
       const root = createRoot(container);
       root.render(
         <MapPlace
@@ -2190,68 +2241,141 @@ export default function MapCanvas() {
                 <span className="rounded-full bg-primary px-2 py-0.5 text-[11px] font-semibold text-white">
                   {selectedPlace?.category?.name || "Place"}
                 </span>
-                {(() => {
-                  const status = computePlaceStatus();
-                  if (!status || status.state === "closed") return null;
-                  return (
-                    <span
-                      className={cn(
-                        "absolute -right-4 -bottom-1 h-3 w-3 rounded-full border border-background/80 shadow",
-                        status.state === "closing"
-                          ? "bg-amber-400"
-                          : "bg-emerald-500"
-                      )}
-                    />
-                  );
-                })()}
               </span>
             </DrawerTitle>
           </DrawerHeader>
           <div className="space-y-3 px-4 pb-4 text-sm text-foreground">
-            <div className="rounded-lg border border-border/60 bg-background/70 p-3 shadow-sm">
-              <p className="font-semibold">Opening times</p>
-              {placeHoursLoading ? (
-                <div className="mt-2 space-y-1 text-muted-foreground">
-                  <div className="h-3 w-32 animate-pulse rounded bg-muted/70" />
-                  <div className="h-3 w-28 animate-pulse rounded bg-muted/70" />
-                  <div className="h-3 w-24 animate-pulse rounded bg-muted/70" />
-                </div>
-              ) : placeHours.length > 0 ? (
-                <ul className="mt-2 space-y-1 text-muted-foreground">
-                  {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(
-                    (label, idx) => {
-                      const entry = placeHours.find(
-                        (h) => h.day_of_week === ((idx + 1) % 7)
-                      );
-                      if (!entry)
-                        return (
-                          <li key={label} className="flex justify-between">
-                            <span>{label}</span>
-                            <span className="text-muted-foreground">—</span>
-                          </li>
-                        );
+            <Accordion
+              type="single"
+              collapsible
+              className="rounded-2xl bg-card/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md"
+            >
+              <AccordionItem value="opening-times" className="border-0">
+                {(() => {
+                  const statusInfo = computePlaceStatus();
+                  const status = statusInfo?.state;
+                  const statusLabel =
+                    status === "open"
+                      ? "Open now"
+                      : status === "closing"
+                        ? "Closing soon"
+                        : "Closed";
+                  const statusClass =
+                    status === "closed"
+                      ? "text-destructive"
+                      : status === "open"
+                        ? "text-emerald-400"
+                        : undefined;
+                  return (
+                    <AccordionTrigger
+                      className={cn(
+                        "items-center px-4 py-3 text-left text-base font-semibold hover:no-underline [&>svg]:translate-y-0",
+                        statusClass
+                      )}
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <span className={statusClass}>{statusLabel}</span>
+                        {status !== "closed" && statusInfo?.closeLabel ? (
+                          <span
+                            className={cn(
+                              "text-sm text-muted-foreground",
+                              statusInfo.is24h
+                                ? ""
+                                : statusInfo.closingSoon
+                                  ? "text-amber-400"
+                                  : ""
+                            )}
+                          >
+                            {statusInfo.is24h
+                              ? "• Open 24 hours"
+                              : `• Closes ${statusInfo.closeLabel}`}
+                          </span>
+                        ) : null}
+                        {status === "closed" && statusInfo?.nextOpenLabel ? (
+                          <span className="text-sm text-muted-foreground">
+                            • Opens {statusInfo.nextOpenLabel}
+                          </span>
+                        ) : null}
+                      </span>
+                    </AccordionTrigger>
+                  );
+                })()}
+                <AccordionContent className="px-4 pb-4">
+                  {placeHoursLoading ? (
+                    <div className="mt-2 space-y-1 text-muted-foreground">
+                      <div className="h-3 w-32 animate-pulse rounded bg-muted/70" />
+                      <div className="h-3 w-28 animate-pulse rounded bg-muted/70" />
+                      <div className="h-3 w-24 animate-pulse rounded bg-muted/70" />
+                    </div>
+                  ) : placeHours.length > 0 ? (
+                    <>
+                      {(() => {
+                      const labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+                      const todayIdx = new Date().getDay();
+                      const dayData = labels.map((label, idx) => {
+                        const dow = (idx + 1) % 7;
+                        const entry = placeHours.find((h) => h.day_of_week === dow);
+                        let text = "—";
+                        if (entry) {
+                          text = entry.is_24h
+                            ? "Open 24 hours"
+                            : `${formatTime(entry.open_time)} – ${formatTime(entry.close_time)}`;
+                        }
+                        return { label, dow, text, isToday: todayIdx === dow };
+                      });
+
+                      const segments: { start: number; end: number; text: string; isToday: boolean }[] = [];
+                      let current = { start: 0, end: 0, text: dayData[0].text, isToday: dayData[0].isToday };
+                      for (let i = 1; i < dayData.length; i++) {
+                        const day = dayData[i];
+                        if (day.text === current.text) {
+                          current.end = i;
+                          current.isToday = current.isToday || day.isToday;
+                        } else {
+                          segments.push(current);
+                          current = { start: i, end: i, text: day.text, isToday: day.isToday };
+                        }
+                      }
+                      segments.push(current);
+
+                      const isAllWeekSame = segments.length === 1 && segments[0].start === 0 && segments[0].end === 6;
+
                       return (
-                        <li key={label} className="flex justify-between">
-                          <span>{label}</span>
-                          {entry.is_24h ? (
-                            <span className="text-muted-foreground">Open 24 hours</span>
-                          ) : (
-                            <span className="text-muted-foreground">
-                              {entry.open_time?.slice(0, 5)} -{" "}
-                              {entry.close_time?.slice(0, 5)}
-                            </span>
-                          )}
-                        </li>
+                        <ul className="mt-2 space-y-1 text-muted-foreground">
+                          {segments.map((seg, idx) => {
+                            const isTwoDayRange = seg.end === seg.start + 1;
+                            const dayLabel = isAllWeekSame
+                              ? "All week"
+                              : seg.start === seg.end
+                                ? dayData[seg.start].label
+                                : isTwoDayRange
+                                  ? `${dayData[seg.start].label} & ${dayData[seg.end].label}`
+                                  : `${dayData[seg.start].label} – ${dayData[seg.end].label}`;
+                            const isToday = seg.isToday;
+                            const labelClass = isToday ? "font-semibold text-foreground" : "text-muted-foreground";
+                            const timeClass = isToday ? "font-semibold text-foreground" : "text-muted-foreground";
+                            return (
+                              <li
+                                key={`${dayLabel}-${idx}`}
+                                className="grid grid-cols-[120px_1fr] items-start gap-x-4"
+                              >
+                                <span className={labelClass}>{dayLabel}</span>
+                                <span className={timeClass}>{seg.text}</span>
+                              </li>
+                            );
+                          })}
+                        </ul>
                       );
-                    }
+                    })()}
+                    </>
+                  ) : (
+                    <p className="mt-2 text-muted-foreground text-sm">
+                      No hours provided.
+                    </p>
                   )}
-                </ul>
-              ) : (
-                <p className="mt-2 text-muted-foreground text-sm">
-                  No hours provided.
-                </p>
-              )}
-            </div>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90">
                 <Globe className="h-5 w-5 text-foreground" />
