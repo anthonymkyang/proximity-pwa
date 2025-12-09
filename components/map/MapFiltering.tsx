@@ -24,6 +24,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Clock, Search, X } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
+import { Slider } from "@/components/ui/slider";
 
 type MapFilteringProps = {
   className?: string;
@@ -87,7 +88,7 @@ const STAT_FILTER_SECTIONS: FilterSection[] = [
   },
   {
     key: "dickSize",
-    label: "Size",
+    label: "Dick size",
     options: ["XS", "Small", "Average", "Large", "XL", "XXL"],
   },
   {
@@ -149,6 +150,13 @@ export default function MapFiltering({
   const [dickCutOptions, setDickCutOptions] = useState<string[]>(
     STAT_FILTER_SECTIONS.find((s) => s.key === "dickCut")?.options ?? []
   );
+  const [dickSizeValue, setDickSizeValue] = useState<[number, number]>([5, 9]);
+  const [dickSizeTouched, setDickSizeTouched] = useState(false);
+  const [activeNow, setActiveNow] = useState(false);
+  const [hosting, setHosting] = useState(false);
+  const [hostingOptions, setHostingOptions] = useState<string[]>([]);
+  const [hostingSelected, setHostingSelected] = useState<string[]>([]);
+  const [visiting, setVisiting] = useState(false);
   const [horizontalFades, setHorizontalFades] = useState<
     Record<string, { left: boolean; right: boolean }>
   >({});
@@ -163,31 +171,71 @@ export default function MapFiltering({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const horizontalRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  const filterBadges = useMemo(
-    () =>
-      STAT_FILTER_SECTIONS.map((section) => {
-        const selected = (selectedFilters[section.key] ?? []).filter(Boolean);
-        if (
-          sectionEnabled[section.key] === false ||
-          !selected ||
-          selected.length === 0
-        ) {
-          return null;
+  const filterBadges = useMemo(() => {
+    const badges: {
+      id: string;
+      label: string;
+      value: string;
+      sectionKey: string;
+    }[] = [];
+
+    if (activeNow) {
+      badges.push({
+        id: "active-now",
+        label: "Active now",
+        value: "Active now",
+        sectionKey: "activeNow",
+      });
+    }
+    if (hosting && hostingSelected.length > 0) {
+      const label =
+        hostingSelected.length > 0 ? hostingSelected.join(", ") : "Hosting";
+      badges.push({
+        id: "hosting",
+        label,
+        value: label,
+        sectionKey: "hosting",
+      });
+    }
+    if (visiting) {
+      badges.push({
+        id: "visiting",
+        label: "Visiting",
+        value: "Visiting",
+        sectionKey: "visiting",
+      });
+    }
+
+    STAT_FILTER_SECTIONS.forEach((section) => {
+      if (section.key === "dickSize") {
+        if (sectionEnabled[section.key] !== false || dickSizeTouched) {
+          const label = `${dickSizeValue[0]}-${dickSizeValue[1]} inches`;
+          badges.push({
+            id: "dickSize-range",
+            label,
+            value: label,
+            sectionKey: "dickSize",
+          });
         }
-        return {
-          id: section.key,
-          label: selected.join(", "),
-          value: selected.join(", "),
-          sectionKey: section.key,
-        };
-      }).filter(Boolean) as {
-        id: string;
-        label: string;
-        value: string;
-        sectionKey: string;
-      }[],
-    [sectionEnabled, selectedFilters]
-  );
+        return;
+      }
+      const selected = (selectedFilters[section.key] ?? []).filter(Boolean);
+      if (
+        sectionEnabled[section.key] === false ||
+        !selected ||
+        selected.length === 0
+      ) {
+        return;
+      }
+      badges.push({
+        id: section.key,
+        label: selected.join(", "),
+        value: selected.join(", "),
+        sectionKey: section.key,
+      });
+    });
+    return badges;
+  }, [activeNow, sectionEnabled, selectedFilters, dickSizeTouched, dickSizeValue, hosting, hostingSelected]);
 
   useEffect(() => {
     onFilterBadgesChange?.(filterBadges.map((badge) => badge.label));
@@ -198,24 +246,9 @@ export default function MapFiltering({
   }, [onWhenOptionChange, whenOption]);
 
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const update = () => {
-      const { scrollTop, scrollHeight, clientHeight } = el;
-      const canScroll = scrollHeight > clientHeight + 1;
-      setShowTopFade(canScroll && scrollTop > 0.5);
-      setShowBottomFade(
-        canScroll && scrollTop + clientHeight < scrollHeight - 0.5
-      );
-    };
-    const raf = requestAnimationFrame(update);
-    el.addEventListener("scroll", update, { passive: true });
-    window.addEventListener("resize", update);
-    return () => {
-      cancelAnimationFrame(raf);
-      el.removeEventListener("scroll", update);
-      window.removeEventListener("resize", update);
-    };
+    // No-op: vertical fade disabled for now
+    setShowTopFade(false);
+    setShowBottomFade(false);
   }, [showFilters, filterBadges.length, selectedFilters]);
 
   const updateHorizontalFade = (key: string) => {
@@ -237,19 +270,34 @@ export default function MapFiltering({
 
   useEffect(() => {
     STAT_FILTER_SECTIONS.forEach((section) => updateHorizontalFade(section.key));
+    updateHorizontalFade("hostingStatus");
   }, [filterBadges.length, selectedFilters, showFilters]);
+
+  useEffect(() => {
+    if (hostingSelected.length === 0 && hosting) {
+      setHosting(false);
+    }
+  }, [hostingSelected.length, hosting]);
 
   useEffect(() => {
     const run = async () => {
       try {
         const supabase = createClient();
-        const [sexRes, posRes, roleRes, bodyRes, ethRes, dickSizeRes, dickCutRes] =
-          await Promise.all([
-            supabase
-              .from("sexualities")
-              .select("label")
-              .order("sort_order", { ascending: true })
-              .order("label", { ascending: true }),
+        const [
+          sexRes,
+          posRes,
+          roleRes,
+          bodyRes,
+          ethRes,
+          dickSizeRes,
+          dickCutRes,
+          hostingRes,
+        ] = await Promise.all([
+          supabase
+            .from("sexualities")
+            .select("label")
+            .order("sort_order", { ascending: true })
+            .order("label", { ascending: true }),
           supabase
             .from("positions")
             .select("label")
@@ -277,6 +325,11 @@ export default function MapFiltering({
             .order("label", { ascending: true }),
           supabase
             .from("dick_cut_statuses")
+            .select("label")
+            .order("sort_order", { ascending: true })
+            .order("label", { ascending: true }),
+          supabase
+            .from("hosting_statuses")
             .select("label")
             .order("sort_order", { ascending: true })
             .order("label", { ascending: true }),
@@ -358,6 +411,17 @@ export default function MapFiltering({
             setDickCutOptions(labels);
           }
         }
+
+        if (hostingRes.error) {
+          console.warn("map filtering: hosting statuses fetch failed", hostingRes.error);
+        } else {
+          const labels = (hostingRes.data ?? [])
+            .map((row: any) => row?.label)
+            .filter((label: unknown): label is string => typeof label === "string");
+          if (labels.length) {
+            setHostingOptions(labels);
+          }
+        }
       } catch (err) {
         console.warn("map filtering: lookup fetch errored", err);
       }
@@ -437,18 +501,26 @@ export default function MapFiltering({
             ) : null}
             <Switch
               checked={isEnabled}
-              disabled={selected.size === 0}
-              onCheckedChange={(val) =>
+              disabled={
+                section.key === "dickSize"
+                  ? false
+                  : selected.size === 0 &&
+                    !(section.key === "dickSize" && dickSizeTouched)
+              }
+              onCheckedChange={(val) => {
+                if (section.key === "dickSize" && !val) {
+                  setDickSizeTouched(false);
+                }
                 setSectionEnabled((prev) => ({
                   ...prev,
                   [section.key]: val,
-                }))
-              }
+                }));
+              }}
               aria-label={`Toggle ${section.label} filter`}
             />
           </div>
         </div>
-        <div className="relative -mx-4">
+        <div className="relative -mx-4 px-4">
           <div
             className={`pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-card via-card/70 to-transparent transition-opacity ${
               hFade.left ? "opacity-100" : "opacity-0"
@@ -465,7 +537,7 @@ export default function MapFiltering({
               updateHorizontalFade(section.key);
             }}
             onScroll={() => updateHorizontalFade(section.key)}
-            className="overflow-x-auto px-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+            className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
           >
             <div className="inline-flex items-center gap-2 pb-1 whitespace-nowrap">
               {options.map((option) => {
@@ -493,6 +565,48 @@ export default function MapFiltering({
             </div>
           </div>
         </div>
+        {section.key === "dickSize" ? (
+          <div className="mt-3 space-y-2">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>Dick length</span>
+              <span className="font-semibold text-foreground">
+                {dickSizeValue[0]} - {dickSizeValue[1]} inches
+              </span>
+            </div>
+              <Slider
+                min={0}
+                max={14}
+                step={1}
+                value={dickSizeValue}
+                onValueChange={(vals) =>
+                  {
+                    setDickSizeTouched(true);
+                    setSectionEnabled((prev) => ({ ...prev, dickSize: true }));
+                    setDickSizeValue([
+                      vals[0] ?? dickSizeValue[0],
+                      vals[1] ?? vals[0] ?? dickSizeValue[1],
+                    ]);
+                  }
+                }
+                className={cn(
+                  !dickSizeTouched
+                    ? [
+                        "[&_[data-slot=slider-track]]:bg-muted/40",
+                        "[&_[data-slot=slider-range]]:bg-muted/70",
+                        "[&_[data-slot=slider-thumb]]:border-muted",
+                        "[&_[data-slot=slider-thumb]]:ring-muted/40",
+                      ].join(" ")
+                    : undefined
+                )}
+                aria-label="Dick size slider"
+              />
+            <div className="flex justify-between text-[10px] text-muted-foreground">
+              {Array.from({ length: 15 }).map((_, idx) => (
+                <span key={idx}>{idx}</span>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -589,6 +703,106 @@ export default function MapFiltering({
               style={{ scrollbarWidth: "none" }}
             >
               <div className="flex flex-col gap-3 pb-4">
+                <div className="px-1 pb-0 text-[11px] font-semibold uppercase text-muted-foreground">
+                  Cruising
+                </div>
+                <div className="rounded-2xl bg-card px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-foreground">Active now</h3>
+                    <Switch
+                      checked={activeNow}
+                      onCheckedChange={(val) => setActiveNow(val)}
+                      aria-label="Toggle active now filter"
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-2xl bg-card px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md">
+                  <div className="mb-2 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-foreground">Hosting</h3>
+                    <Switch
+                      checked={hosting}
+                      disabled={hostingSelected.length === 0}
+                      onCheckedChange={(val) => setHosting(val)}
+                      aria-label="Toggle hosting filter"
+                    />
+                  </div>
+                  <div className="relative -mx-4 px-4">
+                    <div
+                      className={`pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-card via-card/70 to-transparent transition-opacity ${
+                        (horizontalFades["hostingStatus"]?.left ?? false)
+                          ? "opacity-100"
+                          : "opacity-0"
+                      }`}
+                    />
+                    <div
+                      className={`pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-card via-card/70 to-transparent transition-opacity ${
+                        (horizontalFades["hostingStatus"]?.right ?? false)
+                          ? "opacity-100"
+                          : "opacity-0"
+                      }`}
+                    />
+                    <div
+                      ref={(node) => {
+                        horizontalRefs.current["hostingStatus"] = node;
+                        updateHorizontalFade("hostingStatus");
+                      }}
+                      onScroll={() => updateHorizontalFade("hostingStatus")}
+                      className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+                    >
+                      <div className="inline-flex items-center gap-2 pb-1 whitespace-nowrap">
+                        {hostingOptions.map((option) => {
+                          const active = hostingSelected.includes(option);
+                          return (
+                            <Button
+                              key={option}
+                              type="button"
+                              variant={active ? "default" : "outline"}
+                              size="sm"
+                              className={cn(
+                                "h-9 rounded-full px-3 text-xs border",
+                                active
+                                  ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                                  : "border-white/15 bg-background/70 text-foreground hover:bg-background/90"
+                              )}
+                              onClick={() => {
+                            setHosting(true);
+                            setHostingSelected((prev) =>
+                              prev.includes(option)
+                                ? (() => {
+                                    const next = prev.filter((o) => o !== option);
+                                    if (next.length === 0) {
+                                      setHosting(false);
+                                    }
+                                    return next;
+                                  })()
+                                : [...prev, option]
+                            );
+                          }}
+                        >
+                          {option}
+                        </Button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl bg-card px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-foreground">Visiting</h3>
+                    <Switch
+                      checked={visiting}
+                      onCheckedChange={(val) => setVisiting(val)}
+                      aria-label="Toggle visiting filter"
+                    />
+                  </div>
+                </div>
+
+                <div className="px-1 pb-0 text-[11px] font-semibold uppercase text-muted-foreground">
+                  Stats
+                </div>
                 <div className="rounded-2xl bg-card px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md">
                   {renderSection(
                     STAT_FILTER_SECTIONS.find((s) => s.key === "sexuality") ??
@@ -609,16 +823,6 @@ export default function MapFiltering({
                 ))}
               </div>
             </div>
-            <div
-              className={`pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-card via-card/80 to-transparent transition-opacity duration-200 ${
-                showBottomFade ? "opacity-100" : "opacity-0"
-              }`}
-            />
-            <div
-              className={`pointer-events-none absolute inset-x-0 top-0 h-6 bg-gradient-to-b from-card via-card/80 to-transparent transition-opacity duration-200 ${
-                showTopFade ? "opacity-100" : "opacity-0"
-              }`}
-            />
           </div>
         </DrawerContent>
       </Drawer>
