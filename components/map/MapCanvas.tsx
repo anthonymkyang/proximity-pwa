@@ -43,6 +43,7 @@ import MapAvatar from "./MapAvatar";
 import MapPlace from "./MapPlace";
 import MapGroup from "./MapGroup";
 import MapFiltering from "./MapFiltering";
+import MapCruising from "./MapCruising";
 import { createRoot, type Root } from "react-dom/client";
 import { createClient } from "@/utils/supabase/client";
 import { cn } from "@/lib/utils";
@@ -718,6 +719,7 @@ const addTflStations = async (map: MaplibreMap) => {
 export default function MapCanvas() {
   const mapRef = useRef<MaplibreMap | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const [mapReady, setMapReady] = useState(false);
   const [bearing, setBearing] = useState(0);
   const [locationError, setLocationError] = useState(false);
   const [userLocation, setUserLocation] = useState<[number, number] | null>(
@@ -766,6 +768,8 @@ export default function MapCanvas() {
   const friendMarker6RootRef = useRef<Root | null>(null);
   const groupMarkerRef = useRef<maplibregl.Marker | null>(null);
   const groupMarkerRootRef = useRef<Root | null>(null);
+  const cruisingMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const cruisingMarkerRootRef = useRef<Root | null>(null);
   const placeMarkersRef = useRef<{ marker: maplibregl.Marker; root: Root }[]>(
     []
   );
@@ -1147,6 +1151,7 @@ export default function MapCanvas() {
           const stations = await addTflStations(map);
           stationsRef.current = stations;
         })();
+        setMapReady(true);
       });
 
       const handleRotate = () => setBearing(map.getBearing());
@@ -1683,6 +1688,37 @@ export default function MapCanvas() {
       });
     };
   }, [places, placeHoursByPlace]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    let marker = cruisingMarkerRef.current;
+    let root = cruisingMarkerRootRef.current;
+    if (!marker) {
+      const container = document.createElement("div");
+      container.className =
+        "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
+      root = createRoot(container);
+      cruisingMarkerRootRef.current = root;
+      marker = new maplibregl.Marker({ element: container, anchor: "center" });
+      cruisingMarkerRef.current = marker;
+    }
+
+    root?.render(<MapCruising size={30} />);
+    marker.setLngLat([-0.1756, 51.5154]).addTo(map);
+
+    return () => {
+      if (marker) {
+        marker.remove();
+      }
+      if (root) {
+        requestAnimationFrame(() => root?.unmount());
+      }
+      cruisingMarkerRef.current = null;
+      cruisingMarkerRootRef.current = null;
+    };
+  }, [mapReady]);
 
   useEffect(() => {
     let active = true;
