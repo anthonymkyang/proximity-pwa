@@ -46,11 +46,17 @@ export default function MapGroup({
         aria-hidden
       />
       <div
-        className="relative flex items-center justify-center rounded-full bg-gradient-to-br from-rose-500 via-red-500 to-rose-600 text-white shadow-[0_8px_18px_rgba(0,0,0,0.32)]"
+        className="relative flex items-center justify-center rounded-full bg-red-600 text-white shadow-[0_8px_18px_rgba(0,0,0,0.32)]"
         style={{ width: dimension, height: dimension }}
       >
         <Users className="h-4 w-4" />
       </div>
+      <span className="pointer-events-none absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full bg-red-600 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white shadow-[0_6px_16px_rgba(0,0,0,0.35)]">
+        Today
+      </span>
+      <span className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 rounded-full bg-red-600 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white shadow-[0_6px_16px_rgba(0,0,0,0.35)]">
+        24
+      </span>
     </div>
   );
 }

@@ -2302,10 +2302,10 @@ export default function MapCanvas() {
                 })()}
                 <AccordionContent className="px-4 pb-4">
                   {placeHoursLoading ? (
-                    <div className="mt-2 space-y-1 text-muted-foreground">
-                      <div className="h-3 w-32 animate-pulse rounded bg-muted/70" />
-                      <div className="h-3 w-28 animate-pulse rounded bg-muted/70" />
-                      <div className="h-3 w-24 animate-pulse rounded bg-muted/70" />
+                    <div className="mt-2 space-y-2 text-muted-foreground">
+                      {[1, 2, 3].map((i) => (
+                        <Skeleton key={i} className="h-3 w-full rounded" />
+                      ))}
                     </div>
                   ) : placeHours.length > 0 ? (
                     <>
@@ -2609,3 +2609,4 @@ export default function MapCanvas() {
     </div>
   );
 }
+import { Skeleton } from "@/components/ui/skeleton";
