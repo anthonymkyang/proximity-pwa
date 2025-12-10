@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, {
   type GeoJSONSource,
   type Map as MaplibreMap,
@@ -8,19 +8,19 @@ import maplibregl, {
 } from "maplibre-gl";
 import {
   Clock,
-  BusFront,
   Compass,
   AlertCircle,
-  Footprints,
   Grid,
   Minus,
   Plus,
   Globe,
-  TrainFront,
-  TrainFrontTunnel,
   Navigation,
   MessageCircle,
   BrickWallFire,
+  Footprints,
+  BusFront,
+  TrainFrontTunnel,
+  TrainFront,
   User as UserIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -37,7 +37,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import MapWeather from "./MapWeather";
 import MapAvatar from "./MapAvatar";
@@ -46,50 +46,11 @@ import MapGroup from "./MapGroup";
 import MapFiltering from "./MapFiltering";
 import MapCruising from "./MapCruising";
 import DrawerWalls from "./DrawerWalls";
+import MapDirections from "./MapDirections";
+import { getContrastingText, getLineColor } from "./MapInstructions";
 import { createRoot, type Root } from "react-dom/client";
 import { createClient } from "@/utils/supabase/client";
 import { cn } from "@/lib/utils";
-
-const LINE_COLORS: Record<string, string> = {
-  bakerloo: "#B36305",
-  central: "#E32017",
-  circle: "#FFD300",
-  district: "#00782A",
-  "hammersmith & city": "#F3A9BB",
-  jubilee: "#A0A5A9",
-  metropolitan: "#9B0056",
-  northern: "#000000",
-  piccadilly: "#003688",
-  victoria: "#0098D4",
-  "waterloo & city": "#95CDBA",
-  dlr: "#00AFAD",
-  "elizabeth line": "#6950A1",
-  "london overground": "#EE7C0E",
-  overground: "#EE7C0E",
-  tram: "#66CC00",
-};
-
-const getLineColor = (name: string) => {
-  const key = name.trim().toLowerCase();
-  return LINE_COLORS[key] ?? "#374151";
-};
-
-const getContrastingText = (color: string) => {
-  const hex = color.replace("#", "");
-  const normalized =
-    hex.length === 3
-      ? hex
-          .split("")
-          .map((c) => c + c)
-          .join("")
-      : hex;
-  if (normalized.length !== 6) return "#0b0b0b";
-  const r = parseInt(normalized.slice(0, 2), 16);
-  const g = parseInt(normalized.slice(2, 4), 16);
-  const b = parseInt(normalized.slice(4, 6), 16);
-  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return luminance > 0.7 ? "#0b0b0b" : "#ffffff";
-};
 
 const OPENFREEMAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
 const LOCAL_STYLE_PATH = "/maps/proximity-dark.json"; // place your Maputnik JSON here
@@ -369,67 +330,6 @@ const resolveCssVarColor = (varName: string, fallback: string) => {
     .trim();
   if (!raw) return fallback;
   return normalizeCssColor(raw, fallback);
-};
-
-type JourneyLeg = {
-  mode: string;
-  normalizedMode: string;
-  summary: string;
-  duration?: number;
-};
-
-const InstructionWithLineBadges = ({ text }: { text: string }) => {
-  if (!text) return null;
-  const result: React.ReactNode[] = [];
-  const tokenRegex =
-    /(\b[A-Za-z]+ line\b)|(\b(?:[NC]?\d{1,3}[A-Z]?|[A-Z]\d{1,2})\b)/gi;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = tokenRegex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      result.push(text.slice(lastIndex, match.index));
-    }
-    const [full, lineMatch, busMatch] = match;
-    if (lineMatch) {
-      const lineName = lineMatch.replace(/ line/i, "").trim();
-      const bg = getLineColor(lineName);
-      const fg = getContrastingText(bg);
-      result.push(
-        <span
-          key={`${lineMatch}-${match.index}`}
-          className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold align-middle"
-          style={{ backgroundColor: bg, color: fg }}
-        >
-          {lineMatch}
-        </span>
-      );
-    } else if (busMatch) {
-      result.push(
-        <span
-          key={`${busMatch}-${match.index}`}
-          className="inline-flex items-center rounded-full bg-red-600 px-2 py-0.5 text-[11px] font-semibold text-white align-middle"
-        >
-          {busMatch}
-        </span>
-      );
-    } else {
-      result.push(full);
-    }
-    lastIndex = tokenRegex.lastIndex;
-  }
-
-  if (lastIndex < text.length) {
-    result.push(text.slice(lastIndex));
-  }
-
-  return (
-    <span className="whitespace-pre-wrap leading-relaxed">
-      {result.map((node, idx) => (
-        <React.Fragment key={idx}>{node}</React.Fragment>
-      ))}
-    </span>
-  );
 };
 
 const addRoundelIcons = async (map: MaplibreMap) => {
@@ -735,27 +635,6 @@ export default function MapCanvas() {
     coordinates?: [number, number];
     distanceKm?: number;
   } | null>(null);
-  const [directions, setDirections] = useState<
-    | { status: "idle" }
-    | { status: "loading" }
-    | { status: "error"; message: string }
-    | {
-        status: "ready";
-        journeys: {
-          id: string;
-          durationMins: number;
-          legs: {
-            mode: string;
-            normalizedMode: string;
-            summary: string;
-            duration?: number;
-          }[];
-        }[];
-      }
-  >({ status: "idle" });
-  const instructionsRef = useRef<HTMLDivElement | null>(null);
-  const [showScrollFadeBottom, setShowScrollFadeBottom] = useState(false);
-  const [showScrollFadeTop, setShowScrollFadeTop] = useState(false);
   const friendMarkerRef = useRef<maplibregl.Marker | null>(null);
   const friendMarkerRootRef = useRef<Root | null>(null);
   const friendMarker2Ref = useRef<maplibregl.Marker | null>(null);
@@ -895,6 +774,10 @@ export default function MapCanvas() {
   const [showDirectionsDrawer, setShowDirectionsDrawer] = useState(false);
   const [showStationDrawer, setShowStationDrawer] = useState(false);
   const [directionsTitle, setDirectionsTitle] = useState<string | null>(null);
+  // Placeholder directions state retained while MapDirections is empty.
+  const [directions, setDirections] = useState<{ status: "idle" }>({
+    status: "idle",
+  });
   const [showPlaceDrawer, setShowPlaceDrawer] = useState(false);
   const [showGroupDrawer, setShowGroupDrawer] = useState(false);
   const [showCruisingDrawer, setShowCruisingDrawer] = useState(false);
@@ -912,6 +795,26 @@ export default function MapCanvas() {
   const gridScrollRef = useRef<HTMLDivElement | null>(null);
   const [gridTopFade, setGridTopFade] = useState(false);
   const [gridBottomFade, setGridBottomFade] = useState(false);
+
+  const splitTitleLines = (title: string | null | undefined) => {
+    if (!title) return ["Place"];
+    const words = title.trim().split(/\s+/);
+    if (words.length <= 4) return [title.trim()];
+    const midpoint = Math.ceil(words.length / 2);
+    return [
+      words.slice(0, midpoint).join(" "),
+      words.slice(midpoint).join(" "),
+    ];
+  };
+
+  const placeTitleLines = useMemo(
+    () => splitTitleLines(selectedPlace?.name),
+    [selectedPlace?.name]
+  );
+  const cruisingTitleLines = useMemo(
+    () => splitTitleLines(selectedCruising?.name),
+    [selectedCruising?.name]
+  );
 
   const findNearestStation = (
     coords: [number, number]
@@ -1247,7 +1150,6 @@ export default function MapCanvas() {
           coordinates: coords,
         });
         setShowStationDrawer(true);
-        setDirections({ status: "loading" });
       };
       const handleStationMouseEnter = () => {
         map.getCanvas().style.cursor = "pointer";
@@ -1933,158 +1835,6 @@ export default function MapCanvas() {
   }, [places]);
 
   useEffect(() => {
-    let canceled = false;
-    const run = async () => {
-      if (!selectedStation?.coordinates) {
-        setDirections({ status: "idle" });
-        return;
-      }
-      setDirections({ status: "loading" });
-
-      const getPosition = () =>
-        new Promise<GeolocationPosition>((resolve, reject) => {
-          if (!("geolocation" in navigator)) {
-            reject(new Error("Geolocation unavailable"));
-            return;
-          }
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: true,
-            timeout: 10_000,
-            maximumAge: 30_000,
-          });
-        });
-
-      let userPos: GeolocationPosition;
-      try {
-        userPos = await getPosition();
-        const coords: [number, number] = [
-          userPos.coords.longitude,
-          userPos.coords.latitude,
-        ];
-        setUserLocation(coords);
-      } catch {
-        if (!canceled) {
-          setDirections({
-            status: "error",
-            message: "Turn on location to get directions.",
-          });
-        }
-        return;
-      }
-
-      const [stationLon, stationLat] = selectedStation.coordinates;
-      const url = new URL("/api/tfl-journey", window.location.origin);
-      url.searchParams.set("fromLat", userPos.coords.latitude.toString());
-      url.searchParams.set("fromLon", userPos.coords.longitude.toString());
-      url.searchParams.set("toLat", stationLat.toString());
-      url.searchParams.set("toLon", stationLon.toString());
-      url.searchParams.set(
-        "toName",
-        selectedStation.displayName || selectedStation.name || "Station"
-      );
-
-      try {
-        const res = await fetch(url.toString(), { cache: "no-store" });
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(
-            data?.error || `Directions request failed ${res.status}`
-          );
-        }
-        const journeysRaw: any[] = Array.isArray(data?.journeys)
-          ? data.journeys
-          : [];
-        const journeys = journeysRaw.slice(0, 4).map((journey, idx) => {
-          const legs: JourneyLeg[] = (journey?.legs ?? []).map((leg: any) => {
-            const modeName = leg?.mode?.name ?? "travel";
-            const normalizedMode = normalizeMode(String(modeName));
-            return {
-              mode: modeName,
-              normalizedMode,
-              summary:
-                leg?.instruction?.summary ??
-                leg?.instruction?.detailed ??
-                leg?.departurePoint?.commonName ??
-                "Continue",
-              duration: leg?.duration,
-            };
-          });
-
-          const hasLongWalk = legs.some(
-            (leg: JourneyLeg) =>
-              leg.normalizedMode === "walking" && (leg.duration ?? 0) > 5
-          );
-
-          const journeyId =
-            (journey?.startDateTime || journey?.arrivalDateTime || "journey") +
-            `-${idx}`;
-
-          return {
-            id: journeyId,
-            durationMins: journey?.duration ?? 0,
-            legs,
-            hasLongWalk,
-          };
-        });
-        if (journeys.length === 0) throw new Error("No journeys found");
-        journeys.sort((a, b) => {
-          const aMode = a.legs[0]?.normalizedMode ?? "travel";
-          const bMode = b.legs[0]?.normalizedMode ?? "travel";
-          const aPri = MODE_PRIORITY[aMode] ?? 99;
-          const bPri = MODE_PRIORITY[bMode] ?? 99;
-          if (aPri !== bPri) return aPri - bPri;
-          return (a.durationMins ?? 0) - (b.durationMins ?? 0);
-        });
-        if (!canceled) {
-          setDirections({
-            status: "ready",
-            journeys,
-          });
-        }
-      } catch (err: any) {
-        if (!canceled) {
-          setDirections({
-            status: "error",
-            message:
-              err?.message && typeof err.message === "string"
-                ? err.message
-                : "Directions unavailable right now.",
-          });
-        }
-      }
-    };
-
-    void run();
-    return () => {
-      canceled = true;
-    };
-  }, [selectedStation]);
-
-  useEffect(() => {
-    const el = instructionsRef.current;
-    if (!el) {
-      setShowScrollFadeBottom(false);
-      setShowScrollFadeTop(false);
-      return;
-    }
-    const update = () => {
-      if (!instructionsRef.current) return;
-      const { scrollTop, scrollHeight, clientHeight } = instructionsRef.current;
-      const canScroll = scrollHeight > clientHeight + 1;
-      const atBottom = scrollTop + clientHeight >= scrollHeight - 1;
-      setShowScrollFadeBottom(canScroll && !atBottom);
-      setShowScrollFadeTop(canScroll && scrollTop > 1);
-    };
-    update();
-    el.addEventListener("scroll", update);
-    window.addEventListener("resize", update);
-    return () => {
-      el.removeEventListener("scroll", update);
-      window.removeEventListener("resize", update);
-    };
-  }, [directions]);
-
-  useEffect(() => {
     const root = gridScrollRef.current;
     const viewport = root?.querySelector(
       '[data-slot="scroll-area-viewport"]'
@@ -2210,51 +1960,23 @@ export default function MapCanvas() {
           if (!open) setSelectedPerson(null);
         }}
       >
-        <DrawerContent>
+        <DrawerContent className="pb-2">
           <DrawerHeader>
-            <DrawerTitle className="flex items-center gap-2">
+            <DrawerTitle>
               <span>{selectedPerson?.name ?? "User"}</span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-[11px] font-semibold text-white">
-                <Clock className="h-3 w-3" />
-                Right now
-              </span>
             </DrawerTitle>
-            <DrawerDescription className="flex justify-start">
-              {selectedPerson ? (
-                <span className="inline-flex items-center gap-2 text-sm">
-                  <span
-                    className={cn(
-                      "h-2.5 w-2.5 rounded-full",
-                      selectedPerson.presence === "online"
-                        ? "bg-emerald-500"
-                        : selectedPerson.presence === "away"
-                        ? "bg-amber-400"
-                        : "bg-zinc-400"
-                    )}
-                    aria-hidden
-                  />
-                  <span className="text-foreground">
-                    {selectedPerson.presence === "online"
-                      ? "Online"
-                      : selectedPerson.presence === "away"
-                      ? "Away"
-                      : "Offline"}
-                  </span>
-                </span>
-              ) : null}
-            </DrawerDescription>
           </DrawerHeader>
-          <div className="grid grid-cols-3 gap-3 px-4 pb-6">
-            <div className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90">
+          <div className="grid grid-cols-3 gap-3 px-4 pb-2">
+            <div className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground">
               <UserIcon className="h-5 w-5 text-foreground" />
               <span>Profile</span>
             </div>
-            <div className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90">
+            <div className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground">
               <MessageCircle className="h-5 w-5 text-foreground" />
               <span>Messages</span>
             </div>
             <div
-              className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90"
+              className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground"
               onClick={() => {
                 if (selectedPerson?.location) {
                   const nearest = findNearestStation(selectedPerson.location);
@@ -2279,132 +2001,16 @@ export default function MapCanvas() {
               <span>Directions</span>
             </div>
           </div>
-          <div />
         </DrawerContent>
       </Drawer>
 
-      <Drawer
+      <MapDirections
         open={showDirectionsDrawer}
         onOpenChange={setShowDirectionsDrawer}
-      >
-        <DrawerContent>
-          <DrawerHeader>
-            <DrawerTitle>
-              {directionsTitle ||
-                selectedStation?.displayName ||
-                selectedStation?.name ||
-                "Directions"}
-            </DrawerTitle>
-          </DrawerHeader>
-          <div className="flex flex-col gap-3 px-4 pb-4">
-            {selectedStation ? (
-              <div className="flex flex-col gap-1">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                  Closest station
-                </span>
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-card/80 px-3 py-1 text-xs font-semibold text-foreground shadow-[0_8px_18px_rgba(0,0,0,0.35)] backdrop-blur">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white -ml-1">
-                      <img
-                        src={getStationIcon(
-                          selectedStation?.lines,
-                          selectedStation?.modes
-                        )}
-                        alt="Station icon"
-                        className="h-4 w-4"
-                      />
-                    </span>
-                    <span className="text-sm">
-                      {selectedStation?.displayName ||
-                        selectedStation?.name ||
-                        "Nearest station"}
-                    </span>
-                  </span>
-                </div>
-              </div>
-            ) : null}
-
-            <div className="pt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-              Journey options
-            </div>
-
-            {directions.status === "loading" && (
-              <div className="space-y-2">
-                <div className="h-3.5 w-24 animate-pulse rounded bg-muted/70" />
-                <div className="space-y-2 rounded-lg border border-border/50 p-3">
-                  <div className="h-4 w-32 animate-pulse rounded bg-muted/70" />
-                  <div className="h-3 w-48 animate-pulse rounded bg-muted/60" />
-                  <div className="h-3 w-40 animate-pulse rounded bg-muted/60" />
-                </div>
-              </div>
-            )}
-            {directions.status === "error" && (
-              <span className="text-destructive text-sm">
-                {directions.message}
-              </span>
-            )}
-            {directions.status === "ready" &&
-              directions.journeys.length > 0 && (
-                <Tabs
-                  defaultValue={directions.journeys[0]?.id}
-                  className="w-full"
-                >
-                  <TabsList className="mb-2">
-                    {directions.journeys.map((journey) => {
-                      return (
-                        <TabsTrigger
-                          key={journey.id}
-                          value={journey.id}
-                          className="flex items-center gap-1.5 rounded-full border border-border/60 bg-background px-3 py-1 text-xs font-medium"
-                        >
-                          <span>{formatDuration(journey.durationMins)}</span>
-                        </TabsTrigger>
-                      );
-                    })}
-                  </TabsList>
-                  <div className="relative">
-                    <div
-                      className="h-72 w-full overflow-y-auto [::-webkit-scrollbar]:hidden"
-                      style={{ scrollbarWidth: "none" }}
-                    >
-                      {directions.journeys.map((journey) => (
-                        <TabsContent key={journey.id} value={journey.id}>
-                          <ul className="space-y-2 text-xs text-muted-foreground">
-                            {journey.legs.map((leg, idx) => (
-                              <li
-                                key={`${journey.id}-${leg.summary}-${idx}`}
-                                className="rounded-lg bg-muted/20 p-3"
-                              >
-                                <div className="flex items-center justify-between gap-3">
-                                  <span className="flex items-center gap-2 font-semibold capitalize text-foreground">
-                                    <span className="text-muted-foreground">
-                                      {getModeIcon(leg.normalizedMode)}
-                                    </span>
-                                    {formatModeLabel(leg.mode)}
-                                  </span>
-                                  {leg.duration ? (
-                                    <span className="text-muted-foreground text-[11px]">
-                                      {leg.duration} min
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <div className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-                                  <InstructionWithLineBadges
-                                    text={leg.summary}
-                                  />
-                                </div>
-                              </li>
-                            ))}
-                          </ul>
-                        </TabsContent>
-                      ))}
-                    </div>
-                  </div>
-                </Tabs>
-              )}
-          </div>
-        </DrawerContent>
-      </Drawer>
+        station={selectedStation}
+        title={directionsTitle}
+        onUserLocation={setUserLocation}
+      />
 
       <Drawer
         open={showPlaceDrawer}
@@ -2414,21 +2020,25 @@ export default function MapCanvas() {
         }}
       >
         <DrawerContent>
-          <DrawerHeader>
-            <DrawerTitle className="flex items-center gap-2">
-              <span className="relative inline-flex items-center gap-2">
-                <span>{selectedPlace?.name ?? "Place"}</span>
-                <span className="rounded-full bg-primary px-2 py-0.5 text-[11px] font-semibold text-white">
-                  {selectedPlace?.category?.name || "Place"}
+          <DrawerHeader className="text-center">
+            <DrawerTitle>
+              {placeTitleLines.map((line, idx) => (
+                <span key={`place-title-${idx}`} className="block">
+                  {line}
                 </span>
-              </span>
+              ))}
             </DrawerTitle>
+            <div className="mt-1 flex justify-center">
+              <span className="inline-flex items-center gap-2 rounded-full bg-primary px-2 py-0.5 text-[11px] font-semibold text-white">
+                {selectedPlace?.category?.name || "Place"}
+              </span>
+            </div>
           </DrawerHeader>
           <div className="space-y-3 px-4 pb-4 text-sm text-foreground">
             <Accordion
               type="single"
               collapsible
-              className="rounded-2xl bg-card/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md"
+              className="rounded-2xl bg-muted/15"
             >
               <AccordionItem value="opening-times" className="border-0">
                 {(() => {
@@ -2608,7 +2218,7 @@ export default function MapCanvas() {
               {selectedPlace?.checkins_allowed ? (
                 <button
                   type="button"
-                  className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90"
+                  className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground"
                   onClick={() => {
                     setWallTitle("Wall");
                     setWallSubtitle(selectedPlace?.name ?? undefined);
@@ -2621,7 +2231,7 @@ export default function MapCanvas() {
                   <span>Wall</span>
                 </button>
               ) : null}
-              <div className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90">
+              <div className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground">
                 <Globe className="h-5 w-5 text-foreground" />
                 <button
                   type="button"
@@ -2643,7 +2253,7 @@ export default function MapCanvas() {
                 </button>
               </div>
               <div
-                className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90"
+                className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground"
                 onClick={() => {
                   if (selectedPlace) {
                     const coords: [number, number] = [
@@ -2674,25 +2284,27 @@ export default function MapCanvas() {
       </Drawer>
 
       <Drawer open={showGroupDrawer} onOpenChange={setShowGroupDrawer}>
-        <DrawerContent>
-          <DrawerHeader>
-            <DrawerTitle className="flex items-center gap-2">
+        <DrawerContent className="pb-1">
+          <DrawerHeader className="text-center">
+            <DrawerTitle>
               <span>TCR pump n dump</span>
+            </DrawerTitle>
+            <div className="mt-1 flex justify-center">
               <span className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[11px] font-semibold text-white">
                 Pump n dump
               </span>
-            </DrawerTitle>
+            </div>
           </DrawerHeader>
-          <div className="grid grid-cols-3 gap-3 px-4 pb-6">
-            <div className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90">
+          <div className="grid grid-cols-3 gap-3 px-4 pb-2">
+            <div className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground">
               <UserIcon className="h-5 w-5 text-foreground" />
               <span>Details</span>
             </div>
-            <div className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90">
+            <div className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground">
               <MessageCircle className="h-5 w-5 text-foreground" />
               <span>Host</span>
             </div>
-            <div className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90">
+            <div className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground">
               <Navigation className="h-5 w-5 text-foreground" />
               <span>Directions</span>
             </div>
@@ -2707,100 +2319,34 @@ export default function MapCanvas() {
           if (!open) setSelectedCruising(null);
         }}
       >
-        <DrawerContent className="pb-6">
+        <DrawerContent className="pb-2">
           <DrawerHeader className="pb-2 text-center">
-            <DrawerTitle className="text-lg font-semibold leading-tight">
-              {selectedCruising?.category?.name || "Cruising spot"}
+            <DrawerTitle>
+              {cruisingTitleLines.map((line, idx) => (
+                <span
+                  key={`cruise-title-${idx}`}
+                  className="block leading-[1.2]"
+                >
+                  {line}
+                </span>
+              ))}
             </DrawerTitle>
-            {selectedCruising?.name ? (
-              <div className="text-sm text-muted-foreground">
-                {selectedCruising.name}
+            {selectedCruising?.category?.name ? (
+              <div className="mt-1 flex justify-center">
+                <span className="inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-[11px] font-semibold text-white">
+                  {selectedCruising.category.name}
+                </span>
               </div>
+            ) : null}
+            {selectedCruising?.category?.name ? (
+              <div className="h-2.5" />
             ) : null}
           </DrawerHeader>
 
           <div className="px-4 pb-2">
-            <div className="relative pb-3 pt-1">
-              {!cruisingAvatarsReady ? (
-                <div className="flex items-center gap-3 overflow-hidden pb-2">
-                  {Array.from({ length: totalCruisingAvatars }).map(
-                    (_, idx) => (
-                      <div
-                        key={`cruise-skel-${idx}`}
-                        className="h-14 w-14 shrink-0 rounded-full bg-muted/60"
-                      />
-                    )
-                  )}
-                </div>
-              ) : null}
-
-              <div
-                className={cn(
-                  "flex items-center gap-3 overflow-x-auto pb-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden",
-                  cruisingAvatarsReady ? "" : "invisible"
-                )}
-              >
-                <div className="relative shrink-0">
-                  <div className="grayscale opacity-75">
-                    <MapAvatar
-                      size={44}
-                      avatarUrl={fallbackAvatarUrl}
-                      presence="offline"
-                      onLoaded={() =>
-                        setCruisingAvatarsLoaded((n) =>
-                          n < totalCruisingAvatars ? n + 1 : n
-                        )
-                      }
-                    />
-                  </div>
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                    <span className="flex h-7 w-7 items-center justify-center text-foreground drop-shadow-[0_4px_12px_rgba(0,0,0,0.45)]">
-                      <Plus className="h-4 w-4" />
-                    </span>
-                  </div>
-                  {cruisingAvatarsReady ? (
-                    <span className="pointer-events-none absolute -bottom-3 left-1/2 w-max -translate-x-1/2 rounded-full bg-muted/70 px-2 py-0.5 text-[11px] font-semibold text-foreground shadow-[0_6px_14px_rgba(0,0,0,0.3)]">
-                      Now
-                    </span>
-                  ) : null}
-                </div>
-
-                {(["online", "away", "offline"] as const).map(
-                  (presence, idx) => {
-                    const times = ["2 mins", "10 mins", ""];
-                    const timeLabel = times[idx] || null;
-                    return (
-                      <div
-                        key={`cruise-avatar-${idx}`}
-                        className="relative shrink-0"
-                      >
-                        <MapAvatar
-                          size={44}
-                          avatarUrl={fallbackAvatarUrl}
-                          presence={presence}
-                          onLoaded={() =>
-                            setCruisingAvatarsLoaded((n) =>
-                              n < totalCruisingAvatars ? n + 1 : n
-                            )
-                          }
-                        />
-                        {cruisingAvatarsReady && timeLabel ? (
-                          <span className="pointer-events-none absolute -bottom-3 left-1/2 w-max -translate-x-1/2 rounded-full bg-muted/70 px-2 py-0.5 text-[11px] font-semibold text-foreground shadow-[0_6px_14px_rgba(0,0,0,0.3)]">
-                            {timeLabel}
-                          </span>
-                        ) : null}
-                      </div>
-                    );
-                  }
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="px-4 pb-3">
             <Accordion
               type="multiple"
-              className="rounded-2xl bg-card/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md"
+              className="rounded-2xl bg-muted/15"
             >
               <AccordionItem value="description" className="border-0">
                 <AccordionTrigger className="items-center px-4 py-3 text-left text-base font-semibold hover:no-underline [&>svg]:translate-y-0">
@@ -2828,9 +2374,9 @@ export default function MapCanvas() {
                       {selectedCruising.tips.map((tip, idx) => (
                         <li
                           key={`${selectedCruising.id}-tip-${idx}`}
-                          className="flex items-start gap-3 rounded-xl bg-muted/20 px-3 py-2 text-sm leading-relaxed text-foreground"
+                          className="flex items-start gap-2 text-sm leading-relaxed text-foreground"
                         >
-                          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-orange-500" />
+                          <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-primary" />
                           <span>{tip}</span>
                         </li>
                       ))}
@@ -2845,11 +2391,11 @@ export default function MapCanvas() {
             </Accordion>
           </div>
 
-          <div className="px-4 pb-4">
+          <div className="px-4 pb-2">
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
-                className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90"
+                className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground"
                 onClick={() => {
                   setWallTitle("Wall");
                   setWallSubtitle(selectedCruising?.name ?? undefined);
@@ -2863,7 +2409,7 @@ export default function MapCanvas() {
               </button>
               <button
                 type="button"
-                className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90"
+                className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground"
                 onClick={() => {
                   if (!selectedCruising) return;
                   const coords: [number, number] = [
@@ -2929,138 +2475,34 @@ export default function MapCanvas() {
         onOpenChange={(open) => {
           setShowStationDrawer(open);
           // keep selectedStation so directions drawer can reuse it
-          if (!open) {
-            setDirections({ status: "idle" });
-          }
         }}
       >
         <DrawerContent>
-          <DrawerHeader className="items-start">
-            <DrawerTitle className="text-left">
-              {selectedStation?.displayName ||
-                selectedStation?.name ||
-                "Station"}
+          <DrawerHeader className="items-center text-center pb-2.5">
+            <DrawerTitle className="flex items-center justify-center gap-2">
+              {selectedStation ? (
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white">
+                  <img
+                    src={getStationIcon(
+                      selectedStation?.lines,
+                      selectedStation?.modes
+                    )}
+                    alt="Station icon"
+                    className="h-3.5 w-3.5"
+                  />
+                </span>
+              ) : null}
+              <span>
+                {selectedStation?.displayName ||
+                  selectedStation?.name ||
+                  "Station"}
+              </span>
             </DrawerTitle>
           </DrawerHeader>
-          <div className="flex flex-col gap-3 px-4 pb-4">
-            <div className="flex flex-wrap gap-2">
-              {(() => {
-                const lineTokens = Array.from(
-                  new Set(
-                    (selectedStation?.lines ?? [])
-                      .map((l) => (l ?? "").toString().trim())
-                      .filter(Boolean)
-                      .filter((l) => !/[0-9]/.test(l))
-                  )
-                );
-                if (lineTokens.length === 0) {
-                  return (
-                    <span className="text-muted-foreground text-sm">
-                      Line info unavailable
-                    </span>
-                  );
-                }
-                return lineTokens.map((line) => (
-                  <span
-                    key={line}
-                    className="rounded-full px-2 py-0.5 text-xs font-medium"
-                    style={{
-                      backgroundColor: getLineColor(line),
-                      color: getContrastingText(getLineColor(line)),
-                    }}
-                  >
-                    {line}
-                  </span>
-                ));
-              })()}
-            </div>
-            {directions.status === "loading" && (
-              <div className="space-y-2">
-                <div className="h-3.5 w-24 animate-pulse rounded bg-muted/70" />
-                <div className="space-y-2 rounded-lg border border-border/50 p-3">
-                  <div className="h-4 w-32 animate-pulse rounded bg-muted/70" />
-                  <div className="h-3 w-48 animate-pulse rounded bg-muted/60" />
-                  <div className="h-3 w-40 animate-pulse rounded bg-muted/60" />
-                </div>
-              </div>
-            )}
-            {directions.status === "error" && (
-              <span className="text-destructive text-sm">
-                {directions.message}
-              </span>
-            )}
-            {directions.status === "ready" &&
-              directions.journeys.length > 0 && (
-                <Tabs
-                  defaultValue={directions.journeys[0]?.id}
-                  className="w-full"
-                >
-                  <TabsList className="mb-2">
-                    {directions.journeys.map((journey) => {
-                      return (
-                        <TabsTrigger
-                          key={journey.id}
-                          value={journey.id}
-                          className="flex items-center gap-1.5 rounded-full border border-border/60 bg-background px-3 py-1 text-xs font-medium"
-                        >
-                          <span>{formatDuration(journey.durationMins)}</span>
-                        </TabsTrigger>
-                      );
-                    })}
-                  </TabsList>
-                  <div className="relative">
-                    <div
-                      ref={instructionsRef}
-                      className="h-72 w-full overflow-y-auto [::-webkit-scrollbar]:hidden"
-                      style={{ scrollbarWidth: "none" }}
-                    >
-                      {directions.journeys.map((journey) => (
-                        <TabsContent key={journey.id} value={journey.id}>
-                          <ul className="space-y-2 text-xs text-muted-foreground">
-                            {journey.legs.map((leg, idx) => (
-                              <li
-                                key={`${journey.id}-${leg.summary}-${idx}`}
-                                className="rounded-lg border border-border/60 bg-muted/20 p-3"
-                              >
-                                <div className="flex items-center justify-between gap-3">
-                                  <span className="flex items-center gap-2 font-semibold capitalize text-foreground">
-                                    <span className="text-muted-foreground">
-                                      {getModeIcon(leg.normalizedMode)}
-                                    </span>
-                                    {formatModeLabel(leg.mode)}
-                                  </span>
-                                  {leg.duration ? (
-                                    <span className="text-muted-foreground text-[11px]">
-                                      {leg.duration} min
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <div className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-                                  <InstructionWithLineBadges
-                                    text={leg.summary}
-                                  />
-                                </div>
-                              </li>
-                            ))}
-                          </ul>
-                        </TabsContent>
-                      ))}
-                    </div>
-                    <div
-                      className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-linear-to-t from-background to-transparent transition-opacity duration-200"
-                      style={{ opacity: showScrollFadeBottom ? 1 : 0 }}
-                    />
-                    <div
-                      className="pointer-events-none absolute inset-x-0 top-0 h-10 bg-linear-to-b from-background to-transparent transition-opacity duration-200"
-                      style={{ opacity: showScrollFadeTop ? 1 : 0 }}
-                    />
-                  </div>
-                </Tabs>
-              )}
+          <div className="flex flex-col gap-2 px-4 pb-4">
           </div>
         </DrawerContent>
       </Drawer>
     </div>
   );
 }
-import { Skeleton } from "@/components/ui/skeleton";

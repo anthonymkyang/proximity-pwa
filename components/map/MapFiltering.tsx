@@ -668,7 +668,7 @@ export default function MapFiltering({
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-9 gap-2 rounded-xl border border-white/10 bg-[#1b1b1f]/90 px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[#1b1b1f] focus-visible:ring-0 focus-visible:ring-offset-0"
+                    className="h-9 gap-2 rounded-xl px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0"
                   >
                     <Clock className="h-3.5 w-3.5 text-white" />
                     <span className="truncate text-white">{whenOption}</span>
