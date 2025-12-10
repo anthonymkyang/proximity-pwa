@@ -86,7 +86,7 @@ export default function Conversation({
             <div
               className={
                 mine
-                  ? "max-w-[75%] rounded-lg rounded-br-none px-3 py-2 text-sm bg-linear-to-br from-blue-500 via-blue-600 to-indigo-500 text-white"
+                  ? "max-w-[75%] rounded-lg rounded-br-none px-3 py-2 text-sm bg-primary text-white"
                   : "max-w-[75%] rounded-lg rounded-bl-none px-3 py-2 text-sm bg-muted text-foreground"
               }
             >

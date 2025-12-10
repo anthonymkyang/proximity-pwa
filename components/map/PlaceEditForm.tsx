@@ -48,6 +48,7 @@ export default function PlaceEditForm({
   const [tz, setTz] = useState("Europe/London");
   const [website, setWebsite] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [checkinsAllowed, setCheckinsAllowed] = useState(false);
 
   const [categories, setCategories] = useState<
     { id: string; name: string; slug: string }[]
@@ -72,7 +73,7 @@ export default function PlaceEditForm({
       const [{ data: place }, { data: cats }] = await Promise.all([
         supabase
           .from("places")
-          .select("name,slug,address,lat,lng,tz,website,category_id")
+          .select("name,slug,address,lat,lng,tz,website,category_id,checkins_allowed")
           .eq("id", placeId)
           .maybeSingle(),
         supabase
@@ -95,6 +96,8 @@ export default function PlaceEditForm({
         );
         setTz(place.tz || "Europe/London");
         setWebsite(place.website || "");
+        setCheckinsAllowed(Boolean((place as any).checkins_allowed));
+        setCheckinsAllowed(Boolean((place as any).checkins_allowed));
         if (place.category_id) {
           const catMatch = cats?.find((c) => c.id === place.category_id);
           if (catMatch) setCategoryInput(catMatch.name);
@@ -233,6 +236,8 @@ export default function PlaceEditForm({
       tz: tz || null,
       category_id: categoryId,
       website: website || null,
+      checkins_allowed: checkinsAllowed,
+      checkins_allowed: checkinsAllowed,
     };
     if (uploadedLogoUrl) {
       updatePayload.logo_url = uploadedLogoUrl;
@@ -418,20 +423,32 @@ export default function PlaceEditForm({
           </div>
           <div className="space-y-1">
             <label className="text-[11px] text-muted-foreground">Website</label>
-            <Input
-              size={0}
-              type="url"
-              value={website}
-              placeholder="https://example.com"
-              onChange={(e) => setWebsite(e.target.value)}
-              className="h-12 text-sm"
-            />
-          </div>
+        <Input
+          size={0}
+          type="url"
+          value={website}
+          placeholder="https://example.com"
+          onChange={(e) => setWebsite(e.target.value)}
+          className="h-12 text-sm"
+        />
+      </div>
+      <div className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5">
+        <label className="text-[11px] font-medium text-foreground" htmlFor="checkins">
+          Allow check-ins
+        </label>
+        <input
+          id="checkins"
+          type="checkbox"
+          className="h-4 w-4 accent-primary"
+          checked={checkinsAllowed}
+          onChange={(e) => setCheckinsAllowed(e.target.checked)}
+        />
+      </div>
       <div className="space-y-1">
-            <label className="text-[11px] text-muted-foreground">
-              Opening hours (HH:MM 24h)
-            </label>
-            <div className="space-y-2 rounded-lg border border-border/60 p-2">
+        <label className="text-[11px] text-muted-foreground">
+          Opening hours (HH:MM 24h)
+        </label>
+        <div className="space-y-2 rounded-lg border border-border/60 p-2">
               {days.map((day, idx) => (
                 <div
                   key={day}

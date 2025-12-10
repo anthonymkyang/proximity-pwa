@@ -20,6 +20,7 @@ import {
   TrainFrontTunnel,
   Navigation,
   MessageCircle,
+  BrickWallFire,
   User as UserIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -44,6 +45,7 @@ import MapPlace from "./MapPlace";
 import MapGroup from "./MapGroup";
 import MapFiltering from "./MapFiltering";
 import MapCruising from "./MapCruising";
+import DrawerWalls from "./DrawerWalls";
 import { createRoot, type Root } from "react-dom/client";
 import { createClient } from "@/utils/supabase/client";
 import { cn } from "@/lib/utils";
@@ -768,8 +770,11 @@ export default function MapCanvas() {
   const friendMarker6RootRef = useRef<Root | null>(null);
   const groupMarkerRef = useRef<maplibregl.Marker | null>(null);
   const groupMarkerRootRef = useRef<Root | null>(null);
-  const cruisingMarkerRef = useRef<maplibregl.Marker | null>(null);
-  const cruisingMarkerRootRef = useRef<Root | null>(null);
+  const cruisingMarkersRef = useRef<{ marker: maplibregl.Marker; root: Root; id: string }[]>(
+    []
+  );
+  const fallbackAvatarUrl =
+    "/api/photos/avatars?path=fb66cdef-296f-48f9-9c6e-29114cce6624%2F1762977064388.jpg";
   const placeMarkersRef = useRef<{ marker: maplibregl.Marker; root: Root }[]>(
     []
   );
@@ -790,6 +795,7 @@ export default function MapCanvas() {
       logo_url?: string | null;
       website?: string | null;
       category?: { name?: string | null; slug?: string | null } | null;
+      checkins_allowed?: boolean | null;
     }[]
   >([]);
   const [selectedPlace, setSelectedPlace] = useState<{
@@ -801,6 +807,7 @@ export default function MapCanvas() {
     logo_url?: string | null;
     website?: string | null;
     category?: { name?: string | null; slug?: string | null } | null;
+    checkins_allowed?: boolean | null;
   } | null>(null);
   const [placeHours, setPlaceHours] = useState<
     {
@@ -817,6 +824,26 @@ export default function MapCanvas() {
       { day_of_week: number; open_time: string; close_time: string; is_24h?: boolean | null }[]
     >
   >({});
+  const [cruisingSpots, setCruisingSpots] = useState<
+    {
+      id: string;
+      name: string;
+      lng: number;
+      lat: number;
+      description?: string | null;
+      category?: { name?: string | null } | null;
+      tips?: string[] | null;
+    }[]
+  >([]);
+  const totalCruisingAvatars = 4;
+  const [cruisingAvatarsLoaded, setCruisingAvatarsLoaded] = useState(0);
+  const cruisingAvatarsReady = cruisingAvatarsLoaded >= totalCruisingAvatars;
+  const [wallTitle, setWallTitle] = useState("Wall");
+  const [wallSubtitle, setWallSubtitle] = useState<string | undefined>(undefined);
+  const [wallOwnerType, setWallOwnerType] = useState<"place" | "cruising" | null>(
+    null
+  );
+  const [wallOwnerId, setWallOwnerId] = useState<string | null>(null);
   const computePlaceStatusFor = (
     placeId: string,
     tz: string | null | undefined
@@ -863,6 +890,17 @@ export default function MapCanvas() {
   const [directionsTitle, setDirectionsTitle] = useState<string | null>(null);
   const [showPlaceDrawer, setShowPlaceDrawer] = useState(false);
   const [showGroupDrawer, setShowGroupDrawer] = useState(false);
+  const [showCruisingDrawer, setShowCruisingDrawer] = useState(false);
+  const [showWallDrawer, setShowWallDrawer] = useState(false);
+  const [selectedCruising, setSelectedCruising] = useState<{
+    id: string;
+    name: string;
+    description?: string | null;
+    category?: { name?: string | null } | null;
+    tips?: string[] | null;
+    lng: number;
+    lat: number;
+  } | null>(null);
   const [showGridDrawer, setShowGridDrawer] = useState(false);
   const gridScrollRef = useRef<HTMLDivElement | null>(null);
   const [gridTopFade, setGridTopFade] = useState(false);
@@ -1352,8 +1390,7 @@ export default function MapCanvas() {
     const brixton: [number, number] = [-0.1109, 51.4611];
     const nottingHill: [number, number] = [-0.1967, 51.5094];
     const stGilesHotel: [number, number] = [-0.1305, 51.5164];
-    const avatarUrl =
-      "/api/photos/avatars?path=fb66cdef-296f-48f9-9c6e-29114cce6624%2F1762977064388.jpg";
+    const avatarUrl = fallbackAvatarUrl;
     const displayName = profileName || "Nearby user";
 
     let marker = friendMarkerRef.current;
@@ -1607,7 +1644,7 @@ export default function MapCanvas() {
       const { data, error } = await supabase
         .from("places")
         .select(
-          "id,name,lat,lng,tz,logo_url,website,category:places_categories(name,slug)"
+          "id,name,lat,lng,tz,logo_url,website,checkins_allowed,category:places_categories(name,slug)"
         )
         .limit(100);
       if (!active) return;
@@ -1623,6 +1660,7 @@ export default function MapCanvas() {
               logo_url: (p as any).logo_url ?? null,
               website: (p as any).website ?? null,
               category: (p as any).category ?? null,
+              checkins_allowed: (p as any).checkins_allowed ?? null,
             }))
             .filter(
               (p) =>
@@ -1638,6 +1676,68 @@ export default function MapCanvas() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    const loadCruising = async () => {
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("cruising_places")
+        .select("id,name,description,tips,category:cruising_categories(name),location")
+        .order("name");
+      if (!active) return;
+      if (error || !data) {
+        setCruisingSpots([]);
+        return;
+      }
+      const parsed = data
+        .map((row: any) => {
+          const loc = row.location as any;
+          let lng: number | null = null;
+          let lat: number | null = null;
+          if (loc && typeof loc === "object" && "x" in loc && "y" in loc) {
+            lng = Number((loc as any).x);
+            lat = Number((loc as any).y);
+          } else if (typeof loc === "string") {
+            const match = /\(?\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)?/.exec(loc);
+            if (match) {
+              lng = Number(match[1]);
+              lat = Number(match[2]);
+            }
+          }
+          if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+          return {
+            id: row.id as string,
+            name: row.name as string,
+            description: (row as any).description ?? null,
+            tips: (row as any).tips ?? null,
+            category: (row as any).category ?? null,
+            lng,
+            lat,
+          };
+        })
+        .filter(Boolean) as {
+        id: string;
+        name: string;
+        description?: string | null;
+        tips?: string[] | null;
+        category?: { name?: string | null } | null;
+        lng: number;
+        lat: number;
+      }[];
+      setCruisingSpots(parsed);
+    };
+    void loadCruising();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (showCruisingDrawer) {
+      setCruisingAvatarsLoaded(0);
+    }
+  }, [showCruisingDrawer, selectedCruising?.id]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1693,32 +1793,41 @@ export default function MapCanvas() {
     const map = mapRef.current;
     if (!map || !mapReady) return;
 
-    let marker = cruisingMarkerRef.current;
-    let root = cruisingMarkerRootRef.current;
-    if (!marker) {
-      const container = document.createElement("div");
-      container.className =
-        "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
-      root = createRoot(container);
-      cruisingMarkerRootRef.current = root;
-      marker = new maplibregl.Marker({ element: container, anchor: "center" });
-      cruisingMarkerRef.current = marker;
-    }
+    cruisingMarkersRef.current.forEach(({ marker, root }) => {
+      marker.remove();
+      requestAnimationFrame(() => root.unmount());
+    });
+    cruisingMarkersRef.current = [];
 
-    root?.render(<MapCruising size={30} />);
-    marker.setLngLat([-0.1756, 51.5154]).addTo(map);
+    const nextMarkers: { marker: maplibregl.Marker; root: Root; id: string }[] = [];
+
+    cruisingSpots.forEach((spot) => {
+      const container = document.createElement("div");
+      container.className = "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
+      const root = createRoot(container);
+      root.render(
+        <MapCruising
+          size={30}
+          onClick={() => {
+            setSelectedCruising(spot);
+            setShowCruisingDrawer(true);
+          }}
+        />
+      );
+      const marker = new maplibregl.Marker({ element: container, anchor: "center" });
+      marker.setLngLat([spot.lng, spot.lat]).addTo(map);
+      nextMarkers.push({ marker, root, id: spot.id });
+    });
+
+    cruisingMarkersRef.current = nextMarkers;
 
     return () => {
-      if (marker) {
+      nextMarkers.forEach(({ marker, root }) => {
         marker.remove();
-      }
-      if (root) {
-        requestAnimationFrame(() => root?.unmount());
-      }
-      cruisingMarkerRef.current = null;
-      cruisingMarkerRootRef.current = null;
+        requestAnimationFrame(() => root.unmount());
+      });
     };
-  }, [mapReady]);
+  }, [cruisingSpots, mapReady]);
 
   useEffect(() => {
     let active = true;
@@ -2139,6 +2248,7 @@ export default function MapCanvas() {
               <span>Directions</span>
             </div>
           </div>
+          <div />
         </DrawerContent>
       </Drawer>
 
@@ -2412,7 +2522,28 @@ export default function MapCanvas() {
                 </AccordionContent>
               </AccordionItem>
             </Accordion>
-            <div className="grid grid-cols-2 gap-3">
+            <div
+              className={cn(
+                "grid gap-3",
+                selectedPlace?.checkins_allowed ? "grid-cols-3" : "grid-cols-2"
+              )}
+            >
+              {selectedPlace?.checkins_allowed ? (
+                <button
+                  type="button"
+                  className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90"
+                  onClick={() => {
+                    setWallTitle("Wall");
+                    setWallSubtitle(selectedPlace?.name ?? undefined);
+                    setWallOwnerType("place");
+                    setWallOwnerId(selectedPlace?.id ?? null);
+                    setShowWallDrawer(true);
+                  }}
+                >
+                  <BrickWallFire className="h-5 w-5 text-foreground" />
+                  <span>Wall</span>
+                </button>
+              ) : null}
               <div className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90">
                 <Globe className="h-5 w-5 text-foreground" />
                 <button
@@ -2488,6 +2619,204 @@ export default function MapCanvas() {
           </div>
         </DrawerContent>
       </Drawer>
+
+      <Drawer
+        open={showCruisingDrawer && !!selectedCruising}
+        onOpenChange={(open) => {
+          setShowCruisingDrawer(open);
+          if (!open) setSelectedCruising(null);
+        }}
+      >
+        <DrawerContent className="pb-6">
+          <DrawerHeader className="pb-2 text-center">
+            <DrawerTitle className="text-lg font-semibold leading-tight">
+              {selectedCruising?.category?.name || "Cruising spot"}
+            </DrawerTitle>
+            {selectedCruising?.name ? (
+              <div className="text-sm text-muted-foreground">
+                {selectedCruising.name}
+              </div>
+            ) : null}
+          </DrawerHeader>
+
+          <div className="px-4 pb-2">
+            <div className="relative pb-3 pt-1">
+              {!cruisingAvatarsReady ? (
+                <div className="flex items-center gap-3 overflow-hidden pb-2">
+                  {Array.from({ length: totalCruisingAvatars }).map((_, idx) => (
+                    <div
+                      key={`cruise-skel-${idx}`}
+                      className="h-14 w-14 shrink-0 rounded-full bg-muted/60"
+                    />
+                  ))}
+                </div>
+              ) : null}
+
+              <div
+                className={cn(
+                  "flex items-center gap-3 overflow-x-auto pb-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden",
+                  cruisingAvatarsReady ? "" : "invisible"
+                )}
+              >
+                <div className="relative shrink-0">
+                  <div className="grayscale opacity-75">
+                    <MapAvatar
+                      size={44}
+                      avatarUrl={fallbackAvatarUrl}
+                      presence="offline"
+                      onLoaded={() =>
+                        setCruisingAvatarsLoaded((n) =>
+                          n < totalCruisingAvatars ? n + 1 : n
+                        )
+                      }
+                    />
+                  </div>
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                    <span className="flex h-7 w-7 items-center justify-center text-foreground drop-shadow-[0_4px_12px_rgba(0,0,0,0.45)]">
+                      <Plus className="h-4 w-4" />
+                    </span>
+                  </div>
+                  {cruisingAvatarsReady ? (
+                    <span className="pointer-events-none absolute -bottom-3 left-1/2 w-max -translate-x-1/2 rounded-full bg-muted/70 px-2 py-0.5 text-[11px] font-semibold text-foreground shadow-[0_6px_14px_rgba(0,0,0,0.3)]">
+                      Now
+                    </span>
+                  ) : null}
+                </div>
+
+                {(["online", "away", "offline"] as const).map((presence, idx) => {
+                  const times = ["2 mins", "10 mins", ""];
+                  const timeLabel = times[idx] || null;
+                  return (
+                    <div key={`cruise-avatar-${idx}`} className="relative shrink-0">
+                      <MapAvatar
+                        size={44}
+                        avatarUrl={fallbackAvatarUrl}
+                        presence={presence}
+                        onLoaded={() =>
+                          setCruisingAvatarsLoaded((n) =>
+                            n < totalCruisingAvatars ? n + 1 : n
+                          )
+                        }
+                      />
+                      {cruisingAvatarsReady && timeLabel ? (
+                        <span className="pointer-events-none absolute -bottom-3 left-1/2 w-max -translate-x-1/2 rounded-full bg-muted/70 px-2 py-0.5 text-[11px] font-semibold text-foreground shadow-[0_6px_14px_rgba(0,0,0,0.3)]">
+                          {timeLabel}
+                        </span>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="px-4 pb-3">
+            <Accordion
+              type="multiple"
+              className="rounded-2xl bg-card/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md"
+            >
+              <AccordionItem value="description" className="border-0">
+                <AccordionTrigger className="items-center px-4 py-3 text-left text-base font-semibold hover:no-underline [&>svg]:translate-y-0">
+                  Description
+                </AccordionTrigger>
+                <AccordionContent className="px-4 pb-4">
+                  {selectedCruising?.description ? (
+                    <p className="text-sm leading-relaxed text-muted-foreground">
+                      {selectedCruising.description}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No description yet.</p>
+                  )}
+                </AccordionContent>
+              </AccordionItem>
+              <AccordionItem value="tips" className="border-0">
+                <AccordionTrigger className="items-center px-4 py-3 text-left text-base font-semibold hover:no-underline [&>svg]:translate-y-0">
+                  Tips & cues
+                </AccordionTrigger>
+                <AccordionContent className="px-4 pb-4">
+                  {selectedCruising?.tips?.length ? (
+                    <ul className="space-y-2">
+                      {selectedCruising.tips.map((tip, idx) => (
+                        <li
+                          key={`${selectedCruising.id}-tip-${idx}`}
+                          className="flex items-start gap-3 rounded-xl bg-muted/20 px-3 py-2 text-sm leading-relaxed text-foreground"
+                        >
+                          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-orange-500" />
+                          <span>{tip}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="rounded-xl bg-muted/15 px-3 py-2 text-sm text-muted-foreground">
+                      No tips yet for this spot.
+                    </div>
+                  )}
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
+          </div>
+
+          <div className="px-4 pb-4">
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90"
+                onClick={() => {
+                  setWallTitle("Wall");
+                  setWallSubtitle(selectedCruising?.name ?? undefined);
+                  setWallOwnerType("cruising");
+                  setWallOwnerId(selectedCruising?.id ?? null);
+                  setShowWallDrawer(true);
+                }}
+              >
+                <BrickWallFire className="h-5 w-5 text-foreground" />
+                <span>Wall</span>
+              </button>
+              <button
+                type="button"
+                className="flex flex-col items-center gap-2 rounded-2xl bg-card p-4 text-sm font-semibold shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur transition hover:bg-card/90"
+                onClick={() => {
+                  if (!selectedCruising) return;
+                  const coords: [number, number] = [
+                    selectedCruising.lng,
+                    selectedCruising.lat,
+                  ];
+                  const nearest = findNearestStation(coords);
+                  setSelectedStation(
+                    nearest ?? {
+                      name: selectedCruising.name,
+                      displayName: selectedCruising.name,
+                      lines: [],
+                      modes: [],
+                      coordinates: coords,
+                    }
+                  );
+                  setDirectionsTitle(`Directions to ${selectedCruising.name}`);
+                  setShowDirectionsDrawer(true);
+                }}
+              >
+                <Navigation className="h-5 w-5 text-foreground" />
+                <span>Directions</span>
+              </button>
+            </div>
+          </div>
+        </DrawerContent>
+      </Drawer>
+
+      <DrawerWalls
+        open={showWallDrawer}
+        onOpenChange={(open) => {
+          setShowWallDrawer(open);
+          if (!open) {
+            setWallOwnerType(null);
+            setWallOwnerId(null);
+          }
+        }}
+        title={wallTitle}
+        subtitle={wallSubtitle}
+        ownerType={wallOwnerType ?? undefined}
+        ownerId={wallOwnerId}
+      />
 
       {locationError ? (
         <div className="pointer-events-none absolute right-4 top-4">

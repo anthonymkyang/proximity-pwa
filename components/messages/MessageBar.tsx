@@ -14,6 +14,7 @@ export default function MessageBar({
   maxRows = 5,
   disabled,
   onShareClick,
+  showShareButton = true,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -22,6 +23,7 @@ export default function MessageBar({
   maxRows?: number;
   disabled?: boolean;
   onShareClick?: () => void;
+  showShareButton?: boolean;
 }) {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -30,18 +32,22 @@ export default function MessageBar({
     }
   };
 
+  const showShare = Boolean(showShareButton && onShareClick);
+
   return (
     <div className="relative w-full max-w-full overflow-hidden flex items-center gap-2">
-      <Button
-        type="button"
-        variant="outline"
-        size="icon"
-        className="rounded-full h-9 w-9 shrink-0"
-        onClick={onShareClick}
-        aria-label="Share to conversation"
-      >
-        <Plus className="h-5 w-5" />
-      </Button>
+      {showShare ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="rounded-full h-9 w-9 shrink-0"
+          onClick={onShareClick}
+          aria-label="Share to conversation"
+        >
+          <Plus className="h-5 w-5" />
+        </Button>
+      ) : null}
       <div className="relative flex-1">
         <TextareaAutosize
           minRows={1}

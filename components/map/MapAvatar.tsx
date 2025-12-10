@@ -12,6 +12,7 @@ type MapAvatarProps = {
   messages?: boolean;
   newMessages?: boolean;
   onClick?: () => void;
+  onLoaded?: () => void;
 };
 
 export default function MapAvatar({
@@ -23,10 +24,16 @@ export default function MapAvatar({
   messages = false,
   newMessages = false,
   onClick,
+  onLoaded,
 }: MapAvatarProps) {
   const dimension = `${size}px`;
   const ringSize = size + 8;
   const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    if (loaded && onLoaded) {
+      onLoaded();
+    }
+  }, [loaded, onLoaded]);
 
   const ringGradient =
     presence === "online"
