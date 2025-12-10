@@ -770,9 +770,9 @@ export default function MapCanvas() {
   const friendMarker6RootRef = useRef<Root | null>(null);
   const groupMarkerRef = useRef<maplibregl.Marker | null>(null);
   const groupMarkerRootRef = useRef<Root | null>(null);
-  const cruisingMarkersRef = useRef<{ marker: maplibregl.Marker; root: Root; id: string }[]>(
-    []
-  );
+  const cruisingMarkersRef = useRef<
+    { marker: maplibregl.Marker; root: Root; id: string }[]
+  >([]);
   const fallbackAvatarUrl =
     "/api/photos/avatars?path=fb66cdef-296f-48f9-9c6e-29114cce6624%2F1762977064388.jpg";
   const placeMarkersRef = useRef<{ marker: maplibregl.Marker; root: Root }[]>(
@@ -821,7 +821,12 @@ export default function MapCanvas() {
   const [placeHoursByPlace, setPlaceHoursByPlace] = useState<
     Record<
       string,
-      { day_of_week: number; open_time: string; close_time: string; is_24h?: boolean | null }[]
+      {
+        day_of_week: number;
+        open_time: string;
+        close_time: string;
+        is_24h?: boolean | null;
+      }[]
     >
   >({});
   const [cruisingSpots, setCruisingSpots] = useState<
@@ -839,10 +844,12 @@ export default function MapCanvas() {
   const [cruisingAvatarsLoaded, setCruisingAvatarsLoaded] = useState(0);
   const cruisingAvatarsReady = cruisingAvatarsLoaded >= totalCruisingAvatars;
   const [wallTitle, setWallTitle] = useState("Wall");
-  const [wallSubtitle, setWallSubtitle] = useState<string | undefined>(undefined);
-  const [wallOwnerType, setWallOwnerType] = useState<"place" | "cruising" | null>(
-    null
+  const [wallSubtitle, setWallSubtitle] = useState<string | undefined>(
+    undefined
   );
+  const [wallOwnerType, setWallOwnerType] = useState<
+    "place" | "cruising" | null
+  >(null);
   const [wallOwnerId, setWallOwnerId] = useState<string | null>(null);
   const computePlaceStatusFor = (
     placeId: string,
@@ -908,16 +915,14 @@ export default function MapCanvas() {
 
   const findNearestStation = (
     coords: [number, number]
-  ):
-    | {
-        name: string;
-        displayName: string;
-        coordinates: [number, number];
-        lines?: string[];
-        modes?: string[];
-        distanceKm?: number;
-      }
-    | null => {
+  ): {
+    name: string;
+    displayName: string;
+    coordinates: [number, number];
+    lines?: string[];
+    modes?: string[];
+    distanceKm?: number;
+  } | null => {
     const stations = stationsRef.current?.features ?? [];
     if (!coords || stations.length === 0) return null;
 
@@ -994,10 +999,17 @@ export default function MapCanvas() {
 
     const entryToday = placeHours.find((h) => h.day_of_week === day);
     if (entryToday?.is_24h)
-      return { state: "open" as const, closingSoon: false, closeLabel: "24h", is24h: true };
+      return {
+        state: "open" as const,
+        closingSoon: false,
+        closeLabel: "24h",
+        is24h: true,
+      };
 
     const openMinsToday = entryToday ? parseMinutes(entryToday.open_time) : NaN;
-    const closeMinsToday = entryToday ? parseMinutes(entryToday.close_time) : NaN;
+    const closeMinsToday = entryToday
+      ? parseMinutes(entryToday.close_time)
+      : NaN;
 
     const isOpen = (() => {
       if (!entryToday) return false;
@@ -1010,6 +1022,7 @@ export default function MapCanvas() {
     })();
 
     if (isOpen) {
+      if (!entryToday) return null;
       const crossesMidnight = closeMinsToday <= openMinsToday;
       const untilClose = crossesMidnight
         ? minutesNow >= openMinsToday
@@ -1031,7 +1044,8 @@ export default function MapCanvas() {
       const entry = placeHours.find((h) => h.day_of_week === targetDay);
       if (!entry || entry.is_24h) {
         if (entry?.is_24h) {
-          const dayLabel = i === 0 ? "today" : i === 1 ? "tomorrow" : daysShort[targetDay];
+          const dayLabel =
+            i === 0 ? "today" : i === 1 ? "tomorrow" : daysShort[targetDay];
           nextOpenLabel = `All day ${dayLabel}`;
           break;
         }
@@ -1042,7 +1056,8 @@ export default function MapCanvas() {
       if (!Number.isFinite(openMins) || !Number.isFinite(closeMins)) continue;
       if (i === 0 && minutesNow >= closeMins) continue;
       if (i === 0 && minutesNow >= openMins && minutesNow < closeMins) continue;
-      const dayLabel = i === 0 ? "today" : i === 1 ? "tomorrow" : daysShort[targetDay];
+      const dayLabel =
+        i === 0 ? "today" : i === 1 ? "tomorrow" : daysShort[targetDay];
       nextOpenLabel = `${formatTime(entry.open_time)} ${dayLabel}`;
       break;
     }
@@ -1683,7 +1698,9 @@ export default function MapCanvas() {
       const supabase = createClient();
       const { data, error } = await supabase
         .from("cruising_places")
-        .select("id,name,description,tips,category:cruising_categories(name),location")
+        .select(
+          "id,name,description,tips,category:cruising_categories(name),location"
+        )
         .order("name");
       if (!active) return;
       if (error || !data) {
@@ -1757,7 +1774,7 @@ export default function MapCanvas() {
       const container = document.createElement("div");
       container.className =
         "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
-      if (status?.state === "closed") {
+      if (status === "closed") {
         container.style.opacity = "0.4";
         container.style.filter = "grayscale(0.35)";
       }
@@ -1774,7 +1791,10 @@ export default function MapCanvas() {
           }}
         />
       );
-      const marker = new maplibregl.Marker({ element: container, anchor: "center" });
+      const marker = new maplibregl.Marker({
+        element: container,
+        anchor: "center",
+      });
       marker.setLngLat([place.lng, place.lat]).addTo(map);
       newMarkers.push({ marker, root });
     });
@@ -1799,11 +1819,13 @@ export default function MapCanvas() {
     });
     cruisingMarkersRef.current = [];
 
-    const nextMarkers: { marker: maplibregl.Marker; root: Root; id: string }[] = [];
+    const nextMarkers: { marker: maplibregl.Marker; root: Root; id: string }[] =
+      [];
 
     cruisingSpots.forEach((spot) => {
       const container = document.createElement("div");
-      container.className = "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
+      container.className =
+        "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
       const root = createRoot(container);
       root.render(
         <MapCruising
@@ -1814,7 +1836,10 @@ export default function MapCanvas() {
           }}
         />
       );
-      const marker = new maplibregl.Marker({ element: container, anchor: "center" });
+      const marker = new maplibregl.Marker({
+        element: container,
+        anchor: "center",
+      });
       marker.setLngLat([spot.lng, spot.lat]).addTo(map);
       nextMarkers.push({ marker, root, id: spot.id });
     });
@@ -1851,7 +1876,8 @@ export default function MapCanvas() {
           data.map((row) => ({
             day_of_week: Number(row.day_of_week),
             open_time: typeof row.open_time === "string" ? row.open_time : "",
-            close_time: typeof row.close_time === "string" ? row.close_time : "",
+            close_time:
+              typeof row.close_time === "string" ? row.close_time : "",
             is_closed: false,
             is_24h: (row as any).is_24h ?? false,
           }))
@@ -1878,7 +1904,9 @@ export default function MapCanvas() {
       const ids = places.map((p) => p.id);
       const { data, error } = await supabase
         .from("place_hours")
-        .select("place_id, day_of_week, open_time::text, close_time::text, is_24h");
+        .select(
+          "place_id, day_of_week, open_time::text, close_time::text, is_24h"
+        );
       if (!active) return;
       if (!error && Array.isArray(data)) {
         const grouped: Record<string, any[]> = {};
@@ -1888,7 +1916,8 @@ export default function MapCanvas() {
           grouped[pid].push({
             day_of_week: Number(row.day_of_week),
             open_time: typeof row.open_time === "string" ? row.open_time : "",
-            close_time: typeof row.close_time === "string" ? row.close_time : "",
+            close_time:
+              typeof row.close_time === "string" ? row.close_time : "",
             is_24h: row.is_24h ?? false,
           });
         });
@@ -2079,7 +2108,9 @@ export default function MapCanvas() {
 
       <MapFiltering />
 
-      {userLocation ? <MapWeather coords={userLocation} className="top-20" /> : null}
+      {userLocation ? (
+        <MapWeather coords={userLocation} className="top-20" />
+      ) : null}
 
       <div className="pointer-events-none absolute left-4 top-20">
         <Button
@@ -2160,12 +2191,12 @@ export default function MapCanvas() {
               </ScrollArea>
             </div>
             <div
-              className={`pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background to-transparent transition-opacity duration-200 ${
+              className={`pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-linear-to-t from-background to-transparent transition-opacity duration-200 ${
                 gridBottomFade ? "opacity-100" : "opacity-0"
               }`}
             />
             <div
-              className={`pointer-events-none absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-background to-transparent transition-opacity duration-200 ${
+              className={`pointer-events-none absolute inset-x-0 top-0 h-10 bg-linear-to-b from-background to-transparent transition-opacity duration-200 ${
                 gridTopFade ? "opacity-100" : "opacity-0"
               }`}
             />
@@ -2197,8 +2228,8 @@ export default function MapCanvas() {
                       selectedPerson.presence === "online"
                         ? "bg-emerald-500"
                         : selectedPerson.presence === "away"
-                          ? "bg-amber-400"
-                          : "bg-zinc-400"
+                        ? "bg-amber-400"
+                        : "bg-zinc-400"
                     )}
                     aria-hidden
                   />
@@ -2206,8 +2237,8 @@ export default function MapCanvas() {
                     {selectedPerson.presence === "online"
                       ? "Online"
                       : selectedPerson.presence === "away"
-                        ? "Away"
-                        : "Offline"}
+                      ? "Away"
+                      : "Offline"}
                   </span>
                 </span>
               ) : null}
@@ -2253,19 +2284,19 @@ export default function MapCanvas() {
       </Drawer>
 
       <Drawer
-          open={showDirectionsDrawer}
-          onOpenChange={setShowDirectionsDrawer}
-        >
-          <DrawerContent>
-            <DrawerHeader>
-              <DrawerTitle>
-                {directionsTitle ||
-                  selectedStation?.displayName ||
-                  selectedStation?.name ||
-                  "Directions"}
-              </DrawerTitle>
-            </DrawerHeader>
-            <div className="flex flex-col gap-3 px-4 pb-4">
+        open={showDirectionsDrawer}
+        onOpenChange={setShowDirectionsDrawer}
+      >
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>
+              {directionsTitle ||
+                selectedStation?.displayName ||
+                selectedStation?.name ||
+                "Directions"}
+            </DrawerTitle>
+          </DrawerHeader>
+          <div className="flex flex-col gap-3 px-4 pb-4">
             {selectedStation ? (
               <div className="flex flex-col gap-1">
                 <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
@@ -2275,7 +2306,10 @@ export default function MapCanvas() {
                   <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-card/80 px-3 py-1 text-xs font-semibold text-foreground shadow-[0_8px_18px_rgba(0,0,0,0.35)] backdrop-blur">
                     <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white -ml-1">
                       <img
-                        src={getStationIcon(selectedStation?.lines, selectedStation?.modes)}
+                        src={getStationIcon(
+                          selectedStation?.lines,
+                          selectedStation?.modes
+                        )}
                         alt="Station icon"
                         className="h-4 w-4"
                       />
@@ -2404,14 +2438,14 @@ export default function MapCanvas() {
                     status === "open"
                       ? "Open now"
                       : status === "closing"
-                        ? "Closing soon"
-                        : "Closed";
+                      ? "Closing soon"
+                      : "Closed";
                   const statusClass =
                     status === "closed"
                       ? "text-destructive"
                       : status === "open"
-                        ? "text-emerald-400"
-                        : undefined;
+                      ? "text-emerald-400"
+                      : undefined;
                   return (
                     <AccordionTrigger
                       className={cn(
@@ -2428,8 +2462,8 @@ export default function MapCanvas() {
                               statusInfo.is24h
                                 ? ""
                                 : statusInfo.closingSoon
-                                  ? "text-amber-400"
-                                  : ""
+                                ? "text-amber-400"
+                                : ""
                             )}
                           >
                             {statusInfo.is24h
@@ -2456,63 +2490,106 @@ export default function MapCanvas() {
                   ) : placeHours.length > 0 ? (
                     <>
                       {(() => {
-                      const labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-                      const todayIdx = new Date().getDay();
-                      const dayData = labels.map((label, idx) => {
-                        const dow = (idx + 1) % 7;
-                        const entry = placeHours.find((h) => h.day_of_week === dow);
-                        let text = "—";
-                        if (entry) {
-                          text = entry.is_24h
-                            ? "Open 24 hours"
-                            : `${formatTime(entry.open_time)} – ${formatTime(entry.close_time)}`;
+                        const labels = [
+                          "Mon",
+                          "Tue",
+                          "Wed",
+                          "Thu",
+                          "Fri",
+                          "Sat",
+                          "Sun",
+                        ];
+                        const todayIdx = new Date().getDay();
+                        const dayData = labels.map((label, idx) => {
+                          const dow = (idx + 1) % 7;
+                          const entry = placeHours.find(
+                            (h) => h.day_of_week === dow
+                          );
+                          let text = "—";
+                          if (entry) {
+                            text = entry.is_24h
+                              ? "Open 24 hours"
+                              : `${formatTime(entry.open_time)} – ${formatTime(
+                                  entry.close_time
+                                )}`;
+                          }
+                          return {
+                            label,
+                            dow,
+                            text,
+                            isToday: todayIdx === dow,
+                          };
+                        });
+
+                        const segments: {
+                          start: number;
+                          end: number;
+                          text: string;
+                          isToday: boolean;
+                        }[] = [];
+                        let current = {
+                          start: 0,
+                          end: 0,
+                          text: dayData[0].text,
+                          isToday: dayData[0].isToday,
+                        };
+                        for (let i = 1; i < dayData.length; i++) {
+                          const day = dayData[i];
+                          if (day.text === current.text) {
+                            current.end = i;
+                            current.isToday = current.isToday || day.isToday;
+                          } else {
+                            segments.push(current);
+                            current = {
+                              start: i,
+                              end: i,
+                              text: day.text,
+                              isToday: day.isToday,
+                            };
+                          }
                         }
-                        return { label, dow, text, isToday: todayIdx === dow };
-                      });
+                        segments.push(current);
 
-                      const segments: { start: number; end: number; text: string; isToday: boolean }[] = [];
-                      let current = { start: 0, end: 0, text: dayData[0].text, isToday: dayData[0].isToday };
-                      for (let i = 1; i < dayData.length; i++) {
-                        const day = dayData[i];
-                        if (day.text === current.text) {
-                          current.end = i;
-                          current.isToday = current.isToday || day.isToday;
-                        } else {
-                          segments.push(current);
-                          current = { start: i, end: i, text: day.text, isToday: day.isToday };
-                        }
-                      }
-                      segments.push(current);
+                        const isAllWeekSame =
+                          segments.length === 1 &&
+                          segments[0].start === 0 &&
+                          segments[0].end === 6;
 
-                      const isAllWeekSame = segments.length === 1 && segments[0].start === 0 && segments[0].end === 6;
-
-                      return (
-                        <ul className="mt-2 space-y-1 text-muted-foreground">
-                          {segments.map((seg, idx) => {
-                            const isTwoDayRange = seg.end === seg.start + 1;
-                            const dayLabel = isAllWeekSame
-                              ? "All week"
-                              : seg.start === seg.end
+                        return (
+                          <ul className="mt-2 space-y-1 text-muted-foreground">
+                            {segments.map((seg, idx) => {
+                              const isTwoDayRange = seg.end === seg.start + 1;
+                              const dayLabel = isAllWeekSame
+                                ? "All week"
+                                : seg.start === seg.end
                                 ? dayData[seg.start].label
                                 : isTwoDayRange
-                                  ? `${dayData[seg.start].label} & ${dayData[seg.end].label}`
-                                  : `${dayData[seg.start].label} – ${dayData[seg.end].label}`;
-                            const isToday = seg.isToday;
-                            const labelClass = isToday ? "font-semibold text-foreground" : "text-muted-foreground";
-                            const timeClass = isToday ? "font-semibold text-foreground" : "text-muted-foreground";
-                            return (
-                              <li
-                                key={`${dayLabel}-${idx}`}
-                                className="grid grid-cols-[120px_1fr] items-start gap-x-4"
-                              >
-                                <span className={labelClass}>{dayLabel}</span>
-                                <span className={timeClass}>{seg.text}</span>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      );
-                    })()}
+                                ? `${dayData[seg.start].label} & ${
+                                    dayData[seg.end].label
+                                  }`
+                                : `${dayData[seg.start].label} – ${
+                                    dayData[seg.end].label
+                                  }`;
+                              const isToday = seg.isToday;
+                              const labelClass = isToday
+                                ? "font-semibold text-foreground"
+                                : "text-muted-foreground";
+                              const timeClass = isToday
+                                ? "font-semibold text-foreground"
+                                : "text-muted-foreground";
+                              return (
+                                <li
+                                  key={`${dayLabel}-${idx}`}
+                                  className="grid grid-cols-[120px_1fr] items-start gap-x-4"
+                                >
+                                  <span className={labelClass}>{dayLabel}</span>
+                                  <span className={timeClass}>{seg.text}</span>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        );
+                      })()}
                     </>
                   ) : (
                     <p className="mt-2 text-muted-foreground text-sm">
@@ -2550,7 +2627,10 @@ export default function MapCanvas() {
                   type="button"
                   className="text-white"
                   onClick={() => {
-                    if (selectedPlace?.website && typeof window !== "undefined") {
+                    if (
+                      selectedPlace?.website &&
+                      typeof window !== "undefined"
+                    ) {
                       const url = selectedPlace.website.startsWith("http")
                         ? selectedPlace.website
                         : `https://${selectedPlace.website}`;
@@ -2643,12 +2723,14 @@ export default function MapCanvas() {
             <div className="relative pb-3 pt-1">
               {!cruisingAvatarsReady ? (
                 <div className="flex items-center gap-3 overflow-hidden pb-2">
-                  {Array.from({ length: totalCruisingAvatars }).map((_, idx) => (
-                    <div
-                      key={`cruise-skel-${idx}`}
-                      className="h-14 w-14 shrink-0 rounded-full bg-muted/60"
-                    />
-                  ))}
+                  {Array.from({ length: totalCruisingAvatars }).map(
+                    (_, idx) => (
+                      <div
+                        key={`cruise-skel-${idx}`}
+                        className="h-14 w-14 shrink-0 rounded-full bg-muted/60"
+                      />
+                    )
+                  )}
                 </div>
               ) : null}
 
@@ -2683,29 +2765,34 @@ export default function MapCanvas() {
                   ) : null}
                 </div>
 
-                {(["online", "away", "offline"] as const).map((presence, idx) => {
-                  const times = ["2 mins", "10 mins", ""];
-                  const timeLabel = times[idx] || null;
-                  return (
-                    <div key={`cruise-avatar-${idx}`} className="relative shrink-0">
-                      <MapAvatar
-                        size={44}
-                        avatarUrl={fallbackAvatarUrl}
-                        presence={presence}
-                        onLoaded={() =>
-                          setCruisingAvatarsLoaded((n) =>
-                            n < totalCruisingAvatars ? n + 1 : n
-                          )
-                        }
-                      />
-                      {cruisingAvatarsReady && timeLabel ? (
-                        <span className="pointer-events-none absolute -bottom-3 left-1/2 w-max -translate-x-1/2 rounded-full bg-muted/70 px-2 py-0.5 text-[11px] font-semibold text-foreground shadow-[0_6px_14px_rgba(0,0,0,0.3)]">
-                          {timeLabel}
-                        </span>
-                      ) : null}
-                    </div>
-                  );
-                })}
+                {(["online", "away", "offline"] as const).map(
+                  (presence, idx) => {
+                    const times = ["2 mins", "10 mins", ""];
+                    const timeLabel = times[idx] || null;
+                    return (
+                      <div
+                        key={`cruise-avatar-${idx}`}
+                        className="relative shrink-0"
+                      >
+                        <MapAvatar
+                          size={44}
+                          avatarUrl={fallbackAvatarUrl}
+                          presence={presence}
+                          onLoaded={() =>
+                            setCruisingAvatarsLoaded((n) =>
+                              n < totalCruisingAvatars ? n + 1 : n
+                            )
+                          }
+                        />
+                        {cruisingAvatarsReady && timeLabel ? (
+                          <span className="pointer-events-none absolute -bottom-3 left-1/2 w-max -translate-x-1/2 rounded-full bg-muted/70 px-2 py-0.5 text-[11px] font-semibold text-foreground shadow-[0_6px_14px_rgba(0,0,0,0.3)]">
+                            {timeLabel}
+                          </span>
+                        ) : null}
+                      </div>
+                    );
+                  }
+                )}
               </div>
             </div>
           </div>
@@ -2725,7 +2812,9 @@ export default function MapCanvas() {
                       {selectedCruising.description}
                     </p>
                   ) : (
-                    <p className="text-sm text-muted-foreground">No description yet.</p>
+                    <p className="text-sm text-muted-foreground">
+                      No description yet.
+                    </p>
                   )}
                 </AccordionContent>
               </AccordionItem>
