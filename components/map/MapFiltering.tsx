@@ -522,12 +522,12 @@ export default function MapFiltering({
         </div>
         <div className="relative -mx-4 px-4">
           <div
-            className={`pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-card via-card/70 to-transparent transition-opacity ${
+            className={`pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-muted/20 via-muted/10 to-transparent transition-opacity ${
               hFade.left ? "opacity-100" : "opacity-0"
             }`}
           />
           <div
-            className={`pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-card via-card/70 to-transparent transition-opacity ${
+            className={`pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-muted/20 via-muted/10 to-transparent transition-opacity ${
               hFade.right ? "opacity-100" : "opacity-0"
             }`}
           />
@@ -706,7 +706,7 @@ export default function MapFiltering({
                 <div className="px-1 pb-0 text-[11px] font-semibold uppercase text-muted-foreground">
                   Cruising
                 </div>
-                <div className="rounded-2xl bg-card px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md">
+                <div className="rounded-2xl bg-muted/15 px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-foreground">Active now</h3>
                     <Switch
@@ -717,7 +717,7 @@ export default function MapFiltering({
                   </div>
                 </div>
 
-                <div className="rounded-2xl bg-card px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md">
+                <div className="rounded-2xl bg-muted/15 px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md">
                   <div className="mb-2 flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-foreground">Hosting</h3>
                     <Switch
@@ -729,14 +729,14 @@ export default function MapFiltering({
                   </div>
                   <div className="relative -mx-4 px-4">
                     <div
-                      className={`pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-card via-card/70 to-transparent transition-opacity ${
+                      className={`pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-muted/20 via-muted/10 to-transparent transition-opacity ${
                         (horizontalFades["hostingStatus"]?.left ?? false)
                           ? "opacity-100"
                           : "opacity-0"
                       }`}
                     />
                     <div
-                      className={`pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-card via-card/70 to-transparent transition-opacity ${
+                      className={`pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-muted/20 via-muted/10 to-transparent transition-opacity ${
                         (horizontalFades["hostingStatus"]?.right ?? false)
                           ? "opacity-100"
                           : "opacity-0"
@@ -789,7 +789,7 @@ export default function MapFiltering({
                   </div>
                 </div>
 
-                <div className="rounded-2xl bg-card px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md">
+                <div className="rounded-2xl bg-muted/15 px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-foreground">Visiting</h3>
                     <Switch
@@ -803,7 +803,7 @@ export default function MapFiltering({
                 <div className="px-1 pb-0 text-[11px] font-semibold uppercase text-muted-foreground">
                   Stats
                 </div>
-                <div className="rounded-2xl bg-card px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md">
+                <div className="rounded-2xl bg-muted/15 px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md">
                   {renderSection(
                     STAT_FILTER_SECTIONS.find((s) => s.key === "sexuality") ??
                       STAT_FILTER_SECTIONS[0],
@@ -816,7 +816,7 @@ export default function MapFiltering({
                 ).map((section) => (
                   <div
                     key={section.key}
-                    className="rounded-2xl bg-card px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md"
+                    className="rounded-2xl bg-muted/15 px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-md"
                   >
                     {renderSection(section, { minimal: true })}
                   </div>

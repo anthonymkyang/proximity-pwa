@@ -782,6 +782,7 @@ export default function MapCanvas() {
   const [showGroupDrawer, setShowGroupDrawer] = useState(false);
   const [showCruisingDrawer, setShowCruisingDrawer] = useState(false);
   const [showWallDrawer, setShowWallDrawer] = useState(false);
+  const [groupCoords, setGroupCoords] = useState<[number, number] | null>(null);
   const [selectedCruising, setSelectedCruising] = useState<{
     id: string;
     name: string;
@@ -1309,6 +1310,7 @@ export default function MapCanvas() {
     const stGilesHotel: [number, number] = [-0.1305, 51.5164];
     const avatarUrl = fallbackAvatarUrl;
     const displayName = profileName || "Nearby user";
+    setGroupCoords(stGilesHotel);
 
     let marker = friendMarkerRef.current;
     let root = friendMarkerRootRef.current;
@@ -1526,7 +1528,13 @@ export default function MapCanvas() {
     );
 
     groupRoot?.render(
-      <MapGroup size={32} onClick={() => setShowGroupDrawer(true)} />
+      <MapGroup
+        size={32}
+        onClick={() => {
+          setShowGroupDrawer(true);
+          setGroupCoords(stGilesHotel);
+        }}
+      />
     );
 
     marker?.setLngLat(nearby).addTo(map);
@@ -2010,6 +2018,7 @@ export default function MapCanvas() {
         station={selectedStation}
         title={directionsTitle}
         onUserLocation={setUserLocation}
+        userLocation={userLocation}
       />
 
       <Drawer
@@ -2304,7 +2313,24 @@ export default function MapCanvas() {
               <MessageCircle className="h-5 w-5 text-foreground" />
               <span>Host</span>
             </div>
-            <div className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground">
+            <div
+              className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground"
+              onClick={() => {
+                const coords = groupCoords ?? [FALLBACK_VIEW.lng, FALLBACK_VIEW.lat];
+                const nearest = findNearestStation(coords as [number, number]);
+                setSelectedStation(
+                  nearest ?? {
+                    name: "Group",
+                    displayName: "Group",
+                    lines: [],
+                    modes: [],
+                    coordinates: coords as [number, number],
+                  }
+                );
+                setDirectionsTitle("Directions to group");
+                setShowDirectionsDrawer(true);
+              }}
+            >
               <Navigation className="h-5 w-5 text-foreground" />
               <span>Directions</span>
             </div>

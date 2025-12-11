@@ -207,7 +207,7 @@ export default function DrawerWalls({
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent className="pb-4">
-        <DrawerHeader className="pb-1">
+        <DrawerHeader className="sr-only">
           <DrawerTitle className="text-lg font-semibold">{headerTitle}</DrawerTitle>
           {subtitle ? (
             <DrawerDescription className="text-sm text-muted-foreground">
@@ -216,7 +216,7 @@ export default function DrawerWalls({
           ) : null}
         </DrawerHeader>
         <div className="px-4">
-          <div className="flex h-[60vh] min-h-[300px] flex-col rounded-2xl bg-card/80 px-4 pb-4 shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur">
+          <div className="mt-3 flex h-[60vh] min-h-[300px] flex-col rounded-2xl bg-card/80 px-4 pb-4 shadow-[0_12px_28px_rgba(0,0,0,0.35)] backdrop-blur">
             <div className="flex-1 space-y-3 overflow-y-auto pr-1 pt-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
               {loading ? (
                 <div className="space-y-2 text-sm text-muted-foreground">

@@ -69,18 +69,20 @@ export default function Conversation({
               mine ? "justify-end" : "justify-start"
             } ${index === messages.length - 1 ? "" : "mb-3"}`}
           >
-            {isGroup && !mine && m.profiles?.avatar_url ? (
-              <img
-                src={resolvedAvatarUrl ?? ""}
-                alt={m.profiles.profile_title || "User avatar"}
-                className="w-6 h-6 rounded-full border border-muted object-cover self-start"
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).src =
-                    "/avatar-fallback.png";
-                }}
-              />
-            ) : isGroup && !mine ? (
-              <div className="w-6 h-6 rounded-full bg-muted border border-muted self-start" />
+            {!mine ? (
+              m.profiles?.avatar_url ? (
+                <img
+                  src={resolvedAvatarUrl ?? ""}
+                  alt={m.profiles.profile_title || "User avatar"}
+                  className="w-6 h-6 rounded-full border border-muted object-cover self-start"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src =
+                      "/avatar-fallback.png";
+                  }}
+                />
+              ) : (
+                <div className="w-6 h-6 rounded-full bg-muted border border-muted self-start" />
+              )
             ) : null}
 
             <div
