@@ -10,6 +10,7 @@ import {
   MoreVertical,
   UserRound,
   UserPlus,
+  Pin,
   Shield,
   Flag,
 } from "lucide-react";
@@ -29,6 +30,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { getAvatarProxyUrl } from "@/lib/profiles/getAvatarProxyUrl";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+} from "@/components/ui/drawer";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 type Message = {
   id: string;
@@ -73,6 +83,19 @@ export default function ConversationPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [otherUserId, setOtherUserId] = useState<string | null>(null);
+  const [contactConnectionId, setContactConnectionId] = useState<string | null>(
+    null
+  );
+  const [pinConnectionId, setPinConnectionId] = useState<string | null>(null);
+  const [contactDrawerOpen, setContactDrawerOpen] = useState(false);
+  const [contactNickname, setContactNickname] = useState("");
+  const [contactWhatsApp, setContactWhatsApp] = useState("");
+  const [contactTelegram, setContactTelegram] = useState("");
+  const [savingContact, setSavingContact] = useState(false);
+  const [pinning, setPinning] = useState(false);
+  const [loadingConnections, setLoadingConnections] = useState(false);
+  const [contactError, setContactError] = useState<string | null>(null);
 
   // load initial messages + current user
   useEffect(() => {
@@ -97,6 +120,8 @@ export default function ConversationPage() {
           const apiName =
             data.other?.profile_title ??
             (data.messages?.[0]?.profiles?.profile_title ?? null);
+          const apiOtherId = data.other?.user_id ?? null;
+          if (apiOtherId) setOtherUserId(apiOtherId);
           if (apiName) {
             setParticipantName(apiName);
           }
@@ -155,6 +180,112 @@ export default function ConversationPage() {
     if (!endRef.current) return;
     endRef.current.scrollIntoView({ block: "start", behavior: "smooth" });
   }, [messages]);
+
+  async function createContact() {
+    if (contactConnectionId) {
+      setContactDrawerOpen(false);
+      return;
+    }
+    if (!otherUserId) {
+      setContactError("Missing user.");
+      return;
+    }
+    setSavingContact(true);
+    setContactError(null);
+    try {
+      const res = await fetch("/api/connections", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "contact",
+          target_profile_id: otherUserId,
+          nickname: contactNickname,
+          whatsapp: contactWhatsApp,
+          telegram: contactTelegram,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body?.error || "Unable to add contact");
+      }
+      setContactConnectionId(body?.connection?.id ?? null);
+      setContactDrawerOpen(false);
+    } catch (err: any) {
+      setContactError(err?.message || "Failed to add contact");
+    } finally {
+      setSavingContact(false);
+    }
+  }
+
+  async function handlePinToggle() {
+    if (!otherUserId || pinning) return;
+    setPinning(true);
+    try {
+      if (pinConnectionId) {
+        await fetch(`/api/connections/${pinConnectionId}`, { method: "DELETE" });
+        setPinConnectionId(null);
+      } else {
+        const res = await fetch("/api/connections", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "pin",
+            target_profile_id: otherUserId,
+            nickname: participantName,
+          }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(body?.error || "Unable to pin profile");
+        }
+        setPinConnectionId(body?.connection?.id ?? null);
+      }
+    } catch {
+      // ignore errors for now
+    } finally {
+      setPinning(false);
+    }
+  }
+
+  // Load connection status for this participant
+  useEffect(() => {
+    if (!otherUserId) return;
+    setLoadingConnections(true);
+    fetch(`/api/connections?target_profile_id=${otherUserId}`)
+      .then((res) => res.json())
+      .then((body) => {
+        const list = body?.connections ?? [];
+        const contact = list.find(
+          (c: any) =>
+            c.type === "contact" &&
+            ((Array.isArray(c.connection_contacts)
+              ? c.connection_contacts[0]?.profile_id
+              : c.connection_contacts?.profile_id) === otherUserId)
+        );
+        const pin = list.find(
+          (c: any) =>
+            c.type === "pin" &&
+            ((Array.isArray(c.connection_pins)
+              ? c.connection_pins[0]?.pinned_profile_id
+              : c.connection_pins?.pinned_profile_id) === otherUserId)
+        );
+        setContactConnectionId(contact?.id ?? null);
+        setPinConnectionId(pin?.id ?? null);
+        if (contact) {
+          const detail = Array.isArray(contact.connection_contacts)
+            ? contact.connection_contacts[0]
+            : contact.connection_contacts;
+          setContactNickname((prev) => detail?.display_name || prev || participantName);
+          const meta = detail?.metadata || {};
+          setContactWhatsApp(meta.whatsapp || "");
+          setContactTelegram(meta.telegram || "");
+        }
+      })
+      .catch(() => {
+        // ignore
+      })
+      .finally(() => setLoadingConnections(false));
+  }, [otherUserId]);
 
   const handleSend = async () => {
     const text = newMessage.trim();
@@ -226,9 +357,28 @@ export default function ConversationPage() {
               <UserRound className="h-4 w-4" />
               View profile
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={loadingConnections}
+              onSelect={(e) => {
+                e.preventDefault();
+                setContactDrawerOpen(true);
+                if (!contactNickname && participantName) {
+                  setContactNickname(participantName);
+                }
+              }}
+            >
               <UserPlus className="h-4 w-4" />
-              Add connection
+              {contactConnectionId ? "View contact" : "Add contact"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={loadingConnections || pinning || !otherUserId}
+              onSelect={(e) => {
+                e.preventDefault();
+                void handlePinToggle();
+              }}
+            >
+              <Pin className="h-4 w-4" />
+              {pinConnectionId ? "Unpin" : "Pin profile"}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive">
@@ -320,6 +470,65 @@ export default function ConversationPage() {
           </InputGroupAddon>
         </InputGroup>
       </div>
+
+      {/* Contact drawer */}
+      <Drawer open={contactDrawerOpen} onOpenChange={setContactDrawerOpen}>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>{contactConnectionId ? "View contact" : "Add contact"}</DrawerTitle>
+            <DrawerDescription>
+              Save their details so you can find them later.
+            </DrawerDescription>
+          </DrawerHeader>
+          <div className="space-y-4 px-4 pb-5">
+            <div className="space-y-2">
+              <Label htmlFor="contact-nickname">Nickname</Label>
+              <Input
+                id="contact-nickname"
+                value={contactNickname}
+                onChange={(e) => setContactNickname(e.target.value)}
+                placeholder={participantName || "Nickname"}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="contact-whatsapp">WhatsApp</Label>
+              <Input
+                id="contact-whatsapp"
+                value={contactWhatsApp}
+                onChange={(e) => setContactWhatsApp(e.target.value)}
+                placeholder="+1 555 123 4567"
+                inputMode="tel"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="contact-telegram">Telegram</Label>
+              <Input
+                id="contact-telegram"
+                value={contactTelegram}
+                onChange={(e) => setContactTelegram(e.target.value)}
+                placeholder="@username"
+              />
+            </div>
+            {contactError ? (
+              <p className="text-sm text-destructive">{contactError}</p>
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => setContactDrawerOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void createContact()}
+                disabled={savingContact || !otherUserId}
+              >
+                {savingContact ? "Saving..." : contactConnectionId ? "Update" : "Save contact"}
+              </Button>
+            </div>
+          </div>
+        </DrawerContent>
+      </Drawer>
     </div>
   );
 }
