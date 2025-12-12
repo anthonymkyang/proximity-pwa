@@ -61,6 +61,9 @@ export default function ConversationPage() {
   const router = useRouter();
   const supabase = useRef(createClient());
   const endRef = useRef<HTMLDivElement | null>(null);
+  const convoChannelRef = useRef<
+    ReturnType<ReturnType<typeof createClient>["channel"]> | null
+  >(null);
 
   const routeId = Array.isArray((params as any).id)
     ? (params as any).id[0]
@@ -109,6 +112,10 @@ export default function ConversationPage() {
     ReturnType<typeof createClient>["channel"]
   > | null>(null);
   const deliveryAttemptRef = useRef<Set<string>>(new Set());
+  const typingBroadcastedRef = useRef(false);
+  const typingSelfTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const typingTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
+  const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
 
   // Derive other user id from messages if missing (e.g., after refresh)
   useEffect(() => {
@@ -128,6 +135,7 @@ export default function ConversationPage() {
   useEffect(() => {
     messageIdsRef.current = new Set(messages.map((m) => m.id));
   }, [messages]);
+
 
   // load initial messages + current user
   useEffect(() => {
@@ -275,11 +283,51 @@ export default function ConversationPage() {
           .catch(() => {
             // ignore
           });
+        }
+      );
+    channel.on("broadcast", { event: "typing" }, (payload: any) => {
+      const rec = payload.payload as {
+        user_id?: string | null;
+        started?: boolean;
+      };
+      const uid = rec?.user_id;
+      if (!uid || uid === currentUserIdRef.current) return;
+
+      setTypingUsers((prev) => {
+        const next = new Set(prev);
+        if (rec.started) next.add(uid);
+        else next.delete(uid);
+        return next;
+      });
+
+      if (rec.started) {
+        if (typingTimersRef.current[uid]) {
+          clearTimeout(typingTimersRef.current[uid]);
+        }
+        typingTimersRef.current[uid] = setTimeout(() => {
+          setTypingUsers((prev) => {
+            const next = new Set(prev);
+            next.delete(uid);
+            return next;
+          });
+          delete typingTimersRef.current[uid];
+        }, 5000);
+      } else if (typingTimersRef.current[uid]) {
+        clearTimeout(typingTimersRef.current[uid]);
+        delete typingTimersRef.current[uid];
       }
-    );
+    });
     channel.subscribe();
+    convoChannelRef.current = channel;
     return () => {
       try {
+        convoChannelRef.current = null;
+        if (typingSelfTimerRef.current) {
+          clearTimeout(typingSelfTimerRef.current);
+          typingSelfTimerRef.current = null;
+        }
+        Object.values(typingTimersRef.current).forEach((t) => clearTimeout(t));
+        typingTimersRef.current = {};
         supabase.current.removeChannel(channel);
       } catch {}
     };
@@ -290,6 +338,12 @@ export default function ConversationPage() {
     if (!endRef.current) return;
     endRef.current.scrollIntoView({ block: "start", behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    if (typingUsers.size === 0) return;
+    if (!endRef.current) return;
+    endRef.current.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [typingUsers]);
 
   async function createContact() {
     if (contactConnectionId) {
@@ -405,6 +459,14 @@ export default function ConversationPage() {
     const text = newMessage.trim();
     if (!text || !conversationId) return;
     setNewMessage("");
+    if (typingBroadcastedRef.current) {
+      emitTyping(false);
+      typingBroadcastedRef.current = false;
+      if (typingSelfTimerRef.current) {
+        clearTimeout(typingSelfTimerRef.current);
+        typingSelfTimerRef.current = null;
+      }
+    }
     try {
       await fetch(`/api/messages/${conversationId}`, {
         method: "POST",
@@ -484,6 +546,48 @@ export default function ConversationPage() {
         // ignore
       });
   }, [currentUserId, messages]);
+
+  const emitTyping = (started: boolean) => {
+    if (!conversationId) return;
+    const chan = convoChannelRef.current;
+    if (!chan) return;
+    chan
+      .send({
+        type: "broadcast",
+        event: "typing",
+        payload: { user_id: currentUserIdRef.current, started },
+      })
+      .catch(() => {
+        // ignore
+      });
+  };
+
+  const handleTypingChange = (value: string) => {
+    setNewMessage(value);
+    const hasText = value.trim().length > 0;
+
+    if (hasText) {
+      if (!typingBroadcastedRef.current) {
+        emitTyping(true);
+        typingBroadcastedRef.current = true;
+      }
+      if (typingSelfTimerRef.current) {
+        clearTimeout(typingSelfTimerRef.current);
+      }
+      typingSelfTimerRef.current = setTimeout(() => {
+        emitTyping(false);
+        typingBroadcastedRef.current = false;
+        typingSelfTimerRef.current = null;
+      }, 3500);
+    } else if (typingBroadcastedRef.current) {
+      emitTyping(false);
+      typingBroadcastedRef.current = false;
+      if (typingSelfTimerRef.current) {
+        clearTimeout(typingSelfTimerRef.current);
+        typingSelfTimerRef.current = null;
+      }
+    }
+  };
 
   const hasText = newMessage.trim().length > 0;
   const receiptIdsKey = useMemo(() => {
@@ -644,7 +748,11 @@ export default function ConversationPage() {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div
+        className={`relative flex-1 overflow-y-auto px-4 pt-4 space-y-3 ${
+          typingUsers.size > 0 ? "pb-10" : "pb-4"
+        }`}
+      >
         {messages.map((m) => {
           const isMe =
             currentUserId != null ? m.sender_id === currentUserId : false;
@@ -689,6 +797,20 @@ export default function ConversationPage() {
             </div>
           );
         })}
+        {typingUsers.size > 0 ? (
+          <div className="flex justify-start">
+            <div className="rounded-lg rounded-bl-none px-3 py-2 bg-muted text-foreground inline-flex items-center gap-1 shadow-sm">
+              <span className="sr-only">Typing...</span>
+              {[0, 1, 2].map((i) => (
+                <span
+                  key={i}
+                  className="h-2 w-2 rounded-full bg-foreground/70 animate-bounce"
+                  style={{ animationDelay: `${i * 120}ms` }}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
         <div ref={endRef} style={{ height: 0 }} />
       </div>
       <div className="bg-card/80 backdrop-blur px-3 py-2">
@@ -706,11 +828,21 @@ export default function ConversationPage() {
 
           <InputGroupTextarea
             value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
+            onChange={(e) => handleTypingChange(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 handleSend();
+              }
+            }}
+            onBlur={() => {
+              if (typingBroadcastedRef.current) {
+                emitTyping(false);
+                typingBroadcastedRef.current = false;
+              }
+              if (typingSelfTimerRef.current) {
+                clearTimeout(typingSelfTimerRef.current);
+                typingSelfTimerRef.current = null;
               }
             }}
             placeholder="Write a message..."
