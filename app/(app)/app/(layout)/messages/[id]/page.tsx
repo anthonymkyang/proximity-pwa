@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 import {
@@ -54,6 +61,21 @@ type Message = {
     avatar_url?: string | null;
   } | null;
 };
+
+const sortUniqueMessages = (list: Message[]) => {
+  const byId = new Map<string, Message>();
+  list.forEach((m) => {
+    if (!byId.has(m.id)) {
+      byId.set(m.id, m);
+    }
+  });
+  return Array.from(byId.values()).sort(
+    (a, b) =>
+      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  );
+};
+
+const PAGE_SIZE = 30;
 
 export default function ConversationPage() {
   const params = useParams();
@@ -124,6 +146,15 @@ export default function ConversationPage() {
   const loadingOlderRef = useRef(false);
   const shouldAutoScrollRef = useRef(true);
   const messageElsRef = useRef<Record<string, HTMLElement | null>>({});
+  const initialScrollDoneRef = useRef(false);
+  const [visibleMessages, setVisibleMessages] = useState<Set<string>>(
+    new Set()
+  );
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const prevHeightRef = useRef<number | null>(null);
+  const prevScrollTopRef = useRef<number | null>(null);
+  const pendingPrependAdjustRef = useRef(false);
 
   // Derive other user id from messages if missing (e.g., after refresh)
   useEffect(() => {
@@ -144,6 +175,39 @@ export default function ConversationPage() {
     messageIdsRef.current = new Set(messages.map((m) => m.id));
   }, [messages]);
 
+  useEffect(() => {
+    setVisibleMessages(new Set());
+    initialScrollDoneRef.current = false;
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (!listRef.current) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          const id = entry.target.getAttribute("data-message-id");
+          if (!id) return;
+          if (!entry.isIntersecting) return;
+          setVisibleMessages((prev) => {
+            if (prev.has(id)) return prev;
+            const next = new Set(prev);
+            next.add(id);
+            return next;
+          });
+          observer.unobserve(entry.target);
+        });
+      },
+      { root: listRef.current, threshold: 0.15 }
+    );
+
+    Object.entries(messageElsRef.current).forEach(([id, el]) => {
+      if (!el || visibleMessages.has(id)) return;
+      observer.observe(el);
+    });
+
+    return () => observer.disconnect();
+  }, [messages, visibleMessages]);
+
   // load initial messages + current user (paged)
   useEffect(() => {
     const load = async () => {
@@ -153,22 +217,21 @@ export default function ConversationPage() {
       }
       try {
         setInitialLoading(true);
+        setHasMore(false);
+        setLoadingOlder(false);
+        setVisibleMessages(new Set());
         const {
           data: { user },
         } = await supabase.current.auth.getUser();
         setCurrentUserId(user?.id ?? null);
 
-        const res = await fetch(`/api/messages/${conversationId}`);
+        const res = await fetch(
+          `/api/messages/${conversationId}?limit=${PAGE_SIZE}`
+        );
         const data = await res.json();
         if (res.ok) {
           shouldAutoScrollRef.current = true;
-          setMessages(
-            (data.messages as Message[]).sort(
-              (a, b) =>
-                new Date(a.created_at).getTime() -
-                new Date(b.created_at).getTime()
-            )
-          );
+          setMessages(sortUniqueMessages(data.messages as Message[]));
           const otherMsg = (data.messages as Message[] | undefined)?.find(
             (m) => m.sender_id && m.sender_id !== user?.id
           );
@@ -204,6 +267,7 @@ export default function ConversationPage() {
           if (proxied) {
             setParticipantAvatar(proxied);
           }
+          setHasMore(Boolean(data.hasMore));
         }
       } catch {
         // ignore
@@ -239,14 +303,11 @@ export default function ConversationPage() {
               }
             : msg;
           shouldAutoScrollRef.current = true;
-          setMessages((prev) => {
-            if (prev.some((m) => m.id === msg.id)) return prev;
-            return [...prev, msgWithReceipts].sort(
-              (a, b) =>
-                new Date(a.created_at).getTime() -
-                new Date(b.created_at).getTime()
-            );
-          });
+      setMessages((prev) =>
+        prev.some((m) => m.id === msg.id)
+          ? prev
+          : sortUniqueMessages([...prev, msgWithReceipts])
+      );
         }
       );
     channel.on(
@@ -370,6 +431,16 @@ export default function ConversationPage() {
     endRef.current.scrollIntoView({ block: "start", behavior: "smooth" });
     shouldAutoScrollRef.current = false;
   }, [messages]);
+
+  useEffect(() => {
+    if (initialLoading) return;
+    if (initialScrollDoneRef.current) return;
+    if (!messages.length) return;
+    if (!endRef.current) return;
+    endRef.current.scrollIntoView({ block: "start", behavior: "auto" });
+    shouldAutoScrollRef.current = false;
+    initialScrollDoneRef.current = true;
+  }, [initialLoading, messages]);
 
   useEffect(() => {
     if (typingUsers.size === 0) return;
@@ -637,6 +708,88 @@ export default function ConversationPage() {
     }
   };
 
+  const loadOlder = useCallback(async () => {
+    if (
+      !conversationId ||
+      loadingOlderRef.current ||
+      loadingOlder ||
+      !hasMore ||
+      !messages.length
+    )
+      return;
+    const earliest = messages[0];
+    if (!earliest) return;
+    const container = listRef.current;
+    pendingPrependAdjustRef.current = false;
+    prevHeightRef.current = null;
+    prevScrollTopRef.current = null;
+    setLoadingOlder(true);
+    loadingOlderRef.current = true;
+    try {
+      const params = new URLSearchParams({
+        limit: String(PAGE_SIZE),
+        before: earliest.created_at,
+      });
+      const res = await fetch(`/api/messages/${conversationId}?${params}`);
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to load messages");
+      }
+      const incoming = ((data.messages as Message[]) ?? []).filter(
+        (m) => !messageIdsRef.current.has(m.id)
+      );
+      setHasMore(Boolean(data.hasMore));
+      if (incoming.length) {
+        prevHeightRef.current = container?.scrollHeight ?? null;
+        prevScrollTopRef.current = container?.scrollTop ?? null;
+        pendingPrependAdjustRef.current = true;
+        setVisibleMessages((prev) => {
+          const next = new Set(prev);
+          incoming.forEach((m) => next.add(m.id));
+          return next;
+        });
+        setMessages((prev) => sortUniqueMessages([...incoming, ...prev]));
+      } else {
+        pendingPrependAdjustRef.current = false;
+        prevHeightRef.current = null;
+        prevScrollTopRef.current = null;
+      }
+    } catch {
+      pendingPrependAdjustRef.current = false;
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    } finally {
+      if (!pendingPrependAdjustRef.current) {
+        loadingOlderRef.current = false;
+        setLoadingOlder(false);
+        prevHeightRef.current = null;
+        prevScrollTopRef.current = null;
+      }
+    }
+  }, [conversationId, hasMore, loadingOlder, messages]);
+
+  useLayoutEffect(() => {
+    if (!pendingPrependAdjustRef.current) return;
+    const el = listRef.current;
+    const before = prevHeightRef.current;
+    const beforeScroll = prevScrollTopRef.current;
+    if (!el || before == null || beforeScroll == null) {
+      pendingPrependAdjustRef.current = false;
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+      prevHeightRef.current = null;
+      prevScrollTopRef.current = null;
+      return;
+    }
+    const after = el.scrollHeight;
+    el.scrollTop = beforeScroll + (after - before);
+    pendingPrependAdjustRef.current = false;
+    loadingOlderRef.current = false;
+    setLoadingOlder(false);
+    prevHeightRef.current = null;
+    prevScrollTopRef.current = null;
+  }, [messages]);
+
   const hasText = newMessage.trim().length > 0;
   const receiptIdsKey = useMemo(() => {
     return messages
@@ -714,6 +867,20 @@ export default function ConversationPage() {
       receiptsChannelRef.current = null;
     };
   }, [conversationId, receiptIdsKey]);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const handleScroll = () => {
+      if (!hasMore || loadingOlder || loadingOlderRef.current) return;
+      // Trigger when within ~5 messages from top; using a px threshold approximating a few message heights
+      if (el.scrollTop <= 120) {
+        void loadOlder();
+      }
+    };
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, [hasMore, loadingOlder, loadOlder, messages.length]);
 
   return (
     <div className="h-svh min-h-svh bg-background text-foreground flex flex-col">
@@ -856,6 +1023,7 @@ export default function ConversationPage() {
         {messages.map((m) => {
           const isMe =
             currentUserId != null ? m.sender_id === currentUserId : false;
+          const isVisible = visibleMessages.has(m.id);
           return (
             <div
               key={m.id}
@@ -864,7 +1032,10 @@ export default function ConversationPage() {
               }}
               className={`flex ${
                 isMe ? "justify-end" : "justify-start"
-              } transition-opacity duration-300 ease-out`}
+              } transition-all duration-300 ease-out ${
+                isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1"
+              }`}
+              data-message-id={m.id}
             >
               <div
                 className={`rounded-lg px-3 py-2 max-w-[75%] sm:max-w-[65%] lg:max-w-[55%] ${

@@ -58,8 +58,20 @@ export async function GET(
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
 
-  // 1) Fetch messages + sender profiles (all, oldest first)
-  const { data: messages, error: msgErr } = await supabase
+  const url = new URL(req.url);
+  const limitParam = parseInt(url.searchParams.get("limit") ?? "", 10);
+  const limit =
+    Number.isFinite(limitParam) && limitParam > 0
+      ? Math.min(limitParam, 100)
+      : 30;
+  const beforeParam = url.searchParams.get("before");
+  const beforeIso =
+    beforeParam && !isNaN(new Date(beforeParam).getTime())
+      ? new Date(beforeParam).toISOString()
+      : null;
+
+  // 1) Fetch messages + sender profiles (paginated, newest first then reversed)
+  let baseQuery = supabase
     .from("messages")
     .select(
       `
@@ -70,14 +82,23 @@ export async function GET(
       profiles:profiles!messages_sender_id_profiles_fkey(profile_title, avatar_url, date_of_birth)
     `
     )
-    .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: true });
+    .eq("conversation_id", conversationId);
+
+  if (beforeIso) {
+    baseQuery = baseQuery.lt("created_at", beforeIso);
+  }
+
+  const { data: messages, error: msgErr } = await baseQuery
+    .order("created_at", { ascending: false })
+    .limit(limit + 1);
 
   if (msgErr) {
     return NextResponse.json({ error: msgErr.message }, { status: 500 });
   }
 
-  const list = messages ?? [];
+  const hasMore = (messages ?? []).length > limit;
+  const paged = hasMore ? (messages ?? []).slice(0, limit) : messages ?? [];
+  const list = [...paged].reverse();
 
   const listWithAge = list.map((m: any) => {
     const dob = m?.profiles?.date_of_birth ?? null;
@@ -251,7 +272,7 @@ export async function GET(
   });
 
   return NextResponse.json(
-    { messages: enriched, other: otherMeta ?? null },
+    { messages: enriched, other: otherMeta ?? null, hasMore },
     { status: 200 }
   );
 }
