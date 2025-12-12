@@ -22,6 +22,11 @@ import {
   Flag,
   Check,
   CheckCheck,
+  Reply,
+  Copy,
+  Info,
+  Languages,
+  Trash2,
 } from "lucide-react";
 import {
   InputGroup,
@@ -54,6 +59,12 @@ type Message = {
   body: string;
   sender_id: string;
   created_at: string;
+  reply_to_id?: string | null;
+  reply_to_body?: string | null;
+  reply_to_sender_id?: string | null;
+  reply_to_id?: string | null;
+  reply_to_body?: string | null;
+  reply_to_sender_id?: string | null;
   delivered_at?: string | null;
   read_at?: string | null;
   profiles?: {
@@ -152,9 +163,24 @@ export default function ConversationPage() {
   );
   const [hasMore, setHasMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [replyTarget, setReplyTarget] = useState<Message | null>(null);
+  const pendingReplyRef = useRef<{
+    reply_to_id: string | null;
+    reply_to_body: string | null;
+    reply_to_sender_id: string | null;
+  } | null>(null);
   const prevHeightRef = useRef<number | null>(null);
   const prevScrollTopRef = useRef<number | null>(null);
   const pendingPrependAdjustRef = useRef(false);
+  const [focusedMessageId, setFocusedMessageId] = useState<string | null>(null);
+  const [overlayVisible, setOverlayVisible] = useState(false);
+  const [focusedOffset, setFocusedOffset] = useState(0);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const longPressTargetRef = useRef<string | null>(null);
+  const prevBodyOverflowRef = useRef<string | null>(null);
+  const overlayTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const copiedTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Derive other user id from messages if missing (e.g., after refresh)
   useEffect(() => {
@@ -178,7 +204,75 @@ export default function ConversationPage() {
   useEffect(() => {
     setVisibleMessages(new Set());
     initialScrollDoneRef.current = false;
+    setFocusedMessageId(null);
+    setReplyTarget(null);
   }, [conversationId]);
+
+  useEffect(() => {
+    return () => {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+      }
+      if (overlayTimerRef.current) {
+        clearTimeout(overlayTimerRef.current);
+      }
+      if (copiedTimerRef.current) {
+        clearTimeout(copiedTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (focusedMessageId) {
+      if (prevBodyOverflowRef.current === null) {
+        prevBodyOverflowRef.current = document.body.style.overflow || "";
+      }
+      document.body.style.overflow = "hidden";
+    } else if (prevBodyOverflowRef.current !== null) {
+      document.body.style.overflow = prevBodyOverflowRef.current;
+      prevBodyOverflowRef.current = null;
+    }
+    return () => {
+      if (prevBodyOverflowRef.current !== null) {
+        document.body.style.overflow = prevBodyOverflowRef.current;
+        prevBodyOverflowRef.current = null;
+      }
+    };
+  }, [focusedMessageId]);
+
+  useEffect(() => {
+    if (focusedMessageId) {
+      setOverlayVisible(true);
+      if (overlayTimerRef.current) {
+        clearTimeout(overlayTimerRef.current);
+        overlayTimerRef.current = null;
+      }
+    } else if (!focusedMessageId && overlayVisible) {
+      if (overlayTimerRef.current) {
+        clearTimeout(overlayTimerRef.current);
+      }
+      overlayTimerRef.current = setTimeout(() => {
+        setOverlayVisible(false);
+        overlayTimerRef.current = null;
+      }, 260);
+    }
+  }, [focusedMessageId, overlayVisible]);
+
+  useLayoutEffect(() => {
+    if (!focusedMessageId) {
+      setFocusedOffset(0);
+      return;
+    }
+    const el = focusedMessageId
+      ? messageElsRef.current[focusedMessageId]
+      : null;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const target = window.innerHeight / 2;
+    const currentCenter = rect.top + rect.height / 2;
+    setFocusedOffset(target - currentCenter);
+  }, [focusedMessageId]);
 
   useEffect(() => {
     if (!listRef.current) return;
@@ -292,12 +386,25 @@ export default function ConversationPage() {
           filter: `conversation_id=eq.${conversationId}`,
         },
         (payload: any) => {
-          const msg = payload.new as Message;
-          const pending = pendingReceiptsRef.current[msg.id];
-          const msgWithReceipts = pending
-            ? {
-                ...msg,
-                delivered_at:
+      const msg = payload.new as Message;
+      const isMine =
+        currentUserIdRef.current != null &&
+        msg.sender_id === currentUserIdRef.current;
+      if (
+        isMine &&
+        !msg.reply_to_id &&
+        pendingReplyRef.current &&
+        msg.id &&
+        !messageIdsRef.current.has(msg.id)
+      ) {
+        Object.assign(msg, pendingReplyRef.current);
+        pendingReplyRef.current = null;
+      }
+      const pending = pendingReceiptsRef.current[msg.id];
+      const msgWithReceipts = pending
+        ? {
+            ...msg,
+            delivered_at:
                   pending.delivered_at ?? (msg as any).delivered_at ?? null,
                 read_at: pending.read_at ?? (msg as any).read_at ?? null,
               }
@@ -576,6 +683,15 @@ export default function ConversationPage() {
     const text = newMessage.trim();
     if (!text || !conversationId) return;
     setNewMessage("");
+    const replyMeta = replyTarget
+      ? {
+          reply_to_id: replyTarget.id,
+          reply_to_body: replyTarget.body,
+          reply_to_sender_id: replyTarget.sender_id,
+        }
+      : { reply_to_id: null, reply_to_body: null, reply_to_sender_id: null };
+    pendingReplyRef.current = replyMeta;
+    setReplyTarget(null);
     shouldAutoScrollRef.current = true;
     if (typingBroadcastedRef.current) {
       emitTyping(false);
@@ -589,7 +705,7 @@ export default function ConversationPage() {
       await fetch(`/api/messages/${conversationId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: text }),
+        body: JSON.stringify({ body: text, ...replyMeta }),
       });
     } catch {
       // ignore
@@ -680,6 +796,31 @@ export default function ConversationPage() {
       // ignore
     }
   };
+
+  const handleMessageAction = useCallback(
+    async (action: "reply" | "copy" | "info" | "translate" | "delete", msg?: Message) => {
+      if (action === "copy" && msg?.body) {
+        try {
+          await navigator.clipboard.writeText(msg.body);
+          setCopiedMessageId(msg.id);
+          if (copiedTimerRef.current) {
+            clearTimeout(copiedTimerRef.current);
+          }
+          copiedTimerRef.current = setTimeout(() => {
+            setCopiedMessageId(null);
+            copiedTimerRef.current = null;
+          }, 1500);
+        } catch {
+          // ignore
+        }
+      } else if (action === "reply" && msg) {
+        setReplyTarget(msg);
+      }
+      // TODO: wire reply/info/translate/delete if needed
+      setFocusedMessageId(null);
+    },
+    []
+  );
 
   const handleTypingChange = (value: string) => {
     setNewMessage(value);
@@ -884,6 +1025,16 @@ export default function ConversationPage() {
 
   return (
     <div className="h-svh min-h-svh bg-background text-foreground flex flex-col">
+      {overlayVisible ? (
+        <button
+          type="button"
+          className={`fixed inset-0 z-30 bg-black/55 backdrop-blur-2xl transition-opacity duration-300 ${
+            focusedMessageId ? "opacity-100" : "opacity-0 pointer-events-none"
+          }`}
+          onClick={() => setFocusedMessageId(null)}
+          aria-label="Close message actions"
+        />
+      ) : null}
       <div className="bg-background/60 supports-backdrop-filter:bg-background/50 backdrop-blur-md px-3 py-2 flex items-center justify-between gap-3 border-none">
         <div className="flex items-center gap-3">
           <Button
@@ -993,10 +1144,25 @@ export default function ConversationPage() {
       </div>
       <div
         ref={listRef}
-        className={`relative flex-1 overflow-y-auto px-4 pt-4 space-y-3 ${
+        className={`relative flex-1 px-4 pt-4 space-y-3 ${
+          focusedMessageId ? "overflow-hidden touch-none" : "overflow-y-auto"
+        } select-none ${
           typingUsers.size > 0 ? "pb-10" : "pb-2"
         } [&::-webkit-scrollbar]:hidden`}
         style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+        onWheelCapture={(e) => {
+          if (focusedMessageId) e.preventDefault();
+        }}
+        onTouchMove={(e) => {
+          if (focusedMessageId) e.preventDefault();
+        }}
+        onScroll={(e) => {
+          if (focusedMessageId) {
+            e.preventDefault();
+            const el = e.currentTarget;
+            el.scrollTop = el.scrollTop;
+          }
+        }}
       >
         {initialLoading && messages.length === 0
           ? Array.from({ length: 6 }).map((_, idx) => {
@@ -1024,51 +1190,162 @@ export default function ConversationPage() {
           const isMe =
             currentUserId != null ? m.sender_id === currentUserId : false;
           const isVisible = visibleMessages.has(m.id);
+          const isFocused = focusedMessageId === m.id;
+          const handlePressStart = () => {
+            longPressTargetRef.current = m.id;
+            if (longPressTimerRef.current) {
+              clearTimeout(longPressTimerRef.current);
+            }
+            longPressTimerRef.current = setTimeout(() => {
+              setFocusedMessageId(m.id);
+            }, 400);
+          };
+          const cancelPress = () => {
+            if (longPressTimerRef.current) {
+              clearTimeout(longPressTimerRef.current);
+              longPressTimerRef.current = null;
+            }
+            longPressTargetRef.current = null;
+          };
           return (
-            <div
+            <DropdownMenu
               key={m.id}
-              ref={(el) => {
-                messageElsRef.current[m.id] = el;
+              open={isFocused}
+              onOpenChange={(open) => {
+                if (!open) setFocusedMessageId(null);
               }}
-              className={`flex ${
-                isMe ? "justify-end" : "justify-start"
-              } transition-all duration-300 ease-out ${
-                isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1"
-              }`}
-              data-message-id={m.id}
             >
-              <div
-                className={`rounded-lg px-3 py-2 max-w-[75%] sm:max-w-[65%] lg:max-w-[55%] ${
-                  isMe
-                    ? "bg-primary text-white rounded-br-none"
-                    : "bg-muted text-foreground rounded-bl-none"
-                }`}
-              >
-                <p className="text-sm leading-relaxed wrap-break-word">
-                  {m.body}
-                </p>
+              <DropdownMenuTrigger asChild>
                 <div
-                  className={`mt-1 text-xs flex items-center gap-1 ${
-                    isMe ? "text-blue-100 justify-end" : "text-muted-foreground"
+                  ref={(el) => {
+                    messageElsRef.current[m.id] = el;
+                  }}
+                  className={`relative flex ${
+                    isMe ? "justify-end" : "justify-start"
+                  } transition-all duration-300 ease-out ${
+                    isVisible
+                      ? "opacity-100 translate-y-0"
+                      : "opacity-0 translate-y-1"
+                  } ${
+                    focusedMessageId && !isFocused
+                      ? "opacity-40 pointer-events-none filter blur-[0.5px]"
+                      : ""
                   }`}
+                  style={{
+                    zIndex: isFocused ? 50 : "auto",
+                    position: "relative",
+                    transform: isFocused
+                      ? `translateY(${focusedOffset}px)`
+                      : "translateY(0)",
+                    transition: "transform 220ms ease",
+                  }}
+                  data-message-id={m.id}
+                  onPointerDown={handlePressStart}
+                  onPointerUp={cancelPress}
+                  onPointerLeave={cancelPress}
+                  onPointerCancel={cancelPress}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setFocusedMessageId(m.id);
+                  }}
                 >
-                  <span>
-                    {new Date(m.created_at).toLocaleTimeString(undefined, {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      hour12: false,
-                    })}
-                  </span>
-                  {isMe ? (
-                    m.read_at ? (
-                      <CheckCheck className="h-3.5 w-3.5 text-white" />
-                    ) : m.delivered_at ? (
-                      <Check className="h-3.5 w-3.5" />
-                    ) : null
-                  ) : null}
+                <div
+                  className={`relative rounded-lg px-3 py-2 max-w-[75%] sm:max-w-[65%] lg:max-w-[55%] ${
+                    isMe
+                      ? "bg-primary text-white rounded-br-none"
+                      : "bg-muted text-foreground rounded-bl-none"
+                } ${isFocused ? "ring-2 ring-primary shadow-lg z-50" : "z-0"}`}
+                >
+                    {m.reply_to_id && m.reply_to_body ? (
+                      <div className="mb-2 rounded-lg bg-black/10 text-xs text-foreground/80 px-2 py-1 flex flex-col gap-1">
+                        <span className="font-medium">
+                          Replying to {m.reply_to_sender_id === currentUserId ? "you" : "them"}
+                        </span>
+                        <span className="line-clamp-2">{m.reply_to_body}</span>
+                      </div>
+                    ) : null}
+                    <p className="text-sm leading-relaxed wrap-break-word">
+                      {m.body}
+                    </p>
+                    <div
+                      className={`mt-1 text-xs flex items-center gap-1 ${
+                        isMe ? "text-blue-100 justify-end" : "text-muted-foreground"
+                      }`}
+                    >
+                      <span>
+                        {new Date(m.created_at).toLocaleTimeString(undefined, {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          hour12: false,
+                        })}
+                      </span>
+                      {isMe ? (
+                        m.read_at ? (
+                          <CheckCheck className="h-3.5 w-3.5 text-white" />
+                        ) : m.delivered_at ? (
+                          <Check className="h-3.5 w-3.5" />
+                        ) : null
+                      ) : null}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align={isMe ? "end" : "start"}
+                side="bottom"
+                sideOffset={10}
+                className="rounded-2xl bg-background/95 backdrop-blur-md shadow-xl border border-border min-w-[220px] text-base"
+              >
+                <DropdownMenuItem
+                  onSelect={() => void handleMessageAction("reply", m)}
+                  className="flex items-center gap-2"
+                >
+                  <Reply className="h-4 w-4" />
+                  Reply
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => void handleMessageAction("copy", m)}
+                  className="flex items-center gap-2"
+                >
+                  <Copy
+                    className={`h-4 w-4 ${
+                      copiedMessageId === m.id ? "text-emerald-500" : ""
+                    }`}
+                  />
+                  <span
+                    className={`transition-all duration-200 ${
+                      copiedMessageId === m.id
+                        ? "text-emerald-500 scale-105 font-medium"
+                        : ""
+                    }`}
+                  >
+                    {copiedMessageId === m.id ? "Copied text" : "Copy"}
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => void handleMessageAction("info", m)}
+                  className="flex items-center gap-2"
+                >
+                  <Info className="h-4 w-4" />
+                  Info
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => void handleMessageAction("translate", m)}
+                  className="flex items-center gap-2"
+                >
+                  <Languages className="h-4 w-4" />
+                  Translate
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={() => void handleMessageAction("delete", m)}
+                  className="flex items-center gap-2 text-destructive focus:text-destructive"
+                >
+                  <Trash2 className="h-4 w-4 text-destructive" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           );
         })}
         {typingUsers.size > 0 ? (
@@ -1088,6 +1365,19 @@ export default function ConversationPage() {
         <div ref={endRef} style={{ height: 0 }} />
       </div>
       <div className="bg-card/80 backdrop-blur px-3 py-2">
+        {replyTarget ? (
+          <div className="mb-2 flex items-center justify-between rounded-lg bg-muted px-3 py-1 text-xs text-foreground/80 shadow-sm">
+            <div className="truncate">
+              Replying to: <span className="font-medium">{replyTarget.body}</span>
+            </div>
+            <button
+              className="ml-2 text-foreground/60 hover:text-foreground"
+              onClick={() => setReplyTarget(null)}
+            >
+              Clear
+            </button>
+          </div>
+        ) : null}
         <InputGroup
           className="w-full border-0 bg-transparent shadow-none has-[[data-slot=input-group-control]:focus-visible]:ring-0 has-[[data-slot=input-group-control]:focus-visible]:border-0 **:data-[slot=input-group-control]:bg-transparent **:data-[slot=input-group-control]:shadow-none **:data-[slot=input-group-control]:border-0"
           style={{ background: "transparent" }}
