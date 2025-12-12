@@ -61,9 +61,9 @@ export default function ConversationPage() {
   const router = useRouter();
   const supabase = useRef(createClient());
   const endRef = useRef<HTMLDivElement | null>(null);
-  const convoChannelRef = useRef<
-    ReturnType<ReturnType<typeof createClient>["channel"]> | null
-  >(null);
+  const convoChannelRef = useRef<ReturnType<
+    ReturnType<typeof createClient>["channel"]
+  > | null>(null);
 
   const routeId = Array.isArray((params as any).id)
     ? (params as any).id[0]
@@ -125,6 +125,10 @@ export default function ConversationPage() {
   const listRef = useRef<HTMLDivElement | null>(null);
   const loadingOlderRef = useRef(false);
   const shouldAutoScrollRef = useRef(true);
+  const [visibleMessages, setVisibleMessages] = useState<Set<string>>(
+    new Set()
+  );
+  const messageElsRef = useRef<Record<string, HTMLElement | null>>({});
 
   // Derive other user id from messages if missing (e.g., after refresh)
   useEffect(() => {
@@ -145,6 +149,20 @@ export default function ConversationPage() {
     messageIdsRef.current = new Set(messages.map((m) => m.id));
   }, [messages]);
 
+  // fade-in tracking: mark new messages visible shortly after render
+  useEffect(() => {
+    const currentIds = messages.map((m) => m.id);
+    const newIds = currentIds.filter((id) => !visibleMessages.has(id));
+    if (!newIds.length) return;
+    const timer = setTimeout(() => {
+      setVisibleMessages((prev) => {
+        const next = new Set(prev);
+        newIds.forEach((id) => next.add(id));
+        return next;
+      });
+    }, 20);
+    return () => clearTimeout(timer);
+  }, [messages, visibleMessages]);
 
   // load initial messages + current user (paged)
   useEffect(() => {
@@ -185,7 +203,8 @@ export default function ConversationPage() {
             data.other?.profile_title ??
             fallbackTitle ??
             null;
-          const apiProfileTitle = data.other?.profile_title ?? fallbackTitle ?? null;
+          const apiProfileTitle =
+            data.other?.profile_title ?? fallbackTitle ?? null;
           const apiOtherId = data.other?.user_id ?? null;
           if (apiOtherId) setOtherUserId(apiOtherId);
           else {
@@ -294,25 +313,25 @@ export default function ConversationPage() {
         if (didUpdate) return;
 
         // Otherwise, fetch the message to ensure it belongs to this conversation, then cache the receipt
-        supabase.current
-          .from("messages")
-          .select("id, conversation_id")
-          .eq("id", msgId)
-          .maybeSingle()
-          .then(({ data }) => {
+        (async () => {
+          try {
+            const { data } = await supabase.current
+              .from("messages")
+              .select("id, conversation_id")
+              .eq("id", msgId)
+              .maybeSingle();
             if (data?.conversation_id !== conversationId) return;
             pendingReceiptsRef.current[msgId] = {
               delivered_at: rec.delivered_at ?? null,
               read_at: rec.read_at ?? null,
             };
-            // Attempt to re-apply in case the message is now present
             applyUpdate();
-          })
-          .catch(() => {
+          } catch {
             // ignore
-          });
-        }
-      );
+          }
+        })();
+      }
+    );
     channel.on("broadcast", { event: "typing" }, (payload: any) => {
       const rec = payload.payload as {
         user_id?: string | null;
@@ -575,10 +594,11 @@ export default function ConversationPage() {
     if (!rows.length) return;
     rows.forEach((r) => deliveryAttemptRef.current.add(r.message_id));
 
-    supabase.current
-      .from("message_receipts")
-      .upsert(rows, { onConflict: "message_id,user_id" })
-      .then(({ error }) => {
+    (async () => {
+      try {
+        const { error } = await supabase.current
+          .from("message_receipts")
+          .upsert(rows, { onConflict: "message_id,user_id" });
         if (error) return;
         const deliveredMap = rows.reduce<Record<string, string>>((acc, r) => {
           acc[r.message_id] = r.delivered_at ?? now;
@@ -591,25 +611,25 @@ export default function ConversationPage() {
               : m
           )
         );
-      })
-      .catch(() => {
+      } catch {
         // ignore
-      });
+      }
+    })();
   }, [currentUserId, messages]);
 
   const emitTyping = (started: boolean) => {
     if (!conversationId) return;
     const chan = convoChannelRef.current;
     if (!chan) return;
-    chan
-      .send({
+    try {
+      void chan.send({
         type: "broadcast",
         event: "typing",
         payload: { user_id: currentUserIdRef.current, started },
-      })
-      .catch(() => {
-        // ignore
       });
+    } catch {
+      // ignore
+    }
   };
 
   const handleTypingChange = (value: string) => {
@@ -656,15 +676,21 @@ export default function ConversationPage() {
       : null;
 
   const loadOlder = async () => {
-    if (loadingMore || !hasMore || !messages.length || !conversationId)
-      return;
+    if (loadingMore || !hasMore || !messages.length || !conversationId) return;
     setLoadingMore(true);
     loadingOlderRef.current = true;
     shouldAutoScrollRef.current = false;
     const first = messages[0];
     const before = first?.created_at;
-    const prevHeight = listRef.current?.scrollHeight ?? 0;
-    const prevTop = listRef.current?.scrollTop ?? 0;
+    const container = listRef.current;
+    const firstEl = first ? messageElsRef.current[first.id] : null;
+    const prevScrollTop = container?.scrollTop ?? 0;
+    const containerTop = container?.getBoundingClientRect().top ?? 0;
+    const firstTop =
+      firstEl?.getBoundingClientRect().top != null
+        ? firstEl.getBoundingClientRect().top - containerTop
+        : null;
+    const prevHeight = container?.scrollHeight ?? 0;
     try {
       const res = await fetch(
         `/api/messages/${conversationId}?limit=30${
@@ -676,9 +702,17 @@ export default function ConversationPage() {
         setHasMore(Boolean(data?.has_more));
         setMessages((prev) => [...(data.messages as Message[]), ...prev]);
         requestAnimationFrame(() => {
-          const nextHeight = listRef.current?.scrollHeight ?? 0;
-          if (listRef.current) {
-            listRef.current.scrollTop = nextHeight - (prevHeight - prevTop);
+          const c = listRef.current;
+          if (!c) return;
+          const sameFirst = first ? messageElsRef.current[first.id] : null;
+          if (sameFirst && firstTop != null) {
+            const newTop =
+              sameFirst.getBoundingClientRect().top - c.getBoundingClientRect().top;
+            const delta = newTop - firstTop;
+            c.scrollTop = prevScrollTop + delta;
+          } else {
+            const nextHeight = c.scrollHeight ?? 0;
+            c.scrollTop = nextHeight - (prevHeight - prevScrollTop);
           }
         });
       }
@@ -694,9 +728,7 @@ export default function ConversationPage() {
     const ids = Array.from(messageIdsRef.current);
     if (!ids.length) return;
 
-    const filter = `message_id=in.(${ids
-      .map((id) => `"${id}"`)
-      .join(",")})`;
+    const filter = `message_id=in.(${ids.map((id) => `"${id}"`).join(",")})`;
 
     const channel = supabase.current.channel(
       `receipts:${conversationId}:${ids.length}`
@@ -755,7 +787,7 @@ export default function ConversationPage() {
 
   return (
     <div className="h-svh min-h-svh bg-background text-foreground flex flex-col">
-      <div className="bg-background/60 supports-[backdrop-filter]:bg-background/50 backdrop-blur-md px-3 py-2 flex items-center justify-between gap-3 border-none">
+      <div className="bg-background/60 supports-backdrop-filter:bg-background/50 backdrop-blur-md px-3 py-2 flex items-center justify-between gap-3 border-none">
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"
@@ -766,41 +798,41 @@ export default function ConversationPage() {
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
-        <div className="flex items-center gap-3">
-          {initialLoading ? (
-            <>
-              <div className="h-12 w-12 rounded-full bg-muted animate-pulse" />
-              <div className="leading-tight space-y-1">
-                <div className="h-4 w-32 rounded bg-muted animate-pulse" />
-                <div className="h-3 w-24 rounded bg-muted/80 animate-pulse" />
-              </div>
-            </>
-          ) : (
-            <>
-              <Avatar className="h-12 w-12">
-                <AvatarImage
-                  alt={participantName}
-                  src={participantAvatar ?? undefined}
-                />
-                <AvatarFallback>{participantInitials}</AvatarFallback>
-              </Avatar>
-              <div className="leading-tight">
-                <div className="text-sm font-medium flex items-center gap-1 max-w-[240px]">
-                  <span className="truncate">{displayName || "Contact"}</span>
-                  {secondaryName ? (
-                    <span className="text-xs text-muted-foreground truncate max-w-[140px]">
-                      {secondaryName}
-                    </span>
-                  ) : null}
+          <div className="flex items-center gap-3">
+            {initialLoading ? (
+              <>
+                <div className="h-12 w-12 rounded-full bg-muted animate-pulse" />
+                <div className="leading-tight space-y-1">
+                  <div className="h-4 w-32 rounded bg-muted animate-pulse" />
+                  <div className="h-3 w-24 rounded bg-muted/80 animate-pulse" />
                 </div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="size-2 rounded-full bg-green-500" />
-                  <span>Online</span>
+              </>
+            ) : (
+              <>
+                <Avatar className="h-12 w-12">
+                  <AvatarImage
+                    alt={participantName}
+                    src={participantAvatar ?? undefined}
+                  />
+                  <AvatarFallback>{participantInitials}</AvatarFallback>
+                </Avatar>
+                <div className="leading-tight">
+              <div className="text-sm font-medium flex items-center gap-1 max-w-60">
+                <span className="truncate">{displayName || "Contact"}</span>
+                {secondaryName ? (
+                  <span className="text-xs text-muted-foreground truncate max-w-[140px]">
+                    {secondaryName}
+                  </span>
+                    ) : null}
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className="size-2 rounded-full bg-green-500" />
+                    <span>Online</span>
+                  </div>
                 </div>
-              </div>
-            </>
-          )}
-        </div>
+              </>
+            )}
+          </div>
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -899,10 +931,16 @@ export default function ConversationPage() {
         {messages.map((m) => {
           const isMe =
             currentUserId != null ? m.sender_id === currentUserId : false;
+          const isVisible = visibleMessages.has(m.id);
           return (
             <div
               key={m.id}
-              className={`flex ${isMe ? "justify-end" : "justify-start"}`}
+              ref={(el) => {
+                messageElsRef.current[m.id] = el;
+              }}
+              className={`flex ${isMe ? "justify-end" : "justify-start"} transition-opacity duration-300 ease-out ${
+                isVisible ? "opacity-100" : "opacity-0"
+              }`}
             >
               <div
                 className={`rounded-lg px-3 py-2 max-w-[75%] sm:max-w-[65%] lg:max-w-[55%] ${
@@ -916,9 +954,7 @@ export default function ConversationPage() {
                 </p>
                 <div
                   className={`mt-1 text-xs flex items-center gap-1 ${
-                    isMe
-                      ? "text-blue-100 justify-end"
-                      : "text-muted-foreground"
+                    isMe ? "text-blue-100 justify-end" : "text-muted-foreground"
                   }`}
                 >
                   <span>
@@ -957,7 +993,7 @@ export default function ConversationPage() {
         <div ref={endRef} style={{ height: 0 }} />
       </div>
       <div className="bg-card/80 backdrop-blur px-3 py-2">
-        <InputGroup className="w-full border-0 bg-transparent shadow-none !bg-transparent has-[[data-slot=input-group-control]:focus-visible]:ring-0 has-[[data-slot=input-group-control]:focus-visible]:border-0">
+        <InputGroup className="w-full border-0 bg-transparent shadow-none has-[[data-slot=input-group-control]:focus-visible]:ring-0 has-[[data-slot=input-group-control]:focus-visible]:border-0">
           <InputGroupAddon align="inline-start" className="pl-1">
             <InputGroupButton
               size="icon-sm"
@@ -991,7 +1027,7 @@ export default function ConversationPage() {
             placeholder="Write a message..."
             minRows={1}
             maxRows={6}
-            className="text-base !min-h-0 !py-1.5 !border-0 !bg-transparent shadow-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:border-0"
+            className="text-base min-h-0 py-1.5 border-0 bg-transparent shadow-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:border-0"
           />
 
           <InputGroupAddon align="inline-end" className="pr-1">
