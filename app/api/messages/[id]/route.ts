@@ -36,7 +36,7 @@ async function getConversationId(
   return pid || t || null;
 }
 
-// GET /api/messages/:id -> list messages in a convo + upsert delivered receipts for viewer
+// GET /api/messages/:id -> list messages in a convo (paginated) + upsert delivered receipts for viewer
 export async function GET(
   req: Request,
   { params }: { params: { id: string } }
@@ -58,8 +58,16 @@ export async function GET(
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
 
-  // 1) Fetch messages + sender profiles
-  const { data: messages, error: msgErr } = await supabase
+  const url = new URL(req.url);
+  const search = url.searchParams;
+  const limitParam = Number(search.get("limit"));
+  const limit = Number.isFinite(limitParam)
+    ? Math.max(1, Math.min(200, limitParam))
+    : 200;
+  const before = search.get("before");
+
+  // 1) Fetch messages + sender profiles (newest first for pagination, then reverse)
+  let msgQuery = supabase
     .from("messages")
     .select(
       `
@@ -71,14 +79,20 @@ export async function GET(
     `
     )
     .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: true })
-    .limit(200);
+    .order("created_at", { ascending: false })
+    .limit(limit + 1);
+  if (before) {
+    msgQuery = msgQuery.lt("created_at", before);
+  }
+  const { data: messagesDesc, error: msgErr } = await msgQuery;
 
   if (msgErr) {
     return NextResponse.json({ error: msgErr.message }, { status: 500 });
   }
 
-  const list = messages ?? [];
+  const hasMore = (messagesDesc?.length ?? 0) > limit;
+  const trimmedDesc = hasMore ? (messagesDesc ?? []).slice(0, limit) : messagesDesc ?? [];
+  const list = trimmedDesc.reverse(); // oldest first for UI
 
   const listWithAge = list.map((m: any) => {
     const dob = m?.profiles?.date_of_birth ?? null;
@@ -249,7 +263,7 @@ export async function GET(
   });
 
   return NextResponse.json(
-    { messages: enriched, other: otherMeta ?? null },
+    { messages: enriched, other: otherMeta ?? null, has_more: hasMore },
     { status: 200 }
   );
 }

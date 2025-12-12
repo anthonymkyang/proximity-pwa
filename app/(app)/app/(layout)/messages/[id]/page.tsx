@@ -116,6 +116,11 @@ export default function ConversationPage() {
   const typingSelfTimerRef = useRef<NodeJS.Timeout | null>(null);
   const typingTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const loadingOlderRef = useRef(false);
+  const shouldAutoScrollRef = useRef(true);
 
   // Derive other user id from messages if missing (e.g., after refresh)
   useEffect(() => {
@@ -137,7 +142,7 @@ export default function ConversationPage() {
   }, [messages]);
 
 
-  // load initial messages + current user
+  // load initial messages + current user (paged)
   useEffect(() => {
     const load = async () => {
       if (!conversationId) return;
@@ -147,9 +152,10 @@ export default function ConversationPage() {
         } = await supabase.current.auth.getUser();
         setCurrentUserId(user?.id ?? null);
 
-        const res = await fetch(`/api/messages/${conversationId}`);
+        const res = await fetch(`/api/messages/${conversationId}?limit=30`);
         const data = await res.json();
         if (res.ok) {
+          shouldAutoScrollRef.current = true;
           setMessages(
             (data.messages as Message[]).sort(
               (a, b) =>
@@ -157,6 +163,8 @@ export default function ConversationPage() {
                 new Date(b.created_at).getTime()
             )
           );
+          setHasMore(Boolean(data?.has_more));
+
           const apiName =
             data.other?.profile_title ??
             data.messages?.[0]?.profiles?.profile_title ??
@@ -214,6 +222,7 @@ export default function ConversationPage() {
                 read_at: pending.read_at ?? (msg as any).read_at ?? null,
               }
             : msg;
+          shouldAutoScrollRef.current = true;
           setMessages((prev) => {
             if (prev.some((m) => m.id === msg.id)) return prev;
             return [...prev, msgWithReceipts].sort(
@@ -335,8 +344,15 @@ export default function ConversationPage() {
 
   // scroll to bottom on new messages
   useEffect(() => {
+    if (!shouldAutoScrollRef.current) return;
+    if (loadingOlderRef.current) {
+      loadingOlderRef.current = false;
+      shouldAutoScrollRef.current = false;
+      return;
+    }
     if (!endRef.current) return;
     endRef.current.scrollIntoView({ block: "start", behavior: "smooth" });
+    shouldAutoScrollRef.current = false;
   }, [messages]);
 
   useEffect(() => {
@@ -459,6 +475,7 @@ export default function ConversationPage() {
     const text = newMessage.trim();
     if (!text || !conversationId) return;
     setNewMessage("");
+    shouldAutoScrollRef.current = true;
     if (typingBroadcastedRef.current) {
       emitTyping(false);
       typingBroadcastedRef.current = false;
@@ -597,6 +614,40 @@ export default function ConversationPage() {
       .sort()
       .join(",");
   }, [messages]);
+
+  const loadOlder = async () => {
+    if (loadingMore || !hasMore || !messages.length || !conversationId)
+      return;
+    setLoadingMore(true);
+    loadingOlderRef.current = true;
+    shouldAutoScrollRef.current = false;
+    const first = messages[0];
+    const before = first?.created_at;
+    const prevHeight = listRef.current?.scrollHeight ?? 0;
+    const prevTop = listRef.current?.scrollTop ?? 0;
+    try {
+      const res = await fetch(
+        `/api/messages/${conversationId}?limit=30${
+          before ? `&before=${encodeURIComponent(before)}` : ""
+        }`
+      );
+      const data = await res.json();
+      if (res.ok && Array.isArray(data.messages)) {
+        setHasMore(Boolean(data?.has_more));
+        setMessages((prev) => [...(data.messages as Message[]), ...prev]);
+        requestAnimationFrame(() => {
+          const nextHeight = listRef.current?.scrollHeight ?? 0;
+          if (listRef.current) {
+            listRef.current.scrollTop = nextHeight - (prevHeight - prevTop);
+          }
+        });
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   useEffect(() => {
     if (!conversationId) return;
@@ -749,6 +800,12 @@ export default function ConversationPage() {
         </DropdownMenu>
       </div>
       <div
+        ref={listRef}
+        onScroll={(e) => {
+          if ((e.currentTarget?.scrollTop ?? 0) <= 24) {
+            void loadOlder();
+          }
+        }}
         className={`relative flex-1 overflow-y-auto px-4 pt-4 space-y-3 ${
           typingUsers.size > 0 ? "pb-10" : "pb-2"
         }`}
