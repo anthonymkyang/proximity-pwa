@@ -118,6 +118,7 @@ export default function ConversationPage() {
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const listRef = useRef<HTMLDivElement | null>(null);
   const loadingOlderRef = useRef(false);
   const shouldAutoScrollRef = useRef(true);
@@ -145,8 +146,12 @@ export default function ConversationPage() {
   // load initial messages + current user (paged)
   useEffect(() => {
     const load = async () => {
-      if (!conversationId) return;
+      if (!conversationId) {
+        setInitialLoading(false);
+        return;
+      }
       try {
+        setInitialLoading(true);
         const {
           data: { user },
         } = await supabase.current.auth.getUser();
@@ -193,6 +198,8 @@ export default function ConversationPage() {
         }
       } catch {
         // ignore
+      } finally {
+        setInitialLoading(false);
       }
     };
     load();
@@ -808,8 +815,31 @@ export default function ConversationPage() {
         }}
         className={`relative flex-1 overflow-y-auto px-4 pt-4 space-y-3 ${
           typingUsers.size > 0 ? "pb-10" : "pb-2"
-        }`}
+        } [&::-webkit-scrollbar]:hidden`}
+        style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
       >
+        {initialLoading && messages.length === 0
+          ? Array.from({ length: 6 }).map((_, idx) => {
+              const isMe = idx % 2 === 0;
+              return (
+                <div
+                  key={`skeleton-${idx}`}
+                  className={`flex ${isMe ? "justify-end" : "justify-start"}`}
+                >
+                  <div
+                    className={`rounded-lg px-3 py-2 max-w-[70%] ${
+                      isMe
+                        ? "bg-primary/30 text-white rounded-br-none"
+                        : "bg-muted text-muted-foreground rounded-bl-none"
+                    } animate-pulse space-y-2`}
+                  >
+                    <div className="h-3 w-32 rounded bg-foreground/20" />
+                    <div className="h-3 w-20 rounded bg-foreground/10" />
+                  </div>
+                </div>
+              );
+            })
+          : null}
         {messages.map((m) => {
           const isMe =
             currentUserId != null ? m.sender_id === currentUserId : false;
