@@ -716,7 +716,7 @@ export default function ConversationPage() {
             placeholder="Write a message..."
             minRows={1}
             maxRows={6}
-            className="text-sm sm:text-base !min-h-0 !py-1.5 !border-0 !bg-transparent shadow-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:border-0"
+            className="text-base !min-h-0 !py-1.5 !border-0 !bg-transparent shadow-none focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:border-0"
           />
 
           <InputGroupAddon align="inline-end" className="pr-1">
