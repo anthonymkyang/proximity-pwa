@@ -79,6 +79,9 @@ export async function GET(
       body,
       created_at,
       sender_id,
+      reply_to_id,
+      reply_to_body,
+      reply_to_sender_id,
       profiles:profiles!messages_sender_id_profiles_fkey(profile_title, avatar_url, date_of_birth)
     `
     )
@@ -299,10 +302,15 @@ export async function POST(
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
 
-  const { body } = await req.json();
+  const payload = await req.json();
+  const body = payload?.body;
   if (!body || typeof body !== "string" || !body.trim()) {
     return NextResponse.json({ error: "body required" }, { status: 400 });
   }
+
+  const reply_to_id = payload?.reply_to_id ?? null;
+  const reply_to_body = payload?.reply_to_body ?? null;
+  const reply_to_sender_id = payload?.reply_to_sender_id ?? null;
 
   const { data: inserted, error: insErr } = await supabase
     .from("messages")
@@ -310,6 +318,9 @@ export async function POST(
       conversation_id: conversationId,
       sender_id: user.id,
       body: body.trim(),
+      reply_to_id,
+      reply_to_body,
+      reply_to_sender_id,
     })
     .select(
       `
@@ -317,6 +328,9 @@ export async function POST(
         body,
         created_at,
         sender_id,
+        reply_to_id,
+        reply_to_body,
+        reply_to_sender_id,
         profiles:profiles!messages_sender_id_profiles_fkey(profile_title, avatar_url, date_of_birth)
       `
     )
