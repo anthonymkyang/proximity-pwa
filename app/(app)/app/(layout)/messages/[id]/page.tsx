@@ -182,6 +182,31 @@ export default function ConversationPage() {
   const overlayTimerRef = useRef<NodeJS.Timeout | null>(null);
   const copiedTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  const copyToClipboard = useCallback(async (text: string) => {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch {
+      // ignore and fallback
+    }
+    try {
+      const el = document.createElement("textarea");
+      el.value = text;
+      el.style.position = "fixed";
+      el.style.opacity = "0";
+      document.body.appendChild(el);
+      el.focus();
+      el.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(el);
+      return ok;
+    } catch {
+      return false;
+    }
+  }, []);
+
   // Derive other user id from messages if missing (e.g., after refresh)
   useEffect(() => {
     if (otherUserId || !currentUserId) return;
@@ -800,8 +825,8 @@ export default function ConversationPage() {
   const handleMessageAction = useCallback(
     async (action: "reply" | "copy" | "info" | "translate" | "delete", msg?: Message) => {
       if (action === "copy" && msg?.body) {
-        try {
-          await navigator.clipboard.writeText(msg.body);
+        const didCopy = await copyToClipboard(msg.body);
+        if (didCopy) {
           setCopiedMessageId(msg.id);
           if (copiedTimerRef.current) {
             clearTimeout(copiedTimerRef.current);
@@ -810,8 +835,6 @@ export default function ConversationPage() {
             setCopiedMessageId(null);
             copiedTimerRef.current = null;
           }, 1500);
-        } catch {
-          // ignore
         }
       } else if (action === "reply" && msg) {
         setReplyTarget(msg);
@@ -819,7 +842,7 @@ export default function ConversationPage() {
       // TODO: wire reply/info/translate/delete if needed
       setFocusedMessageId(null);
     },
-    []
+    [copyToClipboard]
   );
 
   const handleTypingChange = (value: string) => {
@@ -1164,6 +1187,13 @@ export default function ConversationPage() {
           }
         }}
       >
+        {copiedMessageId ? (
+          <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center">
+            <div className="rounded-xl bg-card px-4 py-2 text-sm text-foreground shadow-lg border">
+              Copied message
+            </div>
+          </div>
+        ) : null}
         {initialLoading && messages.length === 0
           ? Array.from({ length: 6 }).map((_, idx) => {
               const isMe = idx % 2 === 0;
@@ -1254,7 +1284,7 @@ export default function ConversationPage() {
                     isMe
                       ? "bg-primary text-white rounded-br-none"
                       : "bg-muted text-foreground rounded-bl-none"
-                } ${isFocused ? "ring-2 ring-primary shadow-lg z-50" : "z-0"}`}
+                  } ${isFocused ? "ring-2 ring-primary shadow-lg z-50" : "z-0"}`}
                 >
                     {m.reply_to_id && m.reply_to_body ? (
                       <div className="mb-2 rounded-lg bg-black/10 text-xs text-foreground/80 px-2 py-1 flex flex-col gap-1">
@@ -1319,7 +1349,7 @@ export default function ConversationPage() {
                         : ""
                     }`}
                   >
-                    {copiedMessageId === m.id ? "Copied text" : "Copy"}
+                    {copiedMessageId === m.id ? "Copied message" : "Copy"}
                   </span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
