@@ -31,6 +31,15 @@ export async function GET(req: Request) {
         last_interacted_at,
         connection_contacts:connection_contacts (
           profile_id,
+          profiles:profiles!connection_contacts_profile_id_fkey (
+            id,
+            profile_title,
+            avatar_url,
+            username,
+            date_of_birth,
+            sexuality:sexualities!profiles_sexuality_id_fkey(label),
+            position:positions!profiles_position_id_fkey(label)
+          ),
           display_name,
           email,
           phone,
@@ -45,7 +54,10 @@ export async function GET(req: Request) {
             id,
             profile_title,
             avatar_url,
-            username
+            username,
+            date_of_birth,
+            sexuality:sexualities!profiles_sexuality_id_fkey(label),
+            position:positions!profiles_position_id_fkey(label)
           )
         )
       `
@@ -101,6 +113,18 @@ export async function POST(req: Request) {
   }
 
   if (type === "contact") {
+    // avoid duplicate contacts for same profile
+    const { data: existing } = await supabase
+      .from("connections")
+      .select("id")
+      .eq("owner_id", user.id)
+      .eq("type", "contact")
+      .eq("connection_contacts.profile_id", target_profile_id)
+      .maybeSingle();
+    if (existing) {
+      return NextResponse.json({ connection: existing }, { status: 200 });
+    }
+
     const title = nickname?.trim() || "Contact";
     const { data: conn, error: connErr } = await supabase
       .from("connections")
@@ -162,6 +186,18 @@ export async function POST(req: Request) {
   }
 
   // pin
+  // avoid duplicate pin for same profile
+  const { data: existingPin } = await supabase
+    .from("connections")
+    .select("id")
+    .eq("owner_id", user.id)
+    .eq("type", "pin")
+    .eq("connection_pins.pinned_profile_id", target_profile_id)
+    .maybeSingle();
+  if (existingPin) {
+    return NextResponse.json({ connection: existingPin }, { status: 200 });
+  }
+
   const title = nickname?.trim() || "Pinned profile";
   const { data: conn, error: connErr } = await supabase
     .from("connections")

@@ -42,7 +42,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import MapWeather from "./MapWeather";
 import MapAvatar from "./MapAvatar";
 import MapPlace from "./MapPlace";
-import MapGroup from "./MapGroup";
 import MapFiltering from "./MapFiltering";
 import MapCruising from "./MapCruising";
 import DrawerWalls from "./DrawerWalls";
@@ -51,6 +50,12 @@ import { getContrastingText, getLineColor } from "./MapInstructions";
 import { createRoot, type Root } from "react-dom/client";
 import { createClient } from "@/utils/supabase/client";
 import { cn } from "@/lib/utils";
+import {
+  usePresence,
+  toUiPresence,
+} from "@/components/providers/presence-context";
+import getAvatarProxyUrl from "@/lib/profiles/getAvatarProxyUrl";
+import { useRouter } from "next/navigation";
 
 const OPENFREEMAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
 const LOCAL_STYLE_PATH = "/maps/proximity-dark.json"; // place your Maputnik JSON here
@@ -619,6 +624,7 @@ const addTflStations = async (map: MaplibreMap) => {
 };
 
 export default function MapCanvas() {
+  const router = useRouter();
   const mapRef = useRef<MaplibreMap | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [mapReady, setMapReady] = useState(false);
@@ -635,20 +641,37 @@ export default function MapCanvas() {
     coordinates?: [number, number];
     distanceKm?: number;
   } | null>(null);
-  const friendMarkerRef = useRef<maplibregl.Marker | null>(null);
-  const friendMarkerRootRef = useRef<Root | null>(null);
-  const friendMarker2Ref = useRef<maplibregl.Marker | null>(null);
-  const friendMarker2RootRef = useRef<Root | null>(null);
-  const friendMarker3Ref = useRef<maplibregl.Marker | null>(null);
-  const friendMarker3RootRef = useRef<Root | null>(null);
-  const friendMarker4Ref = useRef<maplibregl.Marker | null>(null);
-  const friendMarker4RootRef = useRef<Root | null>(null);
-  const friendMarker5Ref = useRef<maplibregl.Marker | null>(null);
-  const friendMarker5RootRef = useRef<Root | null>(null);
-  const friendMarker6Ref = useRef<maplibregl.Marker | null>(null);
-  const friendMarker6RootRef = useRef<Root | null>(null);
-  const groupMarkerRef = useRef<maplibregl.Marker | null>(null);
-  const groupMarkerRootRef = useRef<Root | null>(null);
+  const liveMarkersRef = useRef<
+    Map<
+      string,
+      {
+        marker: maplibregl.Marker;
+        root: Root;
+      }
+    >
+  >(new Map());
+  const profileCacheRef = useRef<
+    Record<
+      string,
+      {
+        avatar_url: string | null;
+        profile_title?: string | null;
+      }
+    >
+  >({});
+  const [profileCacheVersion, setProfileCacheVersion] = useState(0);
+  const [visiblePresences, setVisiblePresences] = useState<
+    {
+      id: string;
+      lat: number;
+      lng: number;
+      status: string | null;
+      last_seen?: string | null;
+      opacity?: number;
+    }[]
+  >([]);
+  const { presence: presenceCtx, currentUserId } = usePresence();
+  const selfIdRef = useRef<string | null>(null);
   const cruisingMarkersRef = useRef<
     { marker: maplibregl.Marker; root: Root; id: string }[]
   >([]);
@@ -661,9 +684,19 @@ export default function MapCanvas() {
   const [profileName, setProfileName] = useState<string | null>(null);
   const [selectedPerson, setSelectedPerson] = useState<{
     name: string;
+    nickname?: string | null;
+    profileTitle?: string | null;
     presence: "online" | "away" | "offline";
     location?: [number, number];
+    avatarUrl?: string | null;
+    userId?: string;
   } | null>(null);
+  const [connectionNames, setConnectionNames] = useState<
+    Record<string, { nickname?: string | null; title?: string | null }>
+  >({});
+  const [drawerAvatarLoaded, setDrawerAvatarLoaded] = useState(false);
+  const [drawerUnreadCount, setDrawerUnreadCount] = useState(0);
+  const [creatingConversation, setCreatingConversation] = useState(false);
   const [places, setPlaces] = useState<
     {
       id: string;
@@ -782,7 +815,7 @@ export default function MapCanvas() {
   const [showGroupDrawer, setShowGroupDrawer] = useState(false);
   const [showCruisingDrawer, setShowCruisingDrawer] = useState(false);
   const [showWallDrawer, setShowWallDrawer] = useState(false);
-  const [groupCoords, setGroupCoords] = useState<[number, number] | null>(null);
+  const [groupCoords] = useState<[number, number] | null>(null);
   const [selectedCruising, setSelectedCruising] = useState<{
     id: string;
     name: string;
@@ -1189,48 +1222,11 @@ export default function MapCanvas() {
       void maybeCleanup?.then((cleanup) => {
         if (typeof cleanup === "function") cleanup();
       });
-      friendMarkerRef.current?.remove();
-      friendMarkerRef.current = null;
-      if (friendMarkerRootRef.current) {
-        requestAnimationFrame(() => friendMarkerRootRef.current?.unmount());
-        friendMarkerRootRef.current = null;
-      }
-      friendMarker2Ref.current?.remove();
-      friendMarker2Ref.current = null;
-      if (friendMarker2RootRef.current) {
-        requestAnimationFrame(() => friendMarker2RootRef.current?.unmount());
-        friendMarker2RootRef.current = null;
-      }
-      friendMarker3Ref.current?.remove();
-      friendMarker3Ref.current = null;
-      if (friendMarker3RootRef.current) {
-        requestAnimationFrame(() => friendMarker3RootRef.current?.unmount());
-        friendMarker3RootRef.current = null;
-      }
-      friendMarker4Ref.current?.remove();
-      friendMarker4Ref.current = null;
-      if (friendMarker4RootRef.current) {
-        requestAnimationFrame(() => friendMarker4RootRef.current?.unmount());
-        friendMarker4RootRef.current = null;
-      }
-      friendMarker5Ref.current?.remove();
-      friendMarker5Ref.current = null;
-      if (friendMarker5RootRef.current) {
-        requestAnimationFrame(() => friendMarker5RootRef.current?.unmount());
-        friendMarker5RootRef.current = null;
-      }
-      friendMarker6Ref.current?.remove();
-      friendMarker6Ref.current = null;
-      if (friendMarker6RootRef.current) {
-        requestAnimationFrame(() => friendMarker6RootRef.current?.unmount());
-        friendMarker6RootRef.current = null;
-      }
-      groupMarkerRef.current?.remove();
-      groupMarkerRef.current = null;
-      if (groupMarkerRootRef.current) {
-        requestAnimationFrame(() => groupMarkerRootRef.current?.unmount());
-        groupMarkerRootRef.current = null;
-      }
+      liveMarkersRef.current.forEach(({ marker, root }) => {
+        marker.remove();
+        requestAnimationFrame(() => root.unmount());
+      });
+      liveMarkersRef.current.clear();
       userMarkerRef.current?.remove();
       userMarkerRef.current = null;
       setDirectionsTitle(null);
@@ -1270,12 +1266,12 @@ export default function MapCanvas() {
 
         const ripple = document.createElement("span");
         ripple.className =
-          "absolute inline-flex h-12 w-12 rounded-full bg-primary/35 animate-ping";
-        ripple.style.animationDuration = "1.8s";
+          "absolute inline-flex h-12 w-12 rounded-full bg-primary/40 animate-ping";
+        ripple.style.animationDuration = "1s";
 
         const core = document.createElement("span");
         core.className =
-          "relative inline-flex h-4 w-4 rounded-full bg-gradient-to-br from-primary via-primary to-primary/60";
+          "relative inline-flex h-3.5 w-3.5 rounded-full bg-primary shadow-[0_0_0_3px_rgba(46,119,255,0.45)]";
 
         container.appendChild(ripple);
         container.appendChild(core);
@@ -1296,271 +1292,359 @@ export default function MapCanvas() {
   }, [userLocation, profileName]);
 
   useEffect(() => {
+    selfIdRef.current = currentUserId ?? null;
+  }, [currentUserId]);
+
+  useEffect(() => {
+    selfIdRef.current = currentUserId ?? null;
+  }, [currentUserId]);
+
+  useEffect(() => {
     const map = mapRef.current;
-    if (!map || !userLocation) return;
+    if (!map || !mapReady) return;
 
-    const [lon, lat] = userLocation;
-    const nearby: [number, number] = [lon + 0.0025, lat + 0.0012];
-    const nearby2: [number, number] = [lon - 0.002, lat + 0.0017];
-    const nearby3: [number, number] = [lon + 0.0015, lat - 0.0015];
-    const greenPark: [number, number] = [-0.1425, 51.5069];
-    // Brixton marker (random nearby street)
-    const brixton: [number, number] = [-0.1109, 51.4611];
-    const nottingHill: [number, number] = [-0.1967, 51.5094];
-    const stGilesHotel: [number, number] = [-0.1305, 51.5164];
-    const avatarUrl = fallbackAvatarUrl;
-    const displayName = profileName || "Nearby user";
-    setGroupCoords(stGilesHotel);
+    const updateVisible = () => {
+      const bounds = map.getBounds();
+      const [sw, ne] = bounds.toArray();
+      const latPad = Math.max(0.005, (ne[1] - sw[1]) * 0.15);
+      const lngPad = Math.max(0.005, (ne[0] - sw[0]) * 0.15);
+      const expandedBounds = new maplibregl.LngLatBounds(
+        [sw[0] - lngPad, sw[1] - latPad],
+        [ne[0] + lngPad, ne[1] + latPad]
+      );
+      const next: {
+        id: string;
+        lat: number;
+        lng: number;
+        status: string | null;
+        last_seen?: string | null;
+      }[] = [];
 
-    let marker = friendMarkerRef.current;
-    let root = friendMarkerRootRef.current;
-    let marker2 = friendMarker2Ref.current;
-    let root2 = friendMarker2RootRef.current;
-    let marker3 = friendMarker3Ref.current;
-    let root3 = friendMarker3RootRef.current;
-    let marker4 = friendMarker4Ref.current;
-    let root4 = friendMarker4RootRef.current;
-    let marker5 = friendMarker5Ref.current;
-    let root5 = friendMarker5RootRef.current;
-    let marker6 = friendMarker6Ref.current;
-    let root6 = friendMarker6RootRef.current;
-    let groupMarker = groupMarkerRef.current;
-    let groupRoot = groupMarkerRootRef.current;
-
-    if (!marker) {
-      const container = document.createElement("div");
-      container.className =
-        "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
-      root = createRoot(container);
-      friendMarkerRootRef.current = root;
-      marker = new maplibregl.Marker({ element: container, anchor: "center" });
-      friendMarkerRef.current = marker;
-    }
-
-    if (!marker2) {
-      const container = document.createElement("div");
-      container.className =
-        "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
-      root2 = createRoot(container);
-      friendMarker2RootRef.current = root2;
-      marker2 = new maplibregl.Marker({
-        element: container,
-        anchor: "center",
+      Object.entries(presenceCtx || {}).forEach(([id, entry]) => {
+        if (selfIdRef.current && id === selfIdRef.current) return;
+        const lat = typeof entry.lat === "number" ? entry.lat : null;
+        const lng = typeof entry.lng === "number" ? entry.lng : null;
+        if (!Number.isFinite(lat as number) || !Number.isFinite(lng as number))
+          return;
+        if (!expandedBounds.contains([lng as number, lat as number])) return;
+        const status = entry.status?.toLowerCase() || null;
+        const uiPresence = toUiPresence(entry as any);
+        if (!uiPresence && !status) return;
+        next.push({
+          id,
+          lat: lat as number,
+          lng: lng as number,
+          status: entry.status ?? null,
+          last_seen: entry.last_seen ?? entry.updated_at ?? null,
+        });
       });
-      friendMarker2Ref.current = marker2;
-    }
 
-    if (!marker3) {
-      const container = document.createElement("div");
-      container.className =
-        "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
-      root3 = createRoot(container);
-      friendMarker3RootRef.current = root3;
-      marker3 = new maplibregl.Marker({
-        element: container,
-        anchor: "center",
-      });
-      friendMarker3Ref.current = marker3;
-    }
-
-    if (!marker4) {
-      const container = document.createElement("div");
-      container.className =
-        "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
-      root4 = createRoot(container);
-      friendMarker4RootRef.current = root4;
-      marker4 = new maplibregl.Marker({
-        element: container,
-        anchor: "center",
-      });
-      friendMarker4Ref.current = marker4;
-    }
-
-    if (!marker5) {
-      const container = document.createElement("div");
-      container.className =
-        "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
-      root5 = createRoot(container);
-      friendMarker5RootRef.current = root5;
-      marker5 = new maplibregl.Marker({
-        element: container,
-        anchor: "center",
-      });
-      friendMarker5Ref.current = marker5;
-    }
-
-    if (!marker6) {
-      const container = document.createElement("div");
-      container.className =
-        "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
-      root6 = createRoot(container);
-      friendMarker6RootRef.current = root6;
-      marker6 = new maplibregl.Marker({
-        element: container,
-        anchor: "center",
-      });
-      friendMarker6Ref.current = marker6;
-    }
-
-    if (!groupMarker) {
-      const container = document.createElement("div");
-      container.className =
-        "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
-      groupRoot = createRoot(container);
-      groupMarkerRootRef.current = groupRoot;
-      groupMarker = new maplibregl.Marker({
-        element: container,
-        anchor: "center",
-      });
-      groupMarkerRef.current = groupMarker;
-    }
-
-    root?.render(
-      <MapAvatar
-        size={44}
-        avatarUrl={avatarUrl}
-        className="border-white/70 shadow-lg"
-        alt={displayName}
-        presence="away"
-        onClick={() =>
-          setSelectedPerson({
-            name: displayName,
-            presence: "away",
-            location:
-              (marker?.getLngLat().toArray() as [number, number]) ?? nearby,
-          })
-        }
-      />
-    );
-
-    root2?.render(
-      <MapAvatar
-        size={44}
-        avatarUrl={avatarUrl}
-        className="border-white/70 shadow-lg"
-        alt={displayName}
-        presence="online"
-        messages
-        newMessages
-        onClick={() =>
-          setSelectedPerson({
-            name: displayName,
-            presence: "online",
-            location:
-              (marker2?.getLngLat().toArray() as [number, number]) ?? nearby2,
-          })
-        }
-      />
-    );
-
-    root3?.render(
-      <MapAvatar
-        size={44}
-        avatarUrl={avatarUrl}
-        className="border-white/70 shadow-lg"
-        alt={displayName}
-        presence="offline"
-        messages
-        onClick={() =>
-          setSelectedPerson({
-            name: displayName,
-            presence: "offline",
-            location:
-              (marker3?.getLngLat().toArray() as [number, number]) ?? nearby3,
-          })
-        }
-      />
-    );
-
-    root4?.render(
-      <MapAvatar
-        size={44}
-        avatarUrl={avatarUrl}
-        className="border-white/70 shadow-lg"
-        alt={displayName}
-        presence="online"
-        onClick={() =>
-          setSelectedPerson({
-            name: displayName,
-            presence: "online",
-            location:
-              (marker4?.getLngLat().toArray() as [number, number]) ?? greenPark,
-          })
-        }
-      />
-    );
-
-    root5?.render(
-      <MapAvatar
-        size={44}
-        avatarUrl={avatarUrl}
-        className="border-white/70 shadow-lg"
-        alt={displayName}
-        presence="away"
-        onClick={() =>
-          setSelectedPerson({
-            name: displayName,
-            presence: "away",
-            location:
-              (marker5?.getLngLat().toArray() as [number, number]) ?? brixton,
-          })
-        }
-      />
-    );
-
-    root6?.render(
-      <MapAvatar
-        size={44}
-        avatarUrl={avatarUrl}
-        className="border-white/70 shadow-lg"
-        alt={displayName}
-        presence="online"
-        onClick={() =>
-          setSelectedPerson({
-            name: displayName,
-            presence: "online",
-            location:
-              (marker6?.getLngLat().toArray() as [number, number]) ??
-              nottingHill,
-          })
-        }
-      />
-    );
-
-    groupRoot?.render(
-      <MapGroup
-        size={32}
-        onClick={() => {
-          setShowGroupDrawer(true);
-          setGroupCoords(stGilesHotel);
-        }}
-      />
-    );
-
-    marker?.setLngLat(nearby).addTo(map);
-    marker2?.setLngLat(nearby2).addTo(map);
-    marker3?.setLngLat(nearby3).addTo(map);
-    marker4?.setLngLat(greenPark).addTo(map);
-    marker5?.setLngLat(brixton).addTo(map);
-    marker6?.setLngLat(nottingHill).addTo(map);
-    groupMarker?.setLngLat(stGilesHotel).addTo(map);
-
-    return () => {
-      marker?.remove();
-      marker2?.remove();
-      marker3?.remove();
-      marker4?.remove();
-      marker5?.remove();
-      marker6?.remove();
-      groupMarker?.remove();
+      setVisiblePresences(next);
     };
-  }, [userLocation, profileName]);
+
+    updateVisible();
+    map.on("moveend", updateVisible);
+    map.on("zoomend", updateVisible);
+    return () => {
+      map.off("moveend", updateVisible);
+      map.off("zoomend", updateVisible);
+    };
+  }, [presenceCtx, mapReady]);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/connections")
+      .then((res) => res.json())
+      .then((body) => {
+        if (!active) return;
+        const map: Record<
+          string,
+          { nickname?: string | null; title?: string | null }
+        > = {};
+        for (const conn of body?.connections ?? []) {
+          if (conn.type === "contact") {
+            const contact = Array.isArray(conn.connection_contacts)
+              ? conn.connection_contacts[0]
+              : conn.connection_contacts;
+            const pid = contact?.profile_id || contact?.profiles?.id;
+            if (pid) {
+              map[pid] = {
+                nickname: contact?.display_name || null,
+                title: contact?.profiles?.profile_title || null,
+              };
+            }
+          } else if (conn.type === "pin") {
+            const pin = Array.isArray(conn.connection_pins)
+              ? conn.connection_pins[0]
+              : conn.connection_pins;
+            const pid = pin?.pinned_profile_id || pin?.pinned_profile?.id;
+            if (pid) {
+              map[pid] = {
+                nickname: pin?.nickname || null,
+                title: pin?.pinned_profile?.profile_title || null,
+              };
+            }
+          }
+        }
+        setConnectionNames(map);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const missing = visiblePresences
+      .map((p) => p.id)
+      .filter((id) => !profileCacheRef.current[id]);
+    if (missing.length === 0) return;
+    let active = true;
+    const supabase = createClient();
+
+    const loadProfiles = async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, avatar_url, profile_title")
+        .in("id", missing);
+      if (!active) return;
+      if (!error && Array.isArray(data)) {
+        const next = { ...profileCacheRef.current };
+        data.forEach((row: any) => {
+          if (!row?.id) return;
+          next[row.id as string] = {
+            avatar_url: row.avatar_url ?? null,
+            profile_title: row.profile_title ?? null,
+          };
+        });
+        profileCacheRef.current = next;
+        setProfileCacheVersion((v) => v + 1);
+      }
+    };
+
+    void loadProfiles();
+    return () => {
+      active = false;
+    };
+  }, [visiblePresences]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    const liveMarkers = liveMarkersRef.current;
+    const visibleIds = new Set(visiblePresences.map((p) => p.id));
+
+    liveMarkers.forEach(({ marker, root }, id) => {
+      if (!visibleIds.has(id)) {
+        marker.remove();
+        requestAnimationFrame(() => root.unmount());
+        liveMarkers.delete(id);
+      }
+    });
+
+    visiblePresences.forEach((p) => {
+      const profile = profileCacheRef.current[p.id];
+      const rawAvatar = profile?.avatar_url ?? null;
+      const avatarUrl =
+        rawAvatar != null ? getAvatarProxyUrl(rawAvatar) : undefined;
+      const finalAvatar = avatarUrl ?? fallbackAvatarUrl;
+      const connMeta = connectionNames[p.id];
+      const profileTitle = profile?.profile_title || "Nearby user";
+      const displayName = connMeta?.nickname || profileTitle;
+      const presence =
+        toUiPresence({ ...p, updated_at: p.last_seen ?? null } as any) ||
+        "offline";
+
+      let entry = liveMarkers.get(p.id);
+      if (!entry) {
+        const container = document.createElement("div");
+        container.className =
+          "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
+        const root = createRoot(container);
+        const marker = new maplibregl.Marker({
+          element: container,
+          anchor: "center",
+        });
+        entry = { marker, root };
+        liveMarkers.set(p.id, entry);
+      }
+
+      entry.root.render(
+        <MapAvatar
+          size={44}
+          avatarUrl={finalAvatar}
+          className="border-white/70 shadow-lg"
+          alt={displayName}
+          presence={presence}
+          onClick={() =>
+            setSelectedPerson({
+              name: displayName,
+              nickname: connMeta?.nickname ?? null,
+              profileTitle: profile?.profile_title ?? null,
+              presence,
+              location: [p.lng, p.lat],
+              avatarUrl: finalAvatar,
+              userId: p.id,
+            })
+          }
+        />
+      );
+      const el = entry.marker.getElement();
+      if (typeof p.opacity === "number") {
+        el.style.opacity = p.opacity.toString();
+      } else {
+        el.style.opacity = "1";
+      }
+      entry.marker.setLngLat([p.lng, p.lat]).addTo(map);
+    });
+  }, [visiblePresences, mapReady, profileCacheVersion]);
 
   useEffect(() => {
     return () => {
       setShowGroupDrawer(false);
     };
   }, []);
+
+  useEffect(() => {
+    setDrawerAvatarLoaded(false);
+  }, [selectedPerson?.avatarUrl, selectedPerson?.name]);
+
+  const handleOpenMessages = async () => {
+    if (!selectedPerson?.userId || !currentUserId || creatingConversation)
+      return;
+    setCreatingConversation(true);
+    const supabase = createClient();
+    try {
+      // conversations current user is in (direct only)
+      const { data: myMemberships, error: memErr } = await supabase
+        .from("conversation_members")
+        .select("conversation_id, conversations!inner(id, type)")
+        .eq("user_id", currentUserId);
+      if (memErr) throw memErr;
+      const typedMemberships = (myMemberships ?? []) as {
+        conversation_id: string;
+        conversations:
+          | { id: string; type: string }
+          | { id: string; type: string }[];
+      }[];
+      const myDirectIds = typedMemberships
+        .map((m) => {
+          if (!m.conversations) return null;
+          if (Array.isArray(m.conversations)) {
+            const first = m.conversations[0];
+            if (!first) return null;
+            return first.type === "direct" ? m.conversation_id : null;
+          }
+          return m.conversations.type === "direct" ? m.conversation_id : null;
+        })
+        .filter(Boolean) as string[];
+
+      let conversationId: string | null = null;
+      if (myDirectIds.length > 0) {
+        const { data: shared, error: sharedErr } = await supabase
+          .from("conversation_members")
+          .select("conversation_id")
+          .eq("user_id", selectedPerson.userId)
+          .in("conversation_id", myDirectIds)
+          .maybeSingle();
+        if (!sharedErr && shared?.conversation_id) {
+          conversationId = shared.conversation_id;
+        }
+      }
+
+      if (!conversationId) {
+        const { data: newConvo, error: convoErr } = await supabase
+          .from("conversations")
+          .insert({
+            type: "direct",
+            created_by: currentUserId,
+          })
+          .select("id")
+          .single();
+        if (convoErr || !newConvo)
+          throw convoErr ?? new Error("No conversation created");
+        conversationId = newConvo.id as string;
+        const { error: membersErr } = await supabase
+          .from("conversation_members")
+          .insert([
+            { conversation_id: conversationId, user_id: currentUserId },
+            { conversation_id: conversationId, user_id: selectedPerson.userId },
+          ]);
+        if (membersErr) throw membersErr;
+      }
+
+      setSelectedPerson(null);
+      router.push(`/app/messages/${conversationId}`);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn("[Map] open messages failed", e);
+    } finally {
+      setCreatingConversation(false);
+    }
+  };
+
+  // Compute if selected user has unread messages to current user
+  useEffect(() => {
+    let active = true;
+    setDrawerUnreadCount(0);
+    const targetId = selectedPerson?.userId;
+    if (!targetId || !currentUserId) return;
+    const supabase = createClient();
+
+    const checkUnread = async () => {
+      // conversations current user is in
+      const { data: myMemberships, error: memErr } = await supabase
+        .from("conversation_members")
+        .select("conversation_id")
+        .eq("user_id", currentUserId);
+      if (memErr || !Array.isArray(myMemberships) || myMemberships.length === 0)
+        return;
+      const myConvoIds = myMemberships
+        .map((m: any) => m?.conversation_id)
+        .filter(Boolean);
+      if (myConvoIds.length === 0) return;
+
+      // conversations target user shares with current user
+      const { data: shared, error: sharedErr } = await supabase
+        .from("conversation_members")
+        .select("conversation_id")
+        .eq("user_id", targetId)
+        .in("conversation_id", myConvoIds);
+      if (sharedErr || !Array.isArray(shared) || shared.length === 0) return;
+      const convoId = shared[0]?.conversation_id;
+      if (!convoId) return;
+
+      // messages from target in that conversation
+      const { data: msgs, error: msgErr } = await supabase
+        .from("messages")
+        .select("id")
+        .eq("conversation_id", convoId)
+        .eq("sender_id", targetId);
+      if (msgErr || !Array.isArray(msgs) || msgs.length === 0) return;
+      const msgIds = msgs.map((m: any) => m.id).filter(Boolean);
+      if (msgIds.length === 0) return;
+
+      // read receipts for current user
+      const { data: receipts, error: recErr } = await supabase
+        .from("message_receipts")
+        .select("message_id, read_at")
+        .in("message_id", msgIds)
+        .eq("user_id", currentUserId)
+        .not("read_at", "is", null);
+      if (recErr) return;
+      const readSet = new Set((receipts ?? []).map((r: any) => r.message_id));
+      const unreadCount = msgIds.filter(
+        (id: string) => !readSet.has(id)
+      ).length;
+      if (active) setDrawerUnreadCount(unreadCount);
+    };
+
+    void checkUnread();
+    return () => {
+      active = false;
+    };
+  }, [selectedPerson?.userId, currentUserId]);
 
   useEffect(() => {
     const supabase = createClient();
@@ -1970,17 +2054,91 @@ export default function MapCanvas() {
       >
         <DrawerContent className="pb-2">
           <DrawerHeader>
-            <DrawerTitle>
-              <span>{selectedPerson?.name ?? "User"}</span>
+            <div className="mb-3 flex justify-center">
+              <div className="relative h-20 w-20">
+                {!drawerAvatarLoaded ? (
+                  <Skeleton className="absolute inset-0 rounded-full" />
+                ) : null}
+                {selectedPerson?.avatarUrl ? (
+                  <MapAvatar
+                    size={72}
+                    avatarUrl={selectedPerson.avatarUrl}
+                    presence={selectedPerson.presence}
+                    ringGap
+                    hideShadow
+                    onLoaded={() => setDrawerAvatarLoaded(true)}
+                  />
+                ) : (
+                  <Skeleton className="h-full w-full rounded-full" />
+                )}
+              </div>
+            </div>
+            <DrawerTitle className="flex items-center justify-center gap-2 text-center">
+              {(() => {
+                const primary =
+                  selectedPerson?.nickname || selectedPerson?.name || "User";
+                const secondary =
+                  selectedPerson?.profileTitle &&
+                  selectedPerson.profileTitle !== selectedPerson.nickname
+                    ? selectedPerson.profileTitle
+                    : null;
+                return (
+                  <>
+                    <span>{primary}</span>
+                    {secondary ? (
+                      <span className="max-w-[140px] truncate text-sm font-normal text-muted-foreground">
+                        {secondary}
+                      </span>
+                    ) : null}
+                  </>
+                );
+              })()}
             </DrawerTitle>
           </DrawerHeader>
           <div className="grid grid-cols-3 gap-3 px-4 pb-2">
-            <div className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground">
+            <div
+              className={cn(
+                "flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground transition",
+                selectedPerson?.userId
+                  ? "cursor-pointer hover:bg-muted/30"
+                  : "cursor-not-allowed opacity-60"
+              )}
+              onClick={() => {
+                if (selectedPerson?.userId) {
+                  const target = selectedPerson.userId;
+                  setSelectedPerson(null);
+                  router.push(`/app/profile/${target}`);
+                }
+              }}
+            >
               <UserIcon className="h-5 w-5 text-foreground" />
               <span>Profile</span>
             </div>
-            <div className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground">
-              <MessageCircle className="h-5 w-5 text-foreground" />
+            <div
+              className={cn(
+                "flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground transition",
+                selectedPerson?.userId
+                  ? "cursor-pointer hover:bg-muted/30"
+                  : "cursor-not-allowed opacity-60"
+              )}
+              onClick={() => {
+                if (
+                  selectedPerson?.userId &&
+                  currentUserId &&
+                  !creatingConversation
+                ) {
+                  void handleOpenMessages();
+                }
+              }}
+            >
+              <div className="relative">
+                <MessageCircle className="h-5 w-5 text-foreground" />
+                {drawerUnreadCount > 0 ? (
+                  <span className="absolute -right-1 -top-1 inline-flex min-h-3.5 min-w-3.5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-none text-white shadow-[0_0_0_2px_rgba(0,0,0,0.65)]">
+                    {drawerUnreadCount > 9 ? "9+" : drawerUnreadCount}
+                  </span>
+                ) : null}
+              </div>
               <span>Messages</span>
             </div>
             <div
@@ -2316,7 +2474,10 @@ export default function MapCanvas() {
             <div
               className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground"
               onClick={() => {
-                const coords = groupCoords ?? [FALLBACK_VIEW.lng, FALLBACK_VIEW.lat];
+                const coords = groupCoords ?? [
+                  FALLBACK_VIEW.lng,
+                  FALLBACK_VIEW.lat,
+                ];
                 const nearest = findNearestStation(coords as [number, number]);
                 setSelectedStation(
                   nearest ?? {
@@ -2370,10 +2531,7 @@ export default function MapCanvas() {
           </DrawerHeader>
 
           <div className="px-4 pb-2">
-            <Accordion
-              type="multiple"
-              className="rounded-2xl bg-muted/15"
-            >
+            <Accordion type="multiple" className="rounded-2xl bg-muted/15">
               <AccordionItem value="description" className="border-0">
                 <AccordionTrigger className="items-center px-4 py-3 text-left text-base font-semibold hover:no-underline [&>svg]:translate-y-0">
                   Description
@@ -2525,8 +2683,7 @@ export default function MapCanvas() {
               </span>
             </DrawerTitle>
           </DrawerHeader>
-          <div className="flex flex-col gap-2 px-4 pb-4">
-          </div>
+          <div className="flex flex-col gap-2 px-4 pb-4"></div>
         </DrawerContent>
       </Drawer>
     </div>

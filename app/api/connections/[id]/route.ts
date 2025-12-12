@@ -38,6 +38,15 @@ export async function GET(
         last_interacted_at,
         connection_contacts:connection_contacts (
           profile_id,
+          profiles:profiles!connection_contacts_profile_id_fkey (
+            id,
+            profile_title,
+            avatar_url,
+            username,
+            date_of_birth,
+            sexuality:sexualities!profiles_sexuality_id_fkey(label),
+            position:positions!profiles_position_id_fkey(label)
+          ),
           display_name,
           email,
           phone,
@@ -52,7 +61,10 @@ export async function GET(
             id,
             profile_title,
             avatar_url,
-            username
+            username,
+            date_of_birth,
+            sexuality:sexualities!profiles_sexuality_id_fkey(label),
+            position:positions!profiles_position_id_fkey(label)
           )
         )
       `

@@ -97,6 +97,17 @@ export default function ConversationPage() {
   const [loadingConnections, setLoadingConnections] = useState(false);
   const [contactError, setContactError] = useState<string | null>(null);
 
+  // Derive other user id from messages if missing (e.g., after refresh)
+  useEffect(() => {
+    if (otherUserId || !currentUserId) return;
+    const firstOther = messages.find(
+      (m) => m.sender_id && m.sender_id !== currentUserId
+    );
+    if (firstOther?.sender_id) {
+      setOtherUserId(firstOther.sender_id);
+    }
+  }, [messages, currentUserId, otherUserId]);
+
   // load initial messages + current user
   useEffect(() => {
     const load = async () => {
@@ -122,6 +133,13 @@ export default function ConversationPage() {
             (data.messages?.[0]?.profiles?.profile_title ?? null);
           const apiOtherId = data.other?.user_id ?? null;
           if (apiOtherId) setOtherUserId(apiOtherId);
+          else {
+            // derive other user id from messages list if possible
+            const firstOther = (data.messages as Message[] | undefined)?.find(
+              (m) => m.sender_id && m.sender_id !== user?.id
+            );
+            if (firstOther?.sender_id) setOtherUserId(firstOther.sender_id);
+          }
           if (apiName) {
             setParticipantName(apiName);
           }
@@ -371,7 +389,12 @@ export default function ConversationPage() {
               {contactConnectionId ? "View contact" : "Add contact"}
             </DropdownMenuItem>
             <DropdownMenuItem
-              disabled={loadingConnections || pinning || !otherUserId}
+              disabled={
+                loadingConnections ||
+                pinning ||
+                !otherUserId ||
+                Boolean(contactConnectionId)
+              }
               onSelect={(e) => {
                 e.preventDefault();
                 void handlePinToggle();

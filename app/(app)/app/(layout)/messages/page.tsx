@@ -40,6 +40,7 @@ import {
   EmptyContent,
 } from "@/components/ui/empty";
 import getAvatarProxyUrl from "@/lib/profiles/getAvatarProxyUrl";
+import { usePresence, toUiPresence } from "@/components/providers/presence-context";
 
 // -----------------------------------------------------------------------------
 // LOCAL MOCK
@@ -58,22 +59,8 @@ type DBConversation = {
   lastReceipt?: { delivered_at: string | null; read_at: string | null } | null;
   unreadCount?: number;
   presence?: "online" | "away" | "recent" | null;
+  secondary?: string | null;
 };
-
-// Map DB presence row -> UI presence value
-function toUiPresence(row?: {
-  status: string | null;
-  updated_at?: string | null;
-}): "online" | "away" | "recent" | null {
-  if (!row || !row.updated_at) return null;
-  const t = Date.parse(row.updated_at);
-  if (!Number.isFinite(t)) return null;
-  const minutes = (Date.now() - t) / 60000;
-  if (minutes > 60) return null; // long offline -> no dot
-  if (minutes > 5) return "recent"; // recently active -> grey dot
-  // <= 5 minutes: respect status online/away
-  return row.status === "away" ? "away" : "online";
-}
 
 // -----------------------------------------------------------------------------
 // REUSABLE ROW LAYOUT
@@ -238,16 +225,21 @@ export default function MessagesPage() {
     []
   );
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [connectionNames, setConnectionNames] = useState<
+    Record<string, { name?: string | null; profileTitle?: string | null }>
+  >({});
 
   const [rawRows, setRawRows] = useState<any[] | null>(null);
   const convoIdsRef = useRef<Set<string>>(new Set());
   const [showDebug, setShowDebug] = useState(false);
   // Ref mapping user_id -> conversation ids for 1:1
   const userToConvoRef = useRef<Record<string, string[]>>({});
+  const convoToOtherRef = useRef<Record<string, string | null>>({});
 
   // 👇 NEW: show what user the client thinks is logged in
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const currentUserIdRef = useRef<string | null>(null);
+  const { presence: presenceCtx } = usePresence();
   useEffect(() => {
     currentUserIdRef.current = currentUserId;
   }, [currentUserId]);
@@ -483,6 +475,7 @@ export default function MessagesPage() {
           const isGroup = members.length > 2;
 
           let name: string;
+          let secondary: string | null = null;
           let avatar: string | null = null;
           let presence: "online" | "away" | "recent" | null = null;
 
@@ -499,6 +492,13 @@ export default function MessagesPage() {
             const otherProfile = other ? profileById[other.user_id] : null;
             name =
               (otherProfile && otherProfile.profile_title) || "Unknown user";
+            const override = connectionNames[other?.user_id ?? ""];
+            if (override?.name) {
+              name = override.name || name;
+              secondary = override.profileTitle || null;
+            } else {
+              secondary = otherProfile?.profile_title || null;
+            }
             avatar = otherProfile?.avatar_url ?? null;
             presence =
               !isGroup && other
@@ -510,6 +510,7 @@ export default function MessagesPage() {
               if (!userToConvo[ouid]) userToConvo[ouid] = [];
               if (!userToConvo[ouid].includes(convoId))
                 userToConvo[ouid].push(convoId);
+              convoToOtherRef.current[convoId] = ouid;
             }
           }
 
@@ -556,11 +557,20 @@ export default function MessagesPage() {
             lastReceipt,
             unreadCount: unreadByConvo[convoId] ?? 0,
             presence: effectivePresence,
+            secondary,
           } as DBConversation;
         });
 
         setUserConversations(displayConvos);
         userToConvoRef.current = userToConvo;
+        // Build reverse map for overrides
+        const convToOther: Record<string, string | null> = {};
+        Object.entries(userToConvo).forEach(([uid, convs]) => {
+          convs.forEach((cid) => {
+            convToOther[cid] = uid;
+          });
+        });
+        convoToOtherRef.current = convToOther;
         initRealtime(convoIds);
         setLoadError(null);
         setLoading(false);
@@ -714,6 +724,81 @@ export default function MessagesPage() {
       } catch {}
     };
   }, []);
+
+  // Fetch connections to map nicknames/profile titles by profile id
+  useEffect(() => {
+    let active = true;
+    fetch("/api/connections")
+      .then((res) => res.json())
+      .then((body) => {
+        if (!active) return;
+        const map: Record<string, { name?: string | null; profileTitle?: string | null }> = {};
+        for (const conn of body?.connections ?? []) {
+          if (conn.type === "contact") {
+            const contact = Array.isArray(conn.connection_contacts)
+              ? conn.connection_contacts[0]
+              : conn.connection_contacts;
+            const pid = contact?.profile_id || contact?.profiles?.id;
+            if (pid) {
+              map[pid] = {
+                name: contact?.display_name || null,
+                profileTitle: contact?.profiles?.profile_title || null,
+              };
+            }
+          } else if (conn.type === "pin") {
+            const pin = Array.isArray(conn.connection_pins)
+              ? conn.connection_pins[0]
+              : conn.connection_pins;
+            const pid = pin?.pinned_profile_id || pin?.pinned_profile?.id;
+            if (pid) {
+              map[pid] = {
+                name: pin?.nickname || null,
+                profileTitle: pin?.pinned_profile?.profile_title || null,
+              };
+            }
+          }
+        }
+        setConnectionNames(map);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Apply connection nicknames after fetch
+  useEffect(() => {
+    const map = connectionNames;
+    if (!map || Object.keys(map).length === 0) return;
+    setUserConversations((prev) =>
+      prev.map((c) => {
+        const otherId = convoToOtherRef.current[c.id];
+        if (!otherId) return c;
+        const override = map[otherId];
+        if (!override) return c;
+        return {
+          ...c,
+          name: override.name || c.name,
+          secondary: override.profileTitle || c.secondary || null,
+        };
+      })
+    );
+  }, [connectionNames]);
+
+  // Apply presence updates from shared presence context
+  useEffect(() => {
+    if (!presenceCtx || Object.keys(presenceCtx).length === 0) return;
+    setUserConversations((prev) =>
+      prev.map((c) => {
+        const otherId = convoToOtherRef.current[c.id];
+        if (!otherId) return c;
+        const entry = presenceCtx[otherId];
+        if (!entry) return c;
+        const uiPresence = toUiPresence(entry as any);
+        return { ...c, presence: uiPresence };
+      })
+    );
+  }, [presenceCtx]);
 
   const hasNoConvos =
     !loading && userConversations.length === 0 && !loadError && !!currentUserId;
@@ -902,8 +987,15 @@ export default function MessagesPage() {
                       right={
                         <div className="min-w-0 grid grid-cols-[minmax(0,1fr)_auto] gap-x-3">
                           {/* Row 1: title + time (+ badge under time) */}
-                          <p className="col-start-1 truncate text-base font-semibold">
-                            {c.name}
+                          <p className="col-start-1 truncate text-base font-semibold max-w-[70vw] sm:max-w-[80vw]">
+                            <span className="truncate inline-block max-w-[55vw] align-middle">
+                              {c.name}
+                            </span>
+                            {c.secondary ? (
+                              <span className="pl-2 text-sm font-normal text-muted-foreground truncate inline-block max-w-[35vw] align-middle">
+                                {c.secondary}
+                              </span>
+                            ) : null}
                           </p>
                           <div className="col-start-2 row-start-1 text-right">
                             <div className="text-xs text-muted-foreground leading-none mt-0.5">

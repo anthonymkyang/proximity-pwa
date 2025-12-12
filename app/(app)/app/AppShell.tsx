@@ -7,17 +7,20 @@ import { usePathname } from "next/navigation";
 import MapCanvas from "@/components/map/MapCanvas";
 import AppBar from "@/components/nav/AppBar";
 import { Button } from "@/components/ui/button";
+import { PresenceProvider } from "@/components/providers/presence-context";
 
 /**
  * Presence strategy:
  * - Mark online on interaction and on mount.
  * - Heartbeat every 60s to bump last_seen.
- * - After 90s of no interaction, mark away.
+ * - After 5 minutes of no interaction, mark away.
+ * - After 10 minutes of no interaction, mark offline (and remove from map 10m after that).
  * - On pagehide/beforeunload, mark offline (sendBeacon or direct upsert).
  * Notes:
  * - Requires RLS policy to allow a user to upsert their own row in `user_presence`.
  */
-const IDLE_MS = 90_000; // inactivity -> away
+const IDLE_MS = 5 * 60 * 1000; // inactivity -> away (5m)
+const OFFLINE_MS = 10 * 60 * 1000; // inactivity -> offline (10m)
 const HEARTBEAT_MS = 60_000; // periodic heartbeat
 const MIN_WRITE_MS = 12_000; // throttle presence writes
 const SCROLL_FADE_THRESHOLD = 1;
@@ -37,11 +40,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const userIdRef = useRef<string | null>(null);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const offlineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const visibilityAwayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastWriteAtRef = useRef(0);
   const lastSentStatusRef = useRef<"online" | "away" | "offline" | null>(null);
   const isMountedRef = useRef(true);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [isScrolled, setIsScrolled] = useState(false);
+  const coordsRef = useRef<{ lat: number; lng: number } | null>(null);
+  const locationWatcherRef = useRef<number | null>(null);
+  const locationPushRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // --- presence write helpers ---
   const canWriteNow = () => Date.now() - lastWriteAtRef.current >= MIN_WRITE_MS;
@@ -61,7 +69,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         const res = await fetch("/api/presence", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: userId, status }),
+          body: JSON.stringify({
+            user_id: userId,
+            status,
+            lat: coordsRef.current?.lat,
+            lng: coordsRef.current?.lng,
+          }),
           // keepalive helps during rapid navigations (not for beforeunload)
           keepalive: true,
         });
@@ -83,13 +96,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const setOnline = useCallback(() => {
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    idleTimerRef.current = setTimeout(() => upsertPresence("away"), IDLE_MS);
+    idleTimerRef.current = setTimeout(() => setAway(), IDLE_MS);
+    if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
+    offlineTimerRef.current = setTimeout(() => void upsertPresence("offline"), OFFLINE_MS);
     void upsertPresence("online");
   }, [upsertPresence]);
 
   const setAway = useCallback(() => {
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     idleTimerRef.current = null;
+    if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
+    offlineTimerRef.current = setTimeout(() => void upsertPresence("offline"), OFFLINE_MS);
     void upsertPresence("away");
   }, [upsertPresence]);
 
@@ -144,8 +161,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       // Interactions set online and restart idle timer
       const onInteract = () => setOnline();
       const onVisibility = () => {
-        if (document.hidden) setAway();
-        else setOnline();
+        if (visibilityAwayRef.current) {
+          clearTimeout(visibilityAwayRef.current);
+          visibilityAwayRef.current = null;
+        }
+        if (document.hidden) {
+          visibilityAwayRef.current = setTimeout(() => {
+            setAway();
+          }, 2 * 60 * 1000); // 2 minute grace when tab/app hidden
+        } else {
+          setOnline();
+        }
       };
       const onPageHide = () => setOffline();
 
@@ -174,6 +200,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return () => {
       isMountedRef.current = false;
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
+      if (visibilityAwayRef.current) clearTimeout(visibilityAwayRef.current);
       if (heartbeatRef.current) clearInterval(heartbeatRef.current);
       if (unsubAuth) unsubAuth();
 
@@ -181,6 +209,43 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       void setOffline();
     };
   }, [setOnline, setAway, setOffline, upsertPresence, supabase]);
+
+  // location watcher and periodic coord push
+  useEffect(() => {
+    if (locationStatus !== "granted" || typeof navigator === "undefined") return;
+
+    if (navigator.geolocation) {
+      locationWatcherRef.current = navigator.geolocation.watchPosition(
+        (pos) => {
+          const { latitude, longitude } = pos.coords;
+          if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+            coordsRef.current = { lat: latitude, lng: longitude };
+            const status = lastSentStatusRef.current || "online";
+            void upsertPresence(status);
+          }
+        },
+        () => {},
+        { enableHighAccuracy: true, maximumAge: 30_000, timeout: 15_000 }
+      );
+    }
+
+    locationPushRef.current = setInterval(() => {
+      const status = lastSentStatusRef.current || "online";
+      void upsertPresence(status);
+    }, 120_000);
+
+    return () => {
+      if (locationPushRef.current) clearInterval(locationPushRef.current);
+      locationPushRef.current = null;
+      if (
+        locationWatcherRef.current != null &&
+        navigator.geolocation?.clearWatch
+      ) {
+        navigator.geolocation.clearWatch(locationWatcherRef.current);
+      }
+      locationWatcherRef.current = null;
+    };
+  }, [locationStatus, upsertPresence]);
 
   // --- request location before rendering ---
   useEffect(() => {
@@ -285,36 +350,38 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // --- existing UI shell (map + app bar + content) ---
   const appBarHeight = hideAppBar ? 0 : 72;
   return (
-    <div className="relative min-h-screen">
-      <div className="fixed inset-0 z-0">
-        <MapCanvas />
-      </div>
-      <div
-        className={`pointer-events-none fixed inset-x-0 top-0 z-10 h-24 bg-gradient-to-b from-background/90 to-transparent transition-opacity duration-300 ${
-          isScrolled ? "opacity-100" : "opacity-0"
-        }`}
-      />
-
-      <main
-        className={`relative flex min-h-screen flex-col overflow-hidden ${
-          isMapPage ? "bg-transparent pointer-events-none" : "bg-background"
-        }`}
-        style={{
-          paddingTop: "env(safe-area-inset-top, 0px)",
-          paddingBottom: "env(safe-area-inset-bottom, 0px)",
-        }}
-      >
-        <div
-          className={`flex-1 min-h-0 overflow-auto ${
-            isMapPage ? "pointer-events-none" : ""
-          }`}
-          ref={scrollRef}
-        >
-          {children}
+    <PresenceProvider>
+      <div className="relative min-h-screen">
+        <div className="fixed inset-0 z-0">
+          <MapCanvas />
         </div>
-      </main>
+        <div
+          className={`pointer-events-none fixed inset-x-0 top-0 z-10 h-24 bg-gradient-to-b from-background/90 to-transparent transition-opacity duration-300 ${
+            isScrolled ? "opacity-100" : "opacity-0"
+          }`}
+        />
 
-      {!hideAppBar && <AppBar />}
-    </div>
+        <main
+          className={`relative flex min-h-screen flex-col overflow-hidden ${
+            isMapPage ? "bg-transparent pointer-events-none" : "bg-background"
+          }`}
+          style={{
+            paddingTop: "env(safe-area-inset-top, 0px)",
+            paddingBottom: "env(safe-area-inset-bottom, 0px)",
+          }}
+        >
+          <div
+            className={`flex-1 min-h-0 overflow-auto ${
+              isMapPage ? "pointer-events-none" : ""
+            }`}
+            ref={scrollRef}
+          >
+            {children}
+          </div>
+        </main>
+
+        {!hideAppBar && <AppBar />}
+      </div>
+    </PresenceProvider>
   );
 }
