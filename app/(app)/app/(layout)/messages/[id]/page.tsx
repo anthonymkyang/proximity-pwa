@@ -119,15 +119,10 @@ export default function ConversationPage() {
   const typingSelfTimerRef = useRef<NodeJS.Timeout | null>(null);
   const typingTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
-  const [hasMore, setHasMore] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const listRef = useRef<HTMLDivElement | null>(null);
   const loadingOlderRef = useRef(false);
   const shouldAutoScrollRef = useRef(true);
-  const [visibleMessages, setVisibleMessages] = useState<Set<string>>(
-    new Set()
-  );
   const messageElsRef = useRef<Record<string, HTMLElement | null>>({});
 
   // Derive other user id from messages if missing (e.g., after refresh)
@@ -149,21 +144,6 @@ export default function ConversationPage() {
     messageIdsRef.current = new Set(messages.map((m) => m.id));
   }, [messages]);
 
-  // fade-in tracking: mark new messages visible shortly after render
-  useEffect(() => {
-    const currentIds = messages.map((m) => m.id);
-    const newIds = currentIds.filter((id) => !visibleMessages.has(id));
-    if (!newIds.length) return;
-    const timer = setTimeout(() => {
-      setVisibleMessages((prev) => {
-        const next = new Set(prev);
-        newIds.forEach((id) => next.add(id));
-        return next;
-      });
-    }, 20);
-    return () => clearTimeout(timer);
-  }, [messages, visibleMessages]);
-
   // load initial messages + current user (paged)
   useEffect(() => {
     const load = async () => {
@@ -178,7 +158,7 @@ export default function ConversationPage() {
         } = await supabase.current.auth.getUser();
         setCurrentUserId(user?.id ?? null);
 
-        const res = await fetch(`/api/messages/${conversationId}?limit=30`);
+        const res = await fetch(`/api/messages/${conversationId}`);
         const data = await res.json();
         if (res.ok) {
           shouldAutoScrollRef.current = true;
@@ -189,8 +169,6 @@ export default function ConversationPage() {
                 new Date(b.created_at).getTime()
             )
           );
-          setHasMore(Boolean(data?.has_more));
-
           const otherMsg = (data.messages as Message[] | undefined)?.find(
             (m) => m.sender_id && m.sender_id !== user?.id
           );
@@ -675,54 +653,6 @@ export default function ConversationPage() {
       ? participantProfileTitle
       : null;
 
-  const loadOlder = async () => {
-    if (loadingMore || !hasMore || !messages.length || !conversationId) return;
-    setLoadingMore(true);
-    loadingOlderRef.current = true;
-    shouldAutoScrollRef.current = false;
-    const first = messages[0];
-    const before = first?.created_at;
-    const container = listRef.current;
-    const firstEl = first ? messageElsRef.current[first.id] : null;
-    const prevScrollTop = container?.scrollTop ?? 0;
-    const containerTop = container?.getBoundingClientRect().top ?? 0;
-    const firstTop =
-      firstEl?.getBoundingClientRect().top != null
-        ? firstEl.getBoundingClientRect().top - containerTop
-        : null;
-    const prevHeight = container?.scrollHeight ?? 0;
-    try {
-      const res = await fetch(
-        `/api/messages/${conversationId}?limit=30${
-          before ? `&before=${encodeURIComponent(before)}` : ""
-        }`
-      );
-      const data = await res.json();
-      if (res.ok && Array.isArray(data.messages)) {
-        setHasMore(Boolean(data?.has_more));
-        setMessages((prev) => [...(data.messages as Message[]), ...prev]);
-        requestAnimationFrame(() => {
-          const c = listRef.current;
-          if (!c) return;
-          const sameFirst = first ? messageElsRef.current[first.id] : null;
-          if (sameFirst && firstTop != null) {
-            const newTop =
-              sameFirst.getBoundingClientRect().top - c.getBoundingClientRect().top;
-            const delta = newTop - firstTop;
-            c.scrollTop = prevScrollTop + delta;
-          } else {
-            const nextHeight = c.scrollHeight ?? 0;
-            c.scrollTop = nextHeight - (prevHeight - prevScrollTop);
-          }
-        });
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoadingMore(false);
-    }
-  };
-
   useEffect(() => {
     if (!conversationId) return;
     const ids = Array.from(messageIdsRef.current);
@@ -817,12 +747,12 @@ export default function ConversationPage() {
                   <AvatarFallback>{participantInitials}</AvatarFallback>
                 </Avatar>
                 <div className="leading-tight">
-              <div className="text-sm font-medium flex items-center gap-1 max-w-60">
-                <span className="truncate">{displayName || "Contact"}</span>
-                {secondaryName ? (
-                  <span className="text-xs text-muted-foreground truncate max-w-[140px]">
-                    {secondaryName}
-                  </span>
+                  <div className="text-sm font-medium flex items-center gap-1 max-w-60">
+                    <span className="truncate">{displayName || "Contact"}</span>
+                    {secondaryName ? (
+                      <span className="text-xs text-muted-foreground truncate max-w-[140px]">
+                        {secondaryName}
+                      </span>
                     ) : null}
                   </div>
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -896,11 +826,6 @@ export default function ConversationPage() {
       </div>
       <div
         ref={listRef}
-        onScroll={(e) => {
-          if ((e.currentTarget?.scrollTop ?? 0) <= 24) {
-            void loadOlder();
-          }
-        }}
         className={`relative flex-1 overflow-y-auto px-4 pt-4 space-y-3 ${
           typingUsers.size > 0 ? "pb-10" : "pb-2"
         } [&::-webkit-scrollbar]:hidden`}
@@ -931,16 +856,15 @@ export default function ConversationPage() {
         {messages.map((m) => {
           const isMe =
             currentUserId != null ? m.sender_id === currentUserId : false;
-          const isVisible = visibleMessages.has(m.id);
           return (
             <div
               key={m.id}
               ref={(el) => {
                 messageElsRef.current[m.id] = el;
               }}
-              className={`flex ${isMe ? "justify-end" : "justify-start"} transition-opacity duration-300 ease-out ${
-                isVisible ? "opacity-100" : "opacity-0"
-              }`}
+              className={`flex ${
+                isMe ? "justify-end" : "justify-start"
+              } transition-opacity duration-300 ease-out`}
             >
               <div
                 className={`rounded-lg px-3 py-2 max-w-[75%] sm:max-w-[65%] lg:max-w-[55%] ${
@@ -993,7 +917,10 @@ export default function ConversationPage() {
         <div ref={endRef} style={{ height: 0 }} />
       </div>
       <div className="bg-card/80 backdrop-blur px-3 py-2">
-        <InputGroup className="w-full border-0 bg-transparent shadow-none has-[[data-slot=input-group-control]:focus-visible]:ring-0 has-[[data-slot=input-group-control]:focus-visible]:border-0">
+        <InputGroup
+          className="w-full border-0 bg-transparent shadow-none has-[[data-slot=input-group-control]:focus-visible]:ring-0 has-[[data-slot=input-group-control]:focus-visible]:border-0 **:data-[slot=input-group-control]:bg-transparent **:data-[slot=input-group-control]:shadow-none **:data-[slot=input-group-control]:border-0"
+          style={{ background: "transparent" }}
+        >
           <InputGroupAddon align="inline-start" className="pl-1">
             <InputGroupButton
               size="icon-sm"
