@@ -750,7 +750,7 @@ export default function ConversationPage() {
       </div>
       <div
         className={`relative flex-1 overflow-y-auto px-4 pt-4 space-y-3 ${
-          typingUsers.size > 0 ? "pb-10" : "pb-4"
+          typingUsers.size > 0 ? "pb-10" : "pb-2"
         }`}
       >
         {messages.map((m) => {
@@ -804,7 +804,7 @@ export default function ConversationPage() {
               {[0, 1, 2].map((i) => (
                 <span
                   key={i}
-                  className="h-2 w-2 rounded-full bg-foreground/70 animate-bounce"
+                  className="h-1.5 w-1.5 rounded-full bg-foreground/70 animate-bounce"
                   style={{ animationDelay: `${i * 120}ms` }}
                 />
               ))}
