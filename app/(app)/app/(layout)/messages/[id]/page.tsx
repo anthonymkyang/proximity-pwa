@@ -76,6 +76,9 @@ export default function ConversationPage() {
   const [participantAvatar, setParticipantAvatar] = useState<string | null>(
     null
   );
+  const [participantProfileTitle, setParticipantProfileTitle] = useState<
+    string | null
+  >(null);
   const participantInitials = useMemo(() => {
     return (
       participantName
@@ -170,10 +173,19 @@ export default function ConversationPage() {
           );
           setHasMore(Boolean(data?.has_more));
 
-          const apiName =
-            data.other?.profile_title ??
+          const otherMsg = (data.messages as Message[] | undefined)?.find(
+            (m) => m.sender_id && m.sender_id !== user?.id
+          );
+          const fallbackTitle =
+            otherMsg?.profiles?.profile_title ??
             data.messages?.[0]?.profiles?.profile_title ??
             null;
+          const apiName =
+            data.other?.display_name ??
+            data.other?.profile_title ??
+            fallbackTitle ??
+            null;
+          const apiProfileTitle = data.other?.profile_title ?? fallbackTitle ?? null;
           const apiOtherId = data.other?.user_id ?? null;
           if (apiOtherId) setOtherUserId(apiOtherId);
           else {
@@ -183,13 +195,13 @@ export default function ConversationPage() {
             );
             if (firstOther?.sender_id) setOtherUserId(firstOther.sender_id);
           }
-          if (apiName) {
-            setParticipantName(apiName);
-          }
+          if (apiName) setParticipantName(apiName);
+          if (apiProfileTitle) setParticipantProfileTitle(apiProfileTitle);
           const rawAvatar =
             data.other?.avatar_url ??
-            data.messages?.find((m: Message) => m.profiles?.avatar_url)
-              ?.profiles?.avatar_url ??
+            (data.messages as Message[] | undefined)?.find(
+              (m) => m.sender_id !== user?.id && m.profiles?.avatar_url
+            )?.profiles?.avatar_url ??
             null;
           const proxied = getAvatarProxyUrl(rawAvatar);
           if (proxied) {
@@ -440,24 +452,38 @@ export default function ConversationPage() {
   useEffect(() => {
     if (!otherUserId) return;
     setLoadingConnections(true);
-    fetch(`/api/connections?target_profile_id=${otherUserId}`)
+    fetch(`/api/connections`)
       .then((res) => res.json())
       .then((body) => {
         const list = body?.connections ?? [];
-        const contact = list.find(
-          (c: any) =>
-            c.type === "contact" &&
-            (Array.isArray(c.connection_contacts)
-              ? c.connection_contacts[0]?.profile_id
-              : c.connection_contacts?.profile_id) === otherUserId
-        );
-        const pin = list.find(
-          (c: any) =>
-            c.type === "pin" &&
-            (Array.isArray(c.connection_pins)
-              ? c.connection_pins[0]?.pinned_profile_id
-              : c.connection_pins?.pinned_profile_id) === otherUserId
-        );
+        const contact = list.find((c: any) => {
+          if (c.type !== "contact") return false;
+          const rows = Array.isArray(c.connection_contacts)
+            ? c.connection_contacts
+            : [c.connection_contacts].filter(Boolean);
+          return rows.some((r: any) => {
+            const candidate =
+              r?.profile_id ??
+              r?.profiles?.id ??
+              c.target_profile_id ??
+              c.profile_id;
+            return candidate === otherUserId;
+          });
+        });
+        const pin = list.find((c: any) => {
+          if (c.type !== "pin") return false;
+          const rows = Array.isArray(c.connection_pins)
+            ? c.connection_pins
+            : [c.connection_pins].filter(Boolean);
+          return rows.some((r: any) => {
+            const candidate =
+              r?.pinned_profile_id ??
+              r?.pinned_profile?.id ??
+              c.target_profile_id ??
+              c.pinned_profile_id;
+            return candidate === otherUserId;
+          });
+        });
         setContactConnectionId(contact?.id ?? null);
         setPinConnectionId(pin?.id ?? null);
         if (contact) {
@@ -621,6 +647,13 @@ export default function ConversationPage() {
       .sort()
       .join(",");
   }, [messages]);
+  const displayName = (contactNickname?.trim() || participantName || "").trim();
+  const secondaryName =
+    contactNickname?.trim() && participantProfileTitle
+      ? participantProfileTitle
+      : participantProfileTitle && participantProfileTitle !== displayName
+      ? participantProfileTitle
+      : null;
 
   const loadOlder = async () => {
     if (loadingMore || !hasMore || !messages.length || !conversationId)
@@ -733,22 +766,41 @@ export default function ConversationPage() {
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
-          <div className="flex items-center gap-3">
-            <Avatar className="h-12 w-12">
-              <AvatarImage
-                alt={participantName}
-                src={participantAvatar ?? undefined}
-              />
-              <AvatarFallback>{participantInitials}</AvatarFallback>
-            </Avatar>
-            <div className="leading-tight">
-              <div className="text-sm font-medium">{participantName}</div>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span className="size-2 rounded-full bg-green-500" />
-                <span>Online</span>
+        <div className="flex items-center gap-3">
+          {initialLoading ? (
+            <>
+              <div className="h-12 w-12 rounded-full bg-muted animate-pulse" />
+              <div className="leading-tight space-y-1">
+                <div className="h-4 w-32 rounded bg-muted animate-pulse" />
+                <div className="h-3 w-24 rounded bg-muted/80 animate-pulse" />
               </div>
-            </div>
-          </div>
+            </>
+          ) : (
+            <>
+              <Avatar className="h-12 w-12">
+                <AvatarImage
+                  alt={participantName}
+                  src={participantAvatar ?? undefined}
+                />
+                <AvatarFallback>{participantInitials}</AvatarFallback>
+              </Avatar>
+              <div className="leading-tight">
+                <div className="text-sm font-medium flex items-center gap-1 max-w-[240px]">
+                  <span className="truncate">{displayName || "Contact"}</span>
+                  {secondaryName ? (
+                    <span className="text-xs text-muted-foreground truncate max-w-[140px]">
+                      {secondaryName}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="size-2 rounded-full bg-green-500" />
+                  <span>Online</span>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -767,9 +819,13 @@ export default function ConversationPage() {
               View profile
             </DropdownMenuItem>
             <DropdownMenuItem
-              disabled={loadingConnections}
+              disabled={loadingConnections && !contactConnectionId}
               onSelect={(e) => {
                 e.preventDefault();
+                if (contactConnectionId) {
+                  router.push(`/app/connections/${contactConnectionId}`);
+                  return;
+                }
                 setContactDrawerOpen(true);
                 if (!contactNickname && participantName) {
                   setContactNickname(participantName);
@@ -784,7 +840,7 @@ export default function ConversationPage() {
                 loadingConnections ||
                 pinning ||
                 !otherUserId ||
-                Boolean(contactConnectionId)
+                (Boolean(contactConnectionId) && !pinConnectionId)
               }
               onSelect={(e) => {
                 e.preventDefault();
@@ -792,7 +848,7 @@ export default function ConversationPage() {
               }}
             >
               <Pin className="h-4 w-4" />
-              {pinConnectionId ? "Unpin" : "Pin profile"}
+              {pinConnectionId ? "Unpin profile" : "Pin profile"}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive">

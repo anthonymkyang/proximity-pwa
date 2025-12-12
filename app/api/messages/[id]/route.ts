@@ -113,9 +113,10 @@ export async function GET(
   const others = memberIds.filter((id) => id !== user.id);
   const otherUserId = others.length === 1 ? others[0] : null;
 
-  // Fetch the other participant (with labels) and compute age
+  // Fetch the other participant (with labels) and compute age + nickname
   let otherMeta: {
     profile_title: string | null;
+    display_name?: string | null;
     avatar_url: string | null;
     age: number | null;
     sexuality: { label: string } | null;
@@ -132,6 +133,7 @@ export async function GET(
         profile_title,
         avatar_url,
         date_of_birth,
+        nickname,
         sexuality:sexualities!profiles_sexuality_id_fkey(label),
         position:positions!profiles_position_id_fkey(label)
       `
@@ -148,6 +150,7 @@ export async function GET(
         .maybeSingle();
       otherMeta = {
         profile_title: (other as any).profile_title ?? null,
+        display_name: (other as any).nickname ?? null,
         avatar_url: (other as any).avatar_url ?? null,
         age: age ?? null,
         sexuality: (other as any).sexuality?.label
