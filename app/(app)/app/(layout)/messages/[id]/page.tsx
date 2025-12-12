@@ -13,6 +13,8 @@ import {
   Pin,
   Shield,
   Flag,
+  Check,
+  CheckCheck,
 } from "lucide-react";
 import {
   InputGroup,
@@ -45,6 +47,8 @@ type Message = {
   body: string;
   sender_id: string;
   created_at: string;
+  delivered_at?: string | null;
+  read_at?: string | null;
   profiles?: {
     profile_title?: string | null;
     avatar_url?: string | null;
@@ -96,6 +100,15 @@ export default function ConversationPage() {
   const [pinning, setPinning] = useState(false);
   const [loadingConnections, setLoadingConnections] = useState(false);
   const [contactError, setContactError] = useState<string | null>(null);
+  const messageIdsRef = useRef<Set<string>>(new Set());
+  const currentUserIdRef = useRef<string | null>(null);
+  const pendingReceiptsRef = useRef<
+    Record<string, { delivered_at: string | null; read_at: string | null }>
+  >({});
+  const receiptsChannelRef = useRef<ReturnType<
+    ReturnType<typeof createClient>["channel"]
+  > | null>(null);
+  const deliveryAttemptRef = useRef<Set<string>>(new Set());
 
   // Derive other user id from messages if missing (e.g., after refresh)
   useEffect(() => {
@@ -107,6 +120,14 @@ export default function ConversationPage() {
       setOtherUserId(firstOther.sender_id);
     }
   }, [messages, currentUserId, otherUserId]);
+
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId;
+  }, [currentUserId]);
+
+  useEffect(() => {
+    messageIdsRef.current = new Set(messages.map((m) => m.id));
+  }, [messages]);
 
   // load initial messages + current user
   useEffect(() => {
@@ -130,7 +151,8 @@ export default function ConversationPage() {
           );
           const apiName =
             data.other?.profile_title ??
-            (data.messages?.[0]?.profiles?.profile_title ?? null);
+            data.messages?.[0]?.profiles?.profile_title ??
+            null;
           const apiOtherId = data.other?.user_id ?? null;
           if (apiOtherId) setOtherUserId(apiOtherId);
           else {
@@ -175,9 +197,18 @@ export default function ConversationPage() {
         },
         (payload: any) => {
           const msg = payload.new as Message;
+          const pending = pendingReceiptsRef.current[msg.id];
+          const msgWithReceipts = pending
+            ? {
+                ...msg,
+                delivered_at:
+                  pending.delivered_at ?? (msg as any).delivered_at ?? null,
+                read_at: pending.read_at ?? (msg as any).read_at ?? null,
+              }
+            : msg;
           setMessages((prev) => {
             if (prev.some((m) => m.id === msg.id)) return prev;
-            return [...prev, msg].sort(
+            return [...prev, msgWithReceipts].sort(
               (a, b) =>
                 new Date(a.created_at).getTime() -
                 new Date(b.created_at).getTime()
@@ -185,6 +216,67 @@ export default function ConversationPage() {
           });
         }
       );
+    channel.on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "message_receipts",
+      },
+      (payload: any) => {
+        const rec = (payload.new ?? payload.old) as {
+          message_id?: string;
+          delivered_at?: string | null;
+          read_at?: string | null;
+          user_id?: string | null;
+        };
+        const msgId = rec?.message_id;
+        if (!msgId) return;
+
+        const applyUpdate = () => {
+          let updated = false;
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id !== msgId) return m;
+              const isMine =
+                currentUserIdRef.current != null &&
+                m.sender_id === currentUserIdRef.current;
+              if (isMine && rec.user_id === currentUserIdRef.current) return m;
+              updated = true;
+              return {
+                ...m,
+                delivered_at: rec.delivered_at ?? m.delivered_at ?? null,
+                read_at: rec.read_at ?? m.read_at ?? null,
+              };
+            })
+          );
+          return updated;
+        };
+
+        // Try updating in-memory message regardless of cached id set
+        const didUpdate = applyUpdate();
+        if (didUpdate) return;
+
+        // Otherwise, fetch the message to ensure it belongs to this conversation, then cache the receipt
+        supabase.current
+          .from("messages")
+          .select("id, conversation_id")
+          .eq("id", msgId)
+          .maybeSingle()
+          .then(({ data }) => {
+            if (data?.conversation_id !== conversationId) return;
+            pendingReceiptsRef.current[msgId] = {
+              delivered_at: rec.delivered_at ?? null,
+              read_at: rec.read_at ?? null,
+            };
+            // Attempt to re-apply in case the message is now present
+            applyUpdate();
+          })
+          .catch(() => {
+            // ignore
+          });
+      }
+    );
     channel.subscribe();
     return () => {
       try {
@@ -240,7 +332,9 @@ export default function ConversationPage() {
     setPinning(true);
     try {
       if (pinConnectionId) {
-        await fetch(`/api/connections/${pinConnectionId}`, { method: "DELETE" });
+        await fetch(`/api/connections/${pinConnectionId}`, {
+          method: "DELETE",
+        });
         setPinConnectionId(null);
       } else {
         const res = await fetch("/api/connections", {
@@ -276,16 +370,16 @@ export default function ConversationPage() {
         const contact = list.find(
           (c: any) =>
             c.type === "contact" &&
-            ((Array.isArray(c.connection_contacts)
+            (Array.isArray(c.connection_contacts)
               ? c.connection_contacts[0]?.profile_id
-              : c.connection_contacts?.profile_id) === otherUserId)
+              : c.connection_contacts?.profile_id) === otherUserId
         );
         const pin = list.find(
           (c: any) =>
             c.type === "pin" &&
-            ((Array.isArray(c.connection_pins)
+            (Array.isArray(c.connection_pins)
               ? c.connection_pins[0]?.pinned_profile_id
-              : c.connection_pins?.pinned_profile_id) === otherUserId)
+              : c.connection_pins?.pinned_profile_id) === otherUserId
         );
         setContactConnectionId(contact?.id ?? null);
         setPinConnectionId(pin?.id ?? null);
@@ -293,7 +387,9 @@ export default function ConversationPage() {
           const detail = Array.isArray(contact.connection_contacts)
             ? contact.connection_contacts[0]
             : contact.connection_contacts;
-          setContactNickname((prev) => detail?.display_name || prev || participantName);
+          setContactNickname(
+            (prev) => detail?.display_name || prev || participantName
+          );
           const meta = detail?.metadata || {};
           setContactWhatsApp(meta.whatsapp || "");
           setContactTelegram(meta.telegram || "");
@@ -327,7 +423,140 @@ export default function ConversationPage() {
     // noop route protection; keep simple
   }, [conversationId, messages.length]);
 
+  useEffect(() => {
+    if (!conversationId || !currentUserId) return;
+    const hasUnreadFromOthers = messages.some(
+      (m) => m.sender_id !== currentUserId && !m.read_at
+    );
+    if (!hasUnreadFromOthers) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      fetch(`/api/messages/${conversationId}`, {
+        method: "PATCH",
+        signal: controller.signal,
+      }).catch(() => {
+        // ignore
+      });
+    }, 300);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [conversationId, currentUserId, messages]);
+
+  // For newly received messages, immediately upsert delivered receipts while viewing the thread
+  useEffect(() => {
+    if (!currentUserId || !messages.length) return;
+    const now = new Date().toISOString();
+    const rows = messages
+      .filter(
+        (m) =>
+          m.sender_id !== currentUserId &&
+          !m.delivered_at &&
+          !deliveryAttemptRef.current.has(m.id)
+      )
+      .map((m) => ({
+        message_id: m.id,
+        user_id: currentUserId,
+        delivered_at: now,
+      }));
+    if (!rows.length) return;
+    rows.forEach((r) => deliveryAttemptRef.current.add(r.message_id));
+
+    supabase.current
+      .from("message_receipts")
+      .upsert(rows, { onConflict: "message_id,user_id" })
+      .then(({ error }) => {
+        if (error) return;
+        const deliveredMap = rows.reduce<Record<string, string>>((acc, r) => {
+          acc[r.message_id] = r.delivered_at ?? now;
+          return acc;
+        }, {});
+        setMessages((prev) =>
+          prev.map((m) =>
+            deliveredMap[m.id]
+              ? { ...m, delivered_at: m.delivered_at ?? deliveredMap[m.id] }
+              : m
+          )
+        );
+      })
+      .catch(() => {
+        // ignore
+      });
+  }, [currentUserId, messages]);
+
   const hasText = newMessage.trim().length > 0;
+  const receiptIdsKey = useMemo(() => {
+    return messages
+      .map((m) => m.id)
+      .filter(Boolean)
+      .sort()
+      .join(",");
+  }, [messages]);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    const ids = Array.from(messageIdsRef.current);
+    if (!ids.length) return;
+
+    const filter = `message_id=in.(${ids
+      .map((id) => `"${id}"`)
+      .join(",")})`;
+
+    const channel = supabase.current.channel(
+      `receipts:${conversationId}:${ids.length}`
+    );
+
+    const handleReceipt = (payload: any) => {
+      const rec = (payload.new ?? payload.old) as {
+        message_id?: string;
+        delivered_at?: string | null;
+        read_at?: string | null;
+        user_id?: string | null;
+      };
+      const msgId = rec?.message_id;
+      if (!msgId) return;
+
+      let updated = false;
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (m.id !== msgId) return m;
+          const isMine =
+            currentUserIdRef.current != null &&
+            m.sender_id === currentUserIdRef.current;
+          if (isMine && rec.user_id === currentUserIdRef.current) return m;
+          updated = true;
+          return {
+            ...m,
+            delivered_at: rec.delivered_at ?? m.delivered_at ?? null,
+            read_at: rec.read_at ?? m.read_at ?? null,
+          };
+        })
+      );
+      if (updated) return;
+      pendingReceiptsRef.current[msgId] = {
+        delivered_at: rec.delivered_at ?? null,
+        read_at: rec.read_at ?? null,
+      };
+    };
+
+    channel.on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "message_receipts", filter },
+      handleReceipt
+    );
+    channel.subscribe();
+    receiptsChannelRef.current = channel;
+
+    return () => {
+      try {
+        if (receiptsChannelRef.current) {
+          supabase.current.removeChannel(receiptsChannelRef.current);
+        }
+      } catch {}
+      receiptsChannelRef.current = null;
+    };
+  }, [conversationId, receiptIdsKey]);
 
   return (
     <div className="h-svh min-h-svh bg-background text-foreground flex flex-col">
@@ -435,15 +664,26 @@ export default function ConversationPage() {
                   {m.body}
                 </p>
                 <div
-                  className={`mt-1 text-xs ${
-                    isMe ? "text-blue-100" : "text-muted-foreground"
+                  className={`mt-1 text-xs flex items-center gap-1 ${
+                    isMe
+                      ? "text-blue-100 justify-end"
+                      : "text-muted-foreground"
                   }`}
                 >
-                  {new Date(m.created_at).toLocaleTimeString(undefined, {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    hour12: false,
-                  })}
+                  <span>
+                    {new Date(m.created_at).toLocaleTimeString(undefined, {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      hour12: false,
+                    })}
+                  </span>
+                  {isMe ? (
+                    m.read_at ? (
+                      <CheckCheck className="h-3.5 w-3.5 text-white" />
+                    ) : m.delivered_at ? (
+                      <Check className="h-3.5 w-3.5" />
+                    ) : null
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -498,7 +738,9 @@ export default function ConversationPage() {
       <Drawer open={contactDrawerOpen} onOpenChange={setContactDrawerOpen}>
         <DrawerContent>
           <DrawerHeader>
-            <DrawerTitle>{contactConnectionId ? "View contact" : "Add contact"}</DrawerTitle>
+            <DrawerTitle>
+              {contactConnectionId ? "View contact" : "Add contact"}
+            </DrawerTitle>
             <DrawerDescription>
               Save their details so you can find them later.
             </DrawerDescription>
@@ -546,7 +788,11 @@ export default function ConversationPage() {
                 onClick={() => void createContact()}
                 disabled={savingContact || !otherUserId}
               >
-                {savingContact ? "Saving..." : contactConnectionId ? "Update" : "Save contact"}
+                {savingContact
+                  ? "Saving..."
+                  : contactConnectionId
+                  ? "Update"
+                  : "Save contact"}
               </Button>
             </div>
           </div>

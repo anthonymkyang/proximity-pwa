@@ -52,6 +52,7 @@ type DBConversation = {
   id: string;
   name: string;
   lastMessage: string | null;
+  lastMessageId?: string | null;
   avatar?: string | null;
   updated_at?: string | null;
   lastMessageAt?: string | null;
@@ -235,6 +236,8 @@ export default function MessagesPage() {
   // Ref mapping user_id -> conversation ids for 1:1
   const userToConvoRef = useRef<Record<string, string[]>>({});
   const convoToOtherRef = useRef<Record<string, string | null>>({});
+  const messageToConvoRef = useRef<Record<string, string>>({});
+  const messageSenderRef = useRef<Record<string, string>>({});
 
   // 👇 NEW: show what user the client thinks is logged in
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -309,6 +312,10 @@ export default function MessagesPage() {
         }
         const latestByConvo: Record<string, any> = {};
         for (const m of msgs ?? []) {
+          if (m?.id && m?.conversation_id) {
+            messageToConvoRef.current[m.id] = m.conversation_id;
+            if (m.sender_id) messageSenderRef.current[m.id] = m.sender_id;
+          }
           if (!latestByConvo[m.conversation_id])
             latestByConvo[m.conversation_id] = m;
         }
@@ -551,6 +558,7 @@ export default function MessagesPage() {
             name,
             avatar,
             lastMessage,
+            lastMessageId: latest?.id ?? null,
             updated_at: lastMessageAt ?? myRow?.joined_at ?? null,
             lastMessageAt,
             lastMessageSenderId,
@@ -609,6 +617,10 @@ export default function MessagesPage() {
             created_at: string;
           };
           if (!convoIdsRef.current.has(m.conversation_id)) return;
+          if (m.id) {
+            messageToConvoRef.current[m.id] = m.conversation_id;
+            if (m.sender_id) messageSenderRef.current[m.id] = m.sender_id;
+          }
 
           setUserConversations((prev) => {
             const next = prev.map((c) => {
@@ -622,6 +634,7 @@ export default function MessagesPage() {
               return {
                 ...c,
                 lastMessage: m.body,
+                lastMessageId: m.id,
                 lastMessageAt: m.created_at,
                 lastMessageSenderId: m.sender_id,
                 updated_at: m.created_at,
@@ -640,37 +653,72 @@ export default function MessagesPage() {
         }
       );
 
-      // Message receipts for your last sent message in 1:1
+      // Message receipts (delivered/read) realtime
       channel.on(
         "postgres_changes",
         { event: "*", schema: "public", table: "message_receipts" },
         async (payload: any) => {
-          const r = payload.new as {
-            message_id: string;
-            user_id: string;
-            delivered_at: string | null;
-            read_at: string | null;
+          const r = (payload.new ?? payload.old) as {
+            message_id?: string;
+            user_id?: string;
+            delivered_at?: string | null;
+            read_at?: string | null;
           };
-          if (r.user_id !== currentUserIdRef.current || !r.read_at) return;
-          try {
-            const supa = createClient();
-            const { data: msgRow } = await supa
-              .from("messages")
-              .select("conversation_id, sender_id")
-              .eq("id", r.message_id)
-              .maybeSingle();
-            if (!msgRow) return;
+          const msgId = r?.message_id;
+          if (!msgId) return;
+
+          // Map message -> conversation (lookup, fetch if missing)
+          let convoId = messageToConvoRef.current[msgId];
+          let senderId = messageSenderRef.current[msgId];
+          if (!convoId || !senderId) {
+            try {
+              const supa = createClient();
+              const { data: msgRow } = await supa
+                .from("messages")
+                .select("conversation_id, sender_id")
+                .eq("id", msgId)
+                .maybeSingle();
+              if (msgRow?.conversation_id) {
+                convoId = msgRow.conversation_id;
+                messageToConvoRef.current[msgId] = convoId;
+              }
+              if (msgRow?.sender_id) {
+                senderId = msgRow.sender_id;
+                messageSenderRef.current[msgId] = senderId;
+              }
+            } catch {
+              // ignore
+            }
+          }
+          if (!convoId) return;
+
+          // 1) If this receipt is for a message from the current user, update lastReceipt markers when it is the latest message
+          if (senderId === currentUserIdRef.current) {
             setUserConversations((prev) =>
               prev.map((c) => {
-                if (c.id !== msgRow.conversation_id) return c;
-                // Only decrement unread for messages that were from the other user
-                const fromOther = msgRow.sender_id !== currentUserIdRef.current;
-                if (!fromOther) return c;
+                if (c.id !== convoId) return c;
+                if (!c.lastMessageId || c.lastMessageId !== msgId) return c;
+                const nextReceipt = {
+                  delivered_at: r.delivered_at ?? c.lastReceipt?.delivered_at ?? null,
+                  read_at: r.read_at ?? c.lastReceipt?.read_at ?? null,
+                };
+                return { ...c, lastReceipt: nextReceipt };
+              })
+            );
+          }
+
+          // 2) If this receipt is from the current user reading others' messages, decrement unread
+          if (r.user_id === currentUserIdRef.current && r.read_at) {
+            setUserConversations((prev) =>
+              prev.map((c) => {
+                if (c.id !== convoId) return c;
+                // only decrement when the message was from the other user
+                if (senderId === currentUserIdRef.current) return c;
                 const nextUnread = Math.max(0, (c.unreadCount ?? 0) - 1);
                 return { ...c, unreadCount: nextUnread };
               })
             );
-          } catch {}
+          }
         }
       );
 
@@ -1009,9 +1057,9 @@ export default function MessagesPage() {
                           <div className="col-start-2 row-start-2 mt-0.5 leading-tight flex items-center justify-end">
                             {typeof c.unreadCount === "number" &&
                             c.unreadCount > 0 ? (
-                              <Badge className="px-2 py-0.5 text-[10px] rounded-full">
+                              <span className="inline-flex min-w-[22px] items-center justify-center rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground">
                                 {c.unreadCount}
-                              </Badge>
+                              </span>
                             ) : c.lastMessageSenderId === currentUserId ? (
                               c.lastReceipt?.read_at ? (
                                 <CheckCheck
