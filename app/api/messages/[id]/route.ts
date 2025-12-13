@@ -274,8 +274,39 @@ export async function GET(
     };
   });
 
+  // 4) Reactions: gather per-message counts + caller's reaction
+  let enrichedWithReactions = enriched;
+  if (enriched.length) {
+    const ids = enriched.map((m: any) => m.id);
+    const { data: reactions } = await supabase
+      .from("message_reactions")
+      .select("message_id, user_id, type")
+      .in("message_id", ids);
+
+    const countsByMsg: Record<string, Record<string, number>> = {};
+    const myReactionByMsg: Record<string, string> = {};
+
+    reactions?.forEach((r) => {
+      const mid = (r as any).message_id;
+      const type = (r as any).type;
+      const uid = (r as any).user_id;
+      if (!mid || !type) return;
+      if (!countsByMsg[mid]) countsByMsg[mid] = {};
+      countsByMsg[mid][type] = (countsByMsg[mid][type] || 0) + 1;
+      if (uid === user.id) {
+        myReactionByMsg[mid] = type;
+      }
+    });
+
+    enrichedWithReactions = enriched.map((m) => ({
+      ...m,
+      my_reaction: myReactionByMsg[m.id] ?? null,
+      reaction_counts: countsByMsg[m.id] ?? {},
+    }));
+  }
+
   return NextResponse.json(
-    { messages: enriched, other: otherMeta ?? null, hasMore },
+    { messages: enrichedWithReactions, other: otherMeta ?? null, hasMore },
     { status: 200 }
   );
 }
