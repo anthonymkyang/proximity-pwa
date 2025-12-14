@@ -27,6 +27,7 @@ import {
   Info,
   Languages,
   Trash2,
+  X,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -124,6 +125,7 @@ export default function ConversationPage() {
   const supabase = useRef(createClient());
   const endRef = useRef<HTMLDivElement | null>(null);
   const reactionMenuRef = useRef<HTMLDivElement | null>(null);
+  const actionMenuRef = useRef<HTMLDivElement | null>(null);
   const convoChannelRef = useRef<ReturnType<
     ReturnType<typeof createClient>["channel"]
   > | null>(null);
@@ -207,9 +209,10 @@ export default function ConversationPage() {
   const prevHeightRef = useRef<number | null>(null);
   const prevScrollTopRef = useRef<number | null>(null);
   const pendingPrependAdjustRef = useRef(false);
-  const focusedMessageId: string | null = null;
-  const setFocusedMessageId = (_id: string | null) => {};
-  const focusedOffset = 0;
+  const [focusedMessageId, setFocusedMessageId] = useState<string | null>(null);
+  const [focusedMessageRect, setFocusedMessageRect] = useState<DOMRect | null>(
+    null
+  );
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const longPressTargetRef = useRef<string | null>(null);
@@ -252,11 +255,20 @@ export default function ConversationPage() {
   }, []);
 
   const startLongPress = useCallback((id: string) => {
+    console.log("startLongPress called for message:", id);
     if (longPressTimerRef.current) {
       clearTimeout(longPressTimerRef.current);
     }
     longPressTargetRef.current = id;
     longPressTimerRef.current = setTimeout(() => {
+      console.log("Long press timer fired for message:", id);
+      const messageEl = messageElsRef.current[id];
+      if (messageEl) {
+        const rect = messageEl.getBoundingClientRect();
+        setFocusedMessageRect(rect);
+        setFocusedMessageId(id);
+      }
+      console.log("Setting reactionTargetId to:", id);
       setReactionTargetId(id);
       longPressTargetRef.current = null;
       longPressTimerRef.current = null;
@@ -333,9 +345,14 @@ export default function ConversationPage() {
   useEffect(() => {
     if (!reactionTargetId) return;
     const handleOutside = (e: Event) => {
-      const el = reactionMenuRef.current;
-      if (el && el.contains(e.target as Node)) return;
+      const reactionEl = reactionMenuRef.current;
+      const actionEl = actionMenuRef.current;
+      // Don't close if clicking inside either menu
+      if (reactionEl && reactionEl.contains(e.target as Node)) return;
+      if (actionEl && actionEl.contains(e.target as Node)) return;
       setReactionTargetId(null);
+      setFocusedMessageId(null);
+      setFocusedMessageRect(null);
       cancelLongPress();
     };
     document.addEventListener("pointerdown", handleOutside, true);
@@ -347,6 +364,42 @@ export default function ConversationPage() {
   useEffect(() => {
     messageIdsRef.current = new Set(messages.map((m) => m.id));
   }, [messages]);
+
+  // Fetch new messages when user returns to tab
+  useEffect(() => {
+    if (!conversationId) return;
+
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible') {
+        console.log("Tab became visible, fetching new messages");
+        try {
+          const res = await fetch(`/api/messages/${conversationId}?limit=30`);
+          const data = await res.json();
+          if (res.ok && data.messages) {
+            const incoming = ((data.messages as Message[]) ?? [])
+              .filter((m) => !messageIdsRef.current.has(m.id))
+              .map((m) =>
+                normalizeMessage({
+                  ...m,
+                  conversation_id: m.conversation_id ?? conversationId ?? undefined,
+                })
+              );
+
+            if (incoming.length > 0) {
+              console.log(`Found ${incoming.length} new messages while tab was hidden`);
+              setMessages((prev) => sortUniqueMessages([...prev, ...incoming]));
+              shouldAutoScrollRef.current = true;
+            }
+          }
+        } catch (err) {
+          console.error("Failed to fetch messages on visibility change:", err);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [conversationId]);
 
   useEffect(() => {
     setVisibleMessages(new Set());
@@ -493,18 +546,22 @@ export default function ConversationPage() {
           filter: `conversation_id=eq.${conversationId}`,
         },
         (payload: any) => {
+          console.log("Realtime INSERT event:", payload.new);
           const msg = payload.new as Message;
           const isMine =
             currentUserIdRef.current != null &&
             msg.sender_id === currentUserIdRef.current;
+          console.log("isMine:", isMine, "pendingReplyRef.current:", pendingReplyRef.current);
+          // Apply pending reply data if this is our message and we have reply metadata
           if (
             isMine &&
-            !msg.reply_to_id &&
             pendingReplyRef.current &&
             msg.id &&
             !messageIdsRef.current.has(msg.id)
           ) {
+            console.log("Applying pendingReplyRef to message:", msg.id);
             Object.assign(msg, pendingReplyRef.current);
+            console.log("Message after applying reply data:", msg);
             pendingReplyRef.current = null;
           }
           const pending = pendingReceiptsRef.current[msg.id];
@@ -800,6 +857,7 @@ export default function ConversationPage() {
     const text = newMessage.trim();
     if (!text || !conversationId) return;
     setNewMessage("");
+    console.log("handleSend - replyTarget:", replyTarget);
     const replyMeta = replyTarget
       ? {
           reply_to_id: replyTarget.id,
@@ -807,7 +865,9 @@ export default function ConversationPage() {
           reply_to_sender_id: replyTarget.sender_id,
         }
       : { reply_to_id: null, reply_to_body: null, reply_to_sender_id: null };
+    console.log("handleSend - replyMeta:", replyMeta);
     pendingReplyRef.current = replyMeta;
+    console.log("handleSend - pendingReplyRef.current:", pendingReplyRef.current);
     setReplyTarget(null);
     shouldAutoScrollRef.current = true;
     if (typingBroadcastedRef.current) {
@@ -819,13 +879,17 @@ export default function ConversationPage() {
       }
     }
     try {
-      await fetch(`/api/messages/${conversationId}`, {
+      const payload = { body: text, ...replyMeta };
+      console.log("Sending message with payload:", payload);
+      const res = await fetch(`/api/messages/${conversationId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: text, ...replyMeta }),
+        body: JSON.stringify(payload),
       });
-    } catch {
-      // ignore
+      const data = await res.json();
+      console.log("Message API response:", data);
+    } catch (err) {
+      console.error("Send message error:", err);
     }
   };
 
@@ -919,6 +983,7 @@ export default function ConversationPage() {
       action: "reply" | "copy" | "info" | "translate" | "delete",
       msg?: Message
     ) => {
+      console.log("handleMessageAction called:", { action, msg });
       if (action === "copy" && msg?.body) {
         const didCopy = await copyToClipboard(msg.body);
         if (didCopy) {
@@ -932,10 +997,12 @@ export default function ConversationPage() {
           }, 1500);
         }
       } else if (action === "reply" && msg) {
+        console.log("Setting replyTarget to:", msg);
         setReplyTarget(msg);
       }
       // TODO: wire reply/info/translate/delete if needed
       setFocusedMessageId(null);
+      setFocusedMessageRect(null);
     },
     [copyToClipboard]
   );
@@ -955,6 +1022,8 @@ export default function ConversationPage() {
       const prev = message.my_reaction ?? null;
       const next = prev === type ? null : type;
       setReactionTargetId(null);
+      setFocusedMessageId(null);
+      setFocusedMessageRect(null);
 
       // Trigger floating animation when adding a reaction (not removing)
       if (next !== null) {
@@ -1284,6 +1353,20 @@ export default function ConversationPage() {
           }
         }
       `}</style>
+      {focusedMessageId && (
+        <div
+          className="fixed inset-0 z-40 transition-all duration-300"
+          style={{
+            backgroundColor: "rgba(0, 0, 0, 0.6)",
+            backdropFilter: "blur(8px)",
+          }}
+          onClick={() => {
+            setReactionTargetId(null);
+            setFocusedMessageId(null);
+            setFocusedMessageRect(null);
+          }}
+        />
+      )}
       <div className="bg-background/60 supports-backdrop-filter:bg-background/50 backdrop-blur-md px-3 py-2 flex items-center justify-between gap-3 border-none">
         <div className="flex items-center gap-3">
           <Button
@@ -1459,7 +1542,25 @@ export default function ConversationPage() {
             0
           );
           const showPicker = reactionTargetId === m.id;
+          const isFocused = focusedMessageId === m.id;
           const myReaction = m.my_reaction ?? null;
+
+          // Calculate centered position when focused
+          const messageStyle: React.CSSProperties = {};
+          if (isFocused && focusedMessageRect) {
+            const viewportHeight = window.innerHeight;
+            const viewportCenterY = viewportHeight / 2;
+            const messageHeight = focusedMessageRect.height;
+            const targetTop = viewportCenterY - messageHeight / 2;
+            const translateY = targetTop - focusedMessageRect.top;
+
+            Object.assign(messageStyle, {
+              transform: `translateY(${translateY}px)`,
+              zIndex: 50,
+              transition: "transform 300ms ease-out",
+            });
+          }
+
           const reactionChip = reactionEntries.length ? (
             <div
               className="inline-flex items-center gap-1 rounded-full bg-transparent px-0 py-0 text-[12px] text-current"
@@ -1499,23 +1600,25 @@ export default function ConversationPage() {
               }}
               className={`relative flex ${
                 isMe ? "justify-end" : "justify-start"
-              } transition-all duration-300 ease-out ${
+              } ${!isFocused ? "transition-all duration-300 ease-out" : ""} ${
                 isVisible
                   ? "opacity-100 translate-y-0"
                   : "opacity-0 translate-y-1"
               }`}
+              style={isFocused ? messageStyle : undefined}
               data-message-id={m.id}
             >
-              {showPicker ? (
-                <div
-                  className={`absolute top-0 z-20 ${
-                    isMe ? "right-0" : "left-0"
-                  }`}
-                  ref={reactionMenuRef}
-                  onClick={(e) => e.stopPropagation()}
-                  style={{ transform: "translateY(calc(-100% - 8px))" }}
-                >
-                  <div className="flex items-center gap-1 rounded-full border bg-background/95 px-2 py-1 shadow-lg backdrop-blur pointer-events-auto">
+              {showPicker && (
+                <>
+                  <div
+                    className={`absolute top-0 z-50 ${
+                      isMe ? "right-0" : "left-0"
+                    }`}
+                    ref={reactionMenuRef}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ transform: "translateY(calc(-100% - 8px))" }}
+                  >
+                    <div className="flex items-center gap-1 rounded-full border bg-background/95 px-2 py-1 shadow-lg backdrop-blur pointer-events-auto">
                     {REACTIONS.map((r, idx) => {
                       const isActive = myReaction === r.type;
                       return (
@@ -1567,9 +1670,63 @@ export default function ConversationPage() {
                       );
                     })}
                   </div>
-                </div>
-              ) : null}
-                {floatingReactions
+                  </div>
+                  <div
+                    className={`absolute bottom-0 z-50 ${
+                      isMe ? "right-0" : "left-0"
+                    }`}
+                    ref={actionMenuRef}
+                    style={{ transform: "translateY(calc(100% + 8px))" }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="rounded-lg border bg-background/95 shadow-lg backdrop-blur min-w-[180px]">
+                      <div className="py-1">
+                        <button
+                          className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            console.log("Reply button clicked for message:", m.id);
+                            handleMessageAction("reply", m);
+                          }}
+                        >
+                          <Reply className="h-4 w-4" />
+                          Reply
+                        </button>
+                        <button
+                          className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
+                          onClick={() => handleMessageAction("copy", m)}
+                        >
+                          <Copy className="h-4 w-4" />
+                          Copy message
+                        </button>
+                        <button
+                          className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
+                          onClick={() => handleMessageAction("info", m)}
+                        >
+                          <Info className="h-4 w-4" />
+                          Info
+                        </button>
+                        <button
+                          className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
+                          onClick={() => handleMessageAction("translate", m)}
+                        >
+                          <Languages className="h-4 w-4" />
+                          Translate
+                        </button>
+                        <div className="my-1 border-t border-border" />
+                        <button
+                          className="flex w-full items-center gap-2 px-3 py-2 text-sm text-destructive hover:bg-destructive/10 transition-colors"
+                          onClick={() => handleMessageAction("delete", m)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+              {floatingReactions
                   .filter((fr) => fr.messageId === m.id)
                   .map((fr) => {
                     const meta = reactionMeta[fr.type];
@@ -1628,12 +1785,19 @@ export default function ConversationPage() {
                 }}
               >
                 {m.reply_to_id && m.reply_to_body ? (
-                  <div className="mb-2 rounded-lg bg-black/10 text-xs text-foreground/80 px-2 py-1 flex flex-col gap-1">
-                    <span className="font-medium">
-                      Replying to{" "}
-                      {m.reply_to_sender_id === currentUserId ? "you" : "them"}
-                    </span>
-                    <span className="line-clamp-2">{m.reply_to_body}</span>
+                  <div className={`mb-2 rounded px-2 py-1.5 border-l-2 ${
+                    isMe
+                      ? "bg-white/20 border-white/40"
+                      : "bg-black/10 border-black/30"
+                  }`}>
+                    <div className={`text-[10px] font-semibold mb-0.5 ${
+                      isMe ? "text-white/90" : "text-foreground/80"
+                    }`}>
+                      {m.reply_to_sender_id === currentUserId ? "You" : participantName || "Them"}
+                    </div>
+                    <div className={`text-xs line-clamp-2 ${
+                      isMe ? "text-white/80" : "text-foreground/70"
+                    }`}>{m.reply_to_body}</div>
                   </div>
                 ) : null}
                 <p className="text-sm leading-relaxed wrap-break-word">
@@ -1710,16 +1874,21 @@ export default function ConversationPage() {
       </div>
       <div className="bg-card/80 backdrop-blur px-3 py-2">
         {replyTarget ? (
-          <div className="mb-2 flex items-center justify-between rounded-lg bg-muted px-3 py-1 text-xs text-foreground/80 shadow-sm">
-            <div className="truncate">
-              Replying to:{" "}
-              <span className="font-medium">{replyTarget.body}</span>
+          <div className="mb-2 flex items-start gap-2 rounded-lg bg-muted px-3 py-2 text-xs shadow-sm border-l-2 border-primary">
+            <div className="flex-1 min-w-0">
+              <div className="text-primary font-medium mb-0.5">
+                Replying to {replyTarget.sender_id === currentUserId ? "yourself" : participantName || "them"}
+              </div>
+              <div className="line-clamp-2 text-foreground/70">
+                {replyTarget.body}
+              </div>
             </div>
             <button
-              className="ml-2 text-foreground/60 hover:text-foreground"
+              className="shrink-0 text-foreground/60 hover:text-foreground transition-colors p-1"
               onClick={() => setReplyTarget(null)}
+              aria-label="Cancel reply"
             >
-              Clear
+              <X className="h-3.5 w-3.5" />
             </button>
           </div>
         ) : null}

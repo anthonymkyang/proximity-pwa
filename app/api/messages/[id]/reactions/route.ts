@@ -36,9 +36,10 @@ async function canActInConversation(
 
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const conversationId = getConversationId(params, new URL(req.url).pathname);
+  const resolvedParams = await params;
+  const conversationId = getConversationId(resolvedParams, new URL(req.url).pathname);
   if (!conversationId) {
     return NextResponse.json({ error: "conversation_id required" }, { status: 400 });
   }
@@ -116,9 +117,10 @@ export async function POST(
 
 export async function DELETE(
   req: Request,
-  ctx: { params: { id: string } }
+  ctx: { params: Promise<{ id: string }> }
 ) {
-  const conversationId = getConversationId(ctx.params, new URL(req.url).pathname);
+  const resolvedParams = await ctx.params;
+  const conversationId = getConversationId(resolvedParams, new URL(req.url).pathname);
   if (!conversationId) {
     return NextResponse.json({ error: "conversation_id required" }, { status: 400 });
   }

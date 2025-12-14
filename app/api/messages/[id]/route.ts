@@ -343,6 +343,8 @@ export async function POST(
   const reply_to_body = payload?.reply_to_body ?? null;
   const reply_to_sender_id = payload?.reply_to_sender_id ?? null;
 
+  console.log("Received message payload:", { body: body.trim(), reply_to_id, reply_to_body, reply_to_sender_id });
+
   const { data: inserted, error: insErr } = await supabase
     .from("messages")
     .insert({
@@ -368,11 +370,14 @@ export async function POST(
     .single();
 
   if (insErr || !inserted) {
+    console.error("Insert error:", insErr);
     return NextResponse.json(
       { error: insErr?.message || "Failed to send message" },
       { status: 500 }
     );
   }
+
+  console.log("Inserted message:", inserted);
 
   let insertedWithAge: any = inserted;
   if (insertedWithAge?.profiles) {
