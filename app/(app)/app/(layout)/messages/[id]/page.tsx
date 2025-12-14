@@ -45,6 +45,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { getAvatarProxyUrl } from "@/lib/profiles/getAvatarProxyUrl";
+import { toast } from "sonner";
 import {
   Drawer,
   DrawerContent,
@@ -117,6 +118,45 @@ const normalizeMessage = (m: Message): Message => ({
 
 const PAGE_SIZE = 30;
 const LONG_PRESS_MS = 260;
+
+const formatRelativeDate = (dateStr: string) => {
+  const date = new Date(dateStr);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  const isToday = date.toDateString() === today.toDateString();
+  const isYesterday = date.toDateString() === yesterday.toDateString();
+
+  const time = date.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+
+  if (isToday) {
+    return `Today, ${time}`;
+  }
+  if (isYesterday) {
+    return `Yesterday, ${time}`;
+  }
+
+  // Check if within last 6 days
+  const daysAgo = Math.floor(
+    (today.getTime() - date.getTime()) / (1000 * 60 * 60 * 24)
+  );
+  if (daysAgo < 7) {
+    const dayName = date.toLocaleString("en-US", { weekday: "long" });
+    return `${dayName}, ${time}`;
+  }
+
+  // For older dates, show "5 Dec" format
+  const dateStr2 = date.toLocaleString("en-US", {
+    day: "numeric",
+    month: "short",
+  });
+  return `${dateStr2}, ${time}`;
+};
 
 export default function ConversationPage() {
   const params = useParams();
@@ -214,6 +254,8 @@ export default function ConversationPage() {
     null
   );
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [infoDrawerOpen, setInfoDrawerOpen] = useState(false);
+  const [infoMessage, setInfoMessage] = useState<Message | null>(null);
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const longPressTargetRef = useRef<string | null>(null);
   const prevBodyOverflowRef = useRef<string | null>(null);
@@ -360,7 +402,6 @@ export default function ConversationPage() {
       document.removeEventListener("pointerdown", handleOutside, true);
   }, [reactionTargetId, cancelLongPress]);
 
-
   useEffect(() => {
     messageIdsRef.current = new Set(messages.map((m) => m.id));
   }, [messages]);
@@ -370,7 +411,7 @@ export default function ConversationPage() {
     if (!conversationId) return;
 
     const handleVisibilityChange = async () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === "visible") {
         console.log("Tab became visible, fetching new messages");
         try {
           const res = await fetch(`/api/messages/${conversationId}?limit=30`);
@@ -381,12 +422,15 @@ export default function ConversationPage() {
               .map((m) =>
                 normalizeMessage({
                   ...m,
-                  conversation_id: m.conversation_id ?? conversationId ?? undefined,
+                  conversation_id:
+                    m.conversation_id ?? conversationId ?? undefined,
                 })
               );
 
             if (incoming.length > 0) {
-              console.log(`Found ${incoming.length} new messages while tab was hidden`);
+              console.log(
+                `Found ${incoming.length} new messages while tab was hidden`
+              );
               setMessages((prev) => sortUniqueMessages([...prev, ...incoming]));
               shouldAutoScrollRef.current = true;
             }
@@ -397,8 +441,9 @@ export default function ConversationPage() {
       }
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [conversationId]);
 
   useEffect(() => {
@@ -551,7 +596,12 @@ export default function ConversationPage() {
           const isMine =
             currentUserIdRef.current != null &&
             msg.sender_id === currentUserIdRef.current;
-          console.log("isMine:", isMine, "pendingReplyRef.current:", pendingReplyRef.current);
+          console.log(
+            "isMine:",
+            isMine,
+            "pendingReplyRef.current:",
+            pendingReplyRef.current
+          );
           // Apply pending reply data if this is our message and we have reply metadata
           if (
             isMine &&
@@ -660,17 +710,19 @@ export default function ConversationPage() {
       const uid = rec?.user_id;
       if (!uid || uid === currentUserIdRef.current) return;
 
-      setTypingUsers((prev) => {
-        const next = new Set(prev);
-        if (rec.started) next.add(uid);
-        else next.delete(uid);
-        return next;
-      });
-
       if (rec.started) {
+        // User started/resumed typing
+        setTypingUsers((prev) => {
+          const next = new Set(prev);
+          next.add(uid);
+          return next;
+        });
+
+        // Clear any existing timeout for this user
         if (typingTimersRef.current[uid]) {
           clearTimeout(typingTimersRef.current[uid]);
         }
+        // Set a timeout to remove indicator 3 seconds after this message
         typingTimersRef.current[uid] = setTimeout(() => {
           setTypingUsers((prev) => {
             const next = new Set(prev);
@@ -678,10 +730,18 @@ export default function ConversationPage() {
             return next;
           });
           delete typingTimersRef.current[uid];
-        }, 5000);
-      } else if (typingTimersRef.current[uid]) {
-        clearTimeout(typingTimersRef.current[uid]);
-        delete typingTimersRef.current[uid];
+        }, 3000);
+      } else if (rec.started === false) {
+        // User explicitly stopped typing, remove indicator immediately
+        setTypingUsers((prev) => {
+          const next = new Set(prev);
+          next.delete(uid);
+          return next;
+        });
+        if (typingTimersRef.current[uid]) {
+          clearTimeout(typingTimersRef.current[uid]);
+          delete typingTimersRef.current[uid];
+        }
       }
     });
     channel.subscribe();
@@ -867,7 +927,10 @@ export default function ConversationPage() {
       : { reply_to_id: null, reply_to_body: null, reply_to_sender_id: null };
     console.log("handleSend - replyMeta:", replyMeta);
     pendingReplyRef.current = replyMeta;
-    console.log("handleSend - pendingReplyRef.current:", pendingReplyRef.current);
+    console.log(
+      "handleSend - pendingReplyRef.current:",
+      pendingReplyRef.current
+    );
     setReplyTarget(null);
     shouldAutoScrollRef.current = true;
     if (typingBroadcastedRef.current) {
@@ -987,6 +1050,7 @@ export default function ConversationPage() {
       if (action === "copy" && msg?.body) {
         const didCopy = await copyToClipboard(msg.body);
         if (didCopy) {
+          toast.success("Message copied to clipboard");
           setCopiedMessageId(msg.id);
           if (copiedTimerRef.current) {
             clearTimeout(copiedTimerRef.current);
@@ -995,12 +1059,17 @@ export default function ConversationPage() {
             setCopiedMessageId(null);
             copiedTimerRef.current = null;
           }, 1500);
+        } else {
+          toast.error("Failed to copy message");
         }
       } else if (action === "reply" && msg) {
         console.log("Setting replyTarget to:", msg);
         setReplyTarget(msg);
+      } else if (action === "info" && msg) {
+        setInfoMessage(msg);
+        setInfoDrawerOpen(true);
       }
-      // TODO: wire reply/info/translate/delete if needed
+      // TODO: wire translate/delete if needed
       setFocusedMessageId(null);
       setFocusedMessageRect(null);
     },
@@ -1274,6 +1343,7 @@ export default function ConversationPage() {
     );
 
     const handleReaction = (payload: any) => {
+      console.log("Reaction realtime payload:", payload);
       const recNew = payload.new ?? {};
       const recOld = payload.old ?? {};
       const msgId =
@@ -1284,7 +1354,16 @@ export default function ConversationPage() {
       const actorUserId =
         (recNew as any).user_id ?? (recOld as any).user_id ?? null;
       // Ignore own realtime event; optimistic update already applied
-      if (actorUserId && actorUserId === currentUserIdRef.current) return;
+      if (actorUserId && actorUserId === currentUserIdRef.current) {
+        console.log("Ignoring own reaction event");
+        return;
+      }
+      console.log("Applying reaction update:", {
+        msgId,
+        prevType,
+        nextType,
+        actorUserId,
+      });
       applyReactionLocal(msgId, actorUserId, prevType, nextType);
     };
 
@@ -1619,57 +1698,57 @@ export default function ConversationPage() {
                     style={{ transform: "translateY(calc(-100% - 8px))" }}
                   >
                     <div className="flex items-center gap-1 rounded-full border bg-background/95 px-2 py-1 shadow-lg backdrop-blur pointer-events-auto">
-                    {REACTIONS.map((r, idx) => {
-                      const isActive = myReaction === r.type;
-                      return (
-                        <div
-                          key={r.type}
-                          role="button"
-                          tabIndex={0}
-                          className={`p-2 text-xl leading-none rounded-full transition pointer-events-auto ${
-                            isActive ? "bg-muted" : "hover:bg-muted"
-                          }`}
-                          data-reaction={r.type}
-                          onPointerDown={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            void handleReactionToggle(m, r.type);
-                          }}
-                          onMouseDown={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            void handleReactionToggle(m, r.type);
-                          }}
-                          onTouchStart={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            void handleReactionToggle(m, r.type);
-                          }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void handleReactionToggle(m, r.type);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
+                      {REACTIONS.map((r, idx) => {
+                        const isActive = myReaction === r.type;
+                        return (
+                          <div
+                            key={r.type}
+                            role="button"
+                            tabIndex={0}
+                            className={`p-2 text-xl leading-none rounded-full transition pointer-events-auto ${
+                              isActive ? "bg-muted" : "hover:bg-muted"
+                            }`}
+                            data-reaction={r.type}
+                            onPointerDown={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
                               void handleReactionToggle(m, r.type);
-                            }
-                          }}
-                        >
-                          <AnimatedEmoji
-                            src={r.src}
-                            fallback={r.emoji}
-                            size={20}
-                            delayMs={idx * 80}
-                            playOnce
-                            restAtEnd
-                            restFrameFraction={r.restFrameFraction}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
+                            }}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              void handleReactionToggle(m, r.type);
+                            }}
+                            onTouchStart={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              void handleReactionToggle(m, r.type);
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void handleReactionToggle(m, r.type);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                void handleReactionToggle(m, r.type);
+                              }
+                            }}
+                          >
+                            <AnimatedEmoji
+                              src={r.src}
+                              fallback={r.emoji}
+                              size={20}
+                              delayMs={idx * 80}
+                              playOnce
+                              restAtEnd
+                              restFrameFraction={r.restFrameFraction}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                   <div
                     className={`absolute bottom-0 z-50 ${
@@ -1685,8 +1764,12 @@ export default function ConversationPage() {
                           className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
                           onClick={(e) => {
                             e.stopPropagation();
-                            console.log("Reply button clicked for message:", m.id);
+                            console.log(
+                              "Reply button clicked for message:",
+                              m.id
+                            );
                             handleMessageAction("reply", m);
+                            setReactionTargetId(null);
                           }}
                         >
                           <Reply className="h-4 w-4" />
@@ -1694,21 +1777,33 @@ export default function ConversationPage() {
                         </button>
                         <button
                           className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
-                          onClick={() => handleMessageAction("copy", m)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleMessageAction("copy", m);
+                            setReactionTargetId(null);
+                          }}
                         >
                           <Copy className="h-4 w-4" />
                           Copy message
                         </button>
                         <button
                           className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
-                          onClick={() => handleMessageAction("info", m)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleMessageAction("info", m);
+                            setReactionTargetId(null);
+                          }}
                         >
                           <Info className="h-4 w-4" />
                           Info
                         </button>
                         <button
                           className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
-                          onClick={() => handleMessageAction("translate", m)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleMessageAction("translate", m);
+                            setReactionTargetId(null);
+                          }}
                         >
                           <Languages className="h-4 w-4" />
                           Translate
@@ -1716,7 +1811,11 @@ export default function ConversationPage() {
                         <div className="my-1 border-t border-border" />
                         <button
                           className="flex w-full items-center gap-2 px-3 py-2 text-sm text-destructive hover:bg-destructive/10 transition-colors"
-                          onClick={() => handleMessageAction("delete", m)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleMessageAction("delete", m);
+                            setReactionTargetId(null);
+                          }}
                         >
                           <Trash2 className="h-4 w-4" />
                           Delete
@@ -1727,40 +1826,40 @@ export default function ConversationPage() {
                 </>
               )}
               {floatingReactions
-                  .filter((fr) => fr.messageId === m.id)
-                  .map((fr) => {
-                    const meta = reactionMeta[fr.type];
-                    const fallback = meta?.emoji ?? "★";
-                    return (
+                .filter((fr) => fr.messageId === m.id)
+                .map((fr) => {
+                  const meta = reactionMeta[fr.type];
+                  const fallback = meta?.emoji ?? "★";
+                  return (
+                    <div
+                      key={fr.id}
+                      className="absolute pointer-events-none z-30"
+                      style={{
+                        left: isMe ? "auto" : "50%",
+                        right: isMe ? "50%" : "auto",
+                        bottom: "20%",
+                        animation: "floatUp 1.5s ease-out forwards",
+                      }}
+                    >
                       <div
-                        key={fr.id}
-                        className="absolute pointer-events-none z-30"
                         style={{
-                          left: isMe ? "auto" : "50%",
-                          right: isMe ? "50%" : "auto",
-                          bottom: "20%",
-                          animation: "floatUp 1.5s ease-out forwards",
+                          animation: "fadeOut 1.5s ease-out forwards",
+                          transform: "scale(1.5)",
                         }}
                       >
-                        <div
-                          style={{
-                            animation: "fadeOut 1.5s ease-out forwards",
-                            transform: "scale(1.5)",
-                          }}
-                        >
-                          <AnimatedEmoji
-                            src={meta?.src ?? ""}
-                            fallback={fallback}
-                            size={48}
-                            playOnce
-                            restAtEnd
-                            restFrameFraction={meta?.restFrameFraction}
-                          />
-                        </div>
+                        <AnimatedEmoji
+                          src={meta?.src ?? ""}
+                          fallback={fallback}
+                          size={48}
+                          playOnce
+                          restAtEnd
+                          restFrameFraction={meta?.restFrameFraction}
+                        />
                       </div>
-                    );
-                  })}
-                <div
+                    </div>
+                  );
+                })}
+              <div
                 className={`relative rounded-lg px-3 py-2 max-w-[75%] sm:max-w-[65%] lg:max-w-[55%] ${
                   isMe
                     ? "bg-primary text-white rounded-br-none"
@@ -1785,19 +1884,29 @@ export default function ConversationPage() {
                 }}
               >
                 {m.reply_to_id && m.reply_to_body ? (
-                  <div className={`mb-2 rounded px-2 py-1.5 border-l-2 ${
-                    isMe
-                      ? "bg-white/20 border-white/40"
-                      : "bg-black/10 border-black/30"
-                  }`}>
-                    <div className={`text-[10px] font-semibold mb-0.5 ${
-                      isMe ? "text-white/90" : "text-foreground/80"
-                    }`}>
-                      {m.reply_to_sender_id === currentUserId ? "You" : participantName || "Them"}
+                  <div
+                    className={`mb-2 rounded px-2 py-1.5 border-l-2 ${
+                      isMe
+                        ? "bg-white/20 border-white/40"
+                        : "bg-black/10 border-black/30"
+                    }`}
+                  >
+                    <div
+                      className={`text-[10px] font-semibold mb-0.5 ${
+                        isMe ? "text-white/90" : "text-foreground/80"
+                      }`}
+                    >
+                      {m.reply_to_sender_id === currentUserId
+                        ? "You"
+                        : participantName || "Them"}
                     </div>
-                    <div className={`text-xs line-clamp-2 ${
-                      isMe ? "text-white/80" : "text-foreground/70"
-                    }`}>{m.reply_to_body}</div>
+                    <div
+                      className={`text-xs line-clamp-2 ${
+                        isMe ? "text-white/80" : "text-foreground/70"
+                      }`}
+                    >
+                      {m.reply_to_body}
+                    </div>
                   </div>
                 ) : null}
                 <p className="text-sm leading-relaxed wrap-break-word">
@@ -1830,8 +1939,13 @@ export default function ConversationPage() {
                         {m.read_at ? (
                           <CheckCheck className="h-3.5 w-3.5 text-white" />
                         ) : m.delivered_at ? (
-                          <Check className="h-3.5 w-3.5" />
-                        ) : null}
+                          <div className="flex gap-0.5">
+                            <Check className="h-3.5 w-3.5 text-muted-foreground" />
+                            <Check className="h-3.5 w-3.5 text-muted-foreground" />
+                          </div>
+                        ) : (
+                          <Check className="h-3.5 w-3.5 text-muted-foreground" />
+                        )}
                       </div>
                     </>
                   ) : (
@@ -1877,7 +1991,10 @@ export default function ConversationPage() {
           <div className="mb-2 flex items-start gap-2 rounded-lg bg-muted px-3 py-2 text-xs shadow-sm border-l-2 border-primary">
             <div className="flex-1 min-w-0">
               <div className="text-primary font-medium mb-0.5">
-                Replying to {replyTarget.sender_id === currentUserId ? "yourself" : participantName || "them"}
+                Replying to{" "}
+                {replyTarget.sender_id === currentUserId
+                  ? "yourself"
+                  : participantName || "them"}
               </div>
               <div className="line-clamp-2 text-foreground/70">
                 {replyTarget.body}
@@ -2006,6 +2123,92 @@ export default function ConversationPage() {
                   : contactConnectionId
                   ? "Update"
                   : "Save contact"}
+              </Button>
+            </div>
+          </div>
+        </DrawerContent>
+      </Drawer>
+
+      {/* Message Info drawer */}
+      <Drawer open={infoDrawerOpen} onOpenChange={setInfoDrawerOpen}>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>Message Info</DrawerTitle>
+            <DrawerDescription>Delivery and read status</DrawerDescription>
+          </DrawerHeader>
+          <div className="space-y-4 px-4 pb-5">
+            {infoMessage ? (
+              <>
+                {/* Quoted message */}
+                <div className="rounded-lg bg-muted/50 p-3 border-l-2 border-primary">
+                  <p className="text-sm leading-relaxed text-foreground break-words">
+                    {infoMessage.body}
+                  </p>
+                </div>
+
+                {/* Delivery status - show only latest status */}
+                <div className="space-y-3">
+                  {(() => {
+                    // Determine latest status
+                    if (
+                      infoMessage.read_at &&
+                      infoMessage.created_at &&
+                      (infoMessage.delivered_at
+                        ? new Date(infoMessage.read_at).getTime() >=
+                          new Date(infoMessage.delivered_at).getTime()
+                        : new Date(infoMessage.read_at).getTime() >=
+                          new Date(infoMessage.created_at).getTime())
+                    ) {
+                      // Show Read
+                      return (
+                        <>
+                          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                            Read
+                          </div>
+                          <div className="text-sm font-medium">
+                            {formatRelativeDate(infoMessage.read_at)}
+                          </div>
+                        </>
+                      );
+                    } else if (
+                      infoMessage.delivered_at &&
+                      infoMessage.created_at &&
+                      new Date(infoMessage.delivered_at).getTime() >=
+                        new Date(infoMessage.created_at).getTime()
+                    ) {
+                      // Show Delivered
+                      return (
+                        <>
+                          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                            Delivered
+                          </div>
+                          <div className="text-sm font-medium">
+                            {formatRelativeDate(infoMessage.delivered_at)}
+                          </div>
+                        </>
+                      );
+                    } else {
+                      // Show Sent
+                      return (
+                        <>
+                          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                            Sent
+                          </div>
+                          <div className="text-sm font-medium">
+                            {infoMessage.created_at
+                              ? formatRelativeDate(infoMessage.created_at)
+                              : "—"}
+                          </div>
+                        </>
+                      );
+                    }
+                  })()}
+                </div>
+              </>
+            ) : null}
+            <div className="flex justify-end">
+              <Button variant="ghost" onClick={() => setInfoDrawerOpen(false)}>
+                Close
               </Button>
             </div>
           </div>
