@@ -25,7 +25,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Users, CalendarClock, MapPin, Loader2, CheckCircle2 } from "lucide-react";
+import { Users, CalendarClock, MapPin, Loader2, CheckCircle2, UserPlus } from "lucide-react";
 import {
   Item,
   ItemMedia,

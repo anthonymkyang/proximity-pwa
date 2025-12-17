@@ -5,8 +5,9 @@ type Row = { object_key: string };
 
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const resolvedParams = await params;
   try {
     // Your server helper returns a Promise<SupabaseClient>
     const supabase = await createClient();
@@ -19,7 +20,7 @@ export async function POST(
     const { data: items, error } = await supabase
       .from("photo_album_items")
       .select("object_key")
-      .eq("album_id", params.id);
+      .eq("album_id", resolvedParams.id);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });

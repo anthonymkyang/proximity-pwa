@@ -3,9 +3,10 @@ import { createClient } from "@/utils/supabase/server";
 
 export async function DELETE(
   _req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
+    const resolvedParams = await params;
+try {
     // FIX: your server helper returns a Promise<SupabaseClient>
     const supabase = await createClient();
 
@@ -24,7 +25,7 @@ export async function DELETE(
     const { data: row, error: selErr } = await supabase
       .from("profile_photos_private")
       .select("object_key")
-      .eq("id", params.id)
+      .eq("id", resolvedParams.id)
       .eq("user_id", user.id)
       .single();
 
@@ -39,7 +40,7 @@ export async function DELETE(
     const delRow = supabase
       .from("profile_photos_private")
       .delete()
-      .eq("id", params.id)
+      .eq("id", resolvedParams.id)
       .eq("user_id", user.id);
 
     const delObj = supabase.storage

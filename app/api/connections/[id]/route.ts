@@ -5,9 +5,10 @@ import { createClient } from "@/utils/supabase/server";
 // GET /api/connections/:id -> fetch a single connection (owned by viewer)
 export async function GET(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const connectionId = params?.id || req.url.split("/").pop();
+    const resolvedParams = await params;
+const connectionId = params?.id || req.url.split("/").pop();
   if (!connectionId) {
     return NextResponse.json(
       { error: "connection_id_required" },
@@ -90,9 +91,10 @@ export async function GET(
 // DELETE /api/connections/:id -> remove a connection you own
 export async function DELETE(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const connectionId = params?.id || req.url.split("/").pop();
+    const resolvedParams = await params;
+const connectionId = params?.id || req.url.split("/").pop();
   if (!connectionId) {
     return NextResponse.json(
       { error: "connection_id_required" },

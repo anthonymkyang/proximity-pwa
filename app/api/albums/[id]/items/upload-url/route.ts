@@ -4,8 +4,9 @@ import { createClient } from "@/utils/supabase/server";
 
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const resolvedParams = await params;
   try {
     // FIX: your server helper returns Promise<SupabaseClient>
     const supabase = await createClient();
@@ -30,7 +31,7 @@ export async function POST(
     const { data: album, error: albErr } = await supabase
       .from("photo_albums")
       .select("id, user_id")
-      .eq("id", params.id)
+      .eq("id", resolvedParams.id)
       .single();
 
     if (albErr) {

@@ -3,8 +3,9 @@ import { createClient } from "@/utils/supabase/server";
 
 export async function DELETE(
   _req: Request,
-  { params }: { params: { id: string; itemId: string } }
+  { params }: { params: Promise<{ id: string; itemId: string }> }
 ) {
+  const resolvedParams = await params;
   try {
     // Your server helper returns a Promise<SupabaseClient>, so await it
     const supabase = await createClient();
@@ -21,11 +22,11 @@ export async function DELETE(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Fetch the item we’re deleting (ensure it belongs to the album in the route)
+    // Fetch the item we're deleting (ensure it belongs to the album in the route)
     const { data: row, error: selErr } = await supabase
       .from("photo_album_items")
       .select("object_key, album_id, user_id")
-      .eq("id", params.itemId)
+      .eq("id", resolvedParams.itemId)
       .single();
 
     if (selErr) {
@@ -34,7 +35,7 @@ export async function DELETE(
     if (!row) {
       return NextResponse.json({ error: "Item not found" }, { status: 404 });
     }
-    if (row.album_id !== params.id) {
+    if (row.album_id !== resolvedParams.id) {
       // Route/row mismatch
       return NextResponse.json(
         { error: "Item does not belong to this album" },

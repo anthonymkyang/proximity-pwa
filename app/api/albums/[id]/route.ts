@@ -3,8 +3,9 @@ import { createClient } from "@/utils/supabase/server";
 
 export async function GET(
   _req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const resolvedParams = await params;
   try {
     // FIX: your server helper returns a Promise<SupabaseClient>
     const supabase = await createClient();
@@ -12,7 +13,7 @@ export async function GET(
     const { data, error } = await supabase
       .from("photo_albums")
       .select("*")
-      .eq("id", params.id)
+      .eq("id", resolvedParams.id)
       .single();
 
     if (error) {

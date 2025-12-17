@@ -3,8 +3,9 @@ import { createClient } from "@/utils/supabase/server";
 
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const resolvedParams = await params;
   try {
     // Your server helper returns a Promise<SupabaseClient>, so await it
     const supabase = await createClient();
@@ -31,7 +32,7 @@ export async function POST(
     const { data, error } = await supabase
       .from("photo_album_items")
       .insert({
-        album_id: params.id,
+        album_id: resolvedParams.id,
         user_id: user.id,
         object_key: objectKey,
         position: Number(position) || 0,

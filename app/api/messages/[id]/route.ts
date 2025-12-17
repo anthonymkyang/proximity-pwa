@@ -39,7 +39,7 @@ async function getConversationId(
 // GET /api/messages/:id -> list messages in a convo (paginated) + upsert delivered receipts for viewer
 export async function GET(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const conversationId = await getConversationId(req, params);
   if (!conversationId) {
@@ -82,6 +82,10 @@ export async function GET(
       reply_to_id,
       reply_to_body,
       reply_to_sender_id,
+      deleted_at,
+      translation,
+      message_type,
+      metadata,
       profiles:profiles!messages_sender_id_profiles_fkey(profile_title, avatar_url, date_of_birth)
     `
     )
@@ -314,7 +318,7 @@ export async function GET(
 // POST /api/messages/:id -> send message and create sender self-receipt (delivered+read)
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const conversationId = await getConversationId(req, params);
   if (!conversationId) {
@@ -342,8 +346,17 @@ export async function POST(
   const reply_to_id = payload?.reply_to_id ?? null;
   const reply_to_body = payload?.reply_to_body ?? null;
   const reply_to_sender_id = payload?.reply_to_sender_id ?? null;
+  const message_type = payload?.message_type ?? null;
+  const metadata = payload?.metadata ?? null;
 
-  console.log("Received message payload:", { body: body.trim(), reply_to_id, reply_to_body, reply_to_sender_id });
+  console.log("Received message payload:", {
+    body: body.trim(),
+    reply_to_id,
+    reply_to_body,
+    reply_to_sender_id,
+    message_type,
+    metadata,
+  });
 
   const { data: inserted, error: insErr } = await supabase
     .from("messages")
@@ -354,6 +367,8 @@ export async function POST(
       reply_to_id,
       reply_to_body,
       reply_to_sender_id,
+      message_type,
+      metadata,
     })
     .select(
       `
@@ -364,6 +379,9 @@ export async function POST(
         reply_to_id,
         reply_to_body,
         reply_to_sender_id,
+        translation,
+        message_type,
+        metadata,
         profiles:profiles!messages_sender_id_profiles_fkey(profile_title, avatar_url, date_of_birth)
       `
     )
@@ -442,7 +460,7 @@ export async function POST(
 // PATCH /api/messages/:id -> mark messages in this conversation as read for current user
 export async function PATCH(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const conversationId = await getConversationId(req, params);
   if (!conversationId) {

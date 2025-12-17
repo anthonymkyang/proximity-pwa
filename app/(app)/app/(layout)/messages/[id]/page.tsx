@@ -25,9 +25,41 @@ import {
   Reply,
   Copy,
   Info,
-  Languages,
   Trash2,
   X,
+  Languages,
+  Image,
+  BookOpen,
+  MapPin,
+  UsersRound,
+  Calendar,
+  Search,
+  Home,
+  Building,
+  Building2,
+  GraduationCap,
+  School,
+  Hospital,
+  Droplet,
+  Trees,
+  UtensilsCrossed,
+  Coffee,
+  Beer,
+  Hotel,
+  ShoppingBag,
+  ShoppingCart,
+  Landmark,
+  Banknote,
+  Mail,
+  BookMarked,
+  Theater,
+  Film,
+  Train,
+  Bus,
+  ParkingCircle,
+  Fuel,
+  Church,
+  Star,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -40,10 +72,12 @@ import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
+  InputGroupInput,
   InputGroupTextarea,
 } from "@/components/ui/input-group";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { getAvatarProxyUrl } from "@/lib/profiles/getAvatarProxyUrl";
 import { toast } from "sonner";
 import {
@@ -55,7 +89,18 @@ import {
 } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { AnimatedEmoji } from "@/components/emoji/AnimatedEmoji";
+import { useWebLLM } from "@/hooks/useWebLLM";
+import { AIToolsDialog } from "@/components/ai/AIToolsDialog";
+import { usePresence } from "@/components/providers/presence-context";
+import maplibregl, {
+  type Map as MaplibreMap,
+  type StyleSpecification,
+} from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
+import MapDirections from "@/components/map/MapDirections";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 type Message = {
   id: string;
@@ -68,12 +113,35 @@ type Message = {
   reply_to_sender_id?: string | null;
   delivered_at?: string | null;
   read_at?: string | null;
+  deleted_at?: string | null;
   my_reaction?: string | null;
   reaction_counts?: Record<string, number>;
+  translation?: {
+    translatedText: string;
+    detectedLanguage?: string | null;
+    targetLanguage: string;
+  } | null;
   profiles?: {
     profile_title?: string | null;
     avatar_url?: string | null;
   } | null;
+  message_type?: "text" | "location" | null;
+  metadata?: {
+    location?: {
+      lat: number;
+      lng: number;
+      address?: string;
+    };
+  } | null;
+};
+
+type MessageTranslation = {
+  translatedText: string;
+  detectedLanguage?: string;
+  targetLanguage: string;
+  isLoading?: boolean;
+  loadingMessage?: string;
+  error?: string;
 };
 
 const sortUniqueMessages = (list: Message[]) => {
@@ -158,6 +226,272 @@ const formatRelativeDate = (dateStr: string) => {
   return `${dateStr2}, ${time}`;
 };
 
+// Static map preview component for message bubbles
+function StaticMapPreview({
+  location,
+  onClick,
+}: {
+  location: { lat: number; lng: number };
+  onClick: () => void;
+}) {
+  const mapRef = useRef<HTMLDivElement | null>(null);
+  const mapInstanceRef = useRef<MaplibreMap | null>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    // If map already exists, just update center and return
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.setCenter([location.lng, location.lat]);
+      return;
+    }
+
+    let mounted = true;
+
+    const initMap = async () => {
+      try {
+        const styleRes = await fetch("/maps/proximity-dark.json");
+        const style: StyleSpecification = await styleRes.json();
+
+        if (!mounted || !mapRef.current) return;
+
+        const map = new maplibregl.Map({
+          container: mapRef.current,
+          style,
+          center: [location.lng, location.lat],
+          zoom: 15,
+          interactive: false, // Disable all interactions
+          attributionControl: false,
+        });
+
+        map.on("load", () => {
+          if (!mounted) return;
+
+          // Hide road numbers/shields
+          const layers = map.getStyle().layers;
+          if (layers) {
+            layers.forEach((layer) => {
+              if (layer.type !== "symbol" || !layer.layout) return;
+              const textField = layer.layout["text-field"] as unknown;
+              const hasRefToken = (field: unknown) => {
+                if (typeof field === "string") return field.includes("{ref}");
+                if (Array.isArray(field))
+                  return JSON.stringify(field).includes('"ref"');
+                return false;
+              };
+              if (hasRefToken(textField)) {
+                map.setLayoutProperty(layer.id, "visibility", "none");
+              }
+            });
+          }
+
+          // Add marker at location with primary color
+          const markerEl = document.createElement("div");
+          const pinSVG = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "svg"
+          );
+          pinSVG.setAttribute("viewBox", "0 0 24 24");
+          pinSVG.setAttribute("width", "32");
+          pinSVG.setAttribute("height", "32");
+          pinSVG.style.cssText = `
+            filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.3));
+            color: hsl(var(--primary));
+          `;
+          pinSVG.innerHTML =
+            '<path fill="currentColor" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>';
+
+          markerEl.appendChild(pinSVG);
+
+          new maplibregl.Marker({
+            element: markerEl,
+            anchor: "bottom",
+          })
+            .setLngLat([location.lng, location.lat])
+            .addTo(map);
+
+          // Fade in after map loads
+          setIsLoaded(true);
+        });
+
+        mapInstanceRef.current = map;
+      } catch (error) {
+        console.error("Error initializing static map preview:", error);
+      }
+    };
+
+    initMap();
+
+    return () => {
+      mounted = false;
+    };
+  }, [location]);
+
+  return (
+    <div
+      className="w-full h-40 rounded-lg overflow-hidden bg-muted cursor-pointer transition-opacity duration-500"
+      style={{ opacity: isLoaded ? 1 : 0 }}
+      onClick={onClick}
+    >
+      <div ref={mapRef} style={{ width: '100%', height: '160px' }} />
+    </div>
+  );
+}
+
+// Location viewer map component
+function LocationViewerMap({
+  location,
+  onGetDirections,
+}: {
+  location: { lat: number; lng: number; address?: string };
+  onGetDirections: () => void;
+}) {
+  const mapRef = useRef<HTMLDivElement | null>(null);
+  const mapInstanceRef = useRef<MaplibreMap | null>(null);
+
+  useEffect(() => {
+    if (!mapRef.current || mapInstanceRef.current) return;
+
+    const initMap = async () => {
+      try {
+        const styleRes = await fetch("/maps/proximity-dark.json");
+        const style: StyleSpecification = await styleRes.json();
+
+        const map = new maplibregl.Map({
+          container: mapRef.current!,
+          style,
+          center: [location.lng, location.lat],
+          zoom: 15,
+          pitch: 35,
+          // @ts-expect-error antialias is supported
+          antialias: true,
+          attributionControl: false,
+        });
+
+        map.on("load", () => {
+          // Add building extrusions (same as MapCanvas)
+          const BUILDING_SOURCE_ID = "openfreemap-buildings";
+          if (!map.getSource(BUILDING_SOURCE_ID)) {
+            const labelLayerId = map
+              .getStyle()
+              .layers?.find(
+                (layer) =>
+                  layer.type === "symbol" &&
+                  (layer.layout as { "text-field"?: unknown })?.["text-field"]
+              )?.id;
+
+            map.addSource(BUILDING_SOURCE_ID, {
+              url: "https://tiles.openfreemap.org/planet",
+              type: "vector",
+            });
+
+            map.addLayer(
+              {
+                id: "3d-buildings",
+                source: BUILDING_SOURCE_ID,
+                "source-layer": "building",
+                type: "fill-extrusion",
+                minzoom: 15,
+                filter: ["!=", ["get", "hide_3d"], true],
+                paint: {
+                  "fill-extrusion-color": [
+                    "interpolate",
+                    ["linear"],
+                    ["get", "render_height"],
+                    0,
+                    "#0f1113",
+                    120,
+                    "#13171b",
+                    300,
+                    "#161b20",
+                  ],
+                  "fill-extrusion-height": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    15,
+                    0,
+                    16,
+                    ["get", "render_height"],
+                  ],
+                  "fill-extrusion-base": [
+                    "step",
+                    ["zoom"],
+                    0,
+                    16,
+                    ["coalesce", ["get", "render_min_height"], 0],
+                  ],
+                  "fill-extrusion-opacity": 0.4,
+                },
+              },
+              labelLayerId
+            );
+          }
+
+          // Add marker at location with primary color - custom teardrop pin
+          const markerEl = document.createElement("div");
+          const pinSVG = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "svg"
+          );
+          pinSVG.setAttribute("viewBox", "0 0 24 24");
+          pinSVG.setAttribute("width", "32");
+          pinSVG.setAttribute("height", "32");
+          pinSVG.style.filter = "drop-shadow(0 2px 6px rgba(0, 0, 0, 0.3))";
+          pinSVG.style.color = "hsl(var(--primary))";
+          pinSVG.innerHTML =
+            '<path fill="currentColor" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>';
+
+          markerEl.appendChild(pinSVG);
+
+          new maplibregl.Marker({
+            element: markerEl,
+            anchor: "bottom",
+          })
+            .setLngLat([location.lng, location.lat])
+            .addTo(map);
+        });
+
+        mapInstanceRef.current = map;
+      } catch (error) {
+        console.error("Error initializing location viewer map:", error);
+      }
+    };
+
+    initMap();
+
+    return () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
+    };
+  }, [location]);
+
+  return (
+    <div className="relative w-full h-full">
+      <div ref={mapRef} className="w-full h-full" />
+
+      {/* Get Directions button */}
+      <div className="absolute bottom-4 left-4 right-4 z-10">
+        <Button onClick={onGetDirections} className="w-full shadow-lg">
+          Get directions
+        </Button>
+      </div>
+
+      {/* Address overlay at top */}
+      {location.address && (
+        <div className="absolute top-4 left-4 right-4 z-10">
+          <div className="bg-background/95 backdrop-blur-sm rounded-lg p-3 shadow-lg">
+            <p className="text-sm font-medium">{location.address}</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ConversationPage() {
   const params = useParams();
   const search = useSearchParams();
@@ -198,6 +532,7 @@ export default function ConversationPage() {
     );
   }, [participantName]);
 
+  const { presence, currentUserId: presenceUserId } = usePresence();
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -216,6 +551,34 @@ export default function ConversationPage() {
   const [contactError, setContactError] = useState<string | null>(null);
   const [reactionTargetId, setReactionTargetId] = useState<string | null>(null);
   const [reactionError, setReactionError] = useState<string | null>(null);
+  const [aiToolsDialogOpen, setAiToolsDialogOpen] = useState(false);
+  const [pendingTranslateMessage, setPendingTranslateMessage] =
+    useState<Message | null>(null);
+  const [sendDrawerOpen, setSendDrawerOpen] = useState(false);
+  const [albumDrawerOpen, setAlbumDrawerOpen] = useState(false);
+  const [locationDrawerOpen, setLocationDrawerOpen] = useState(false);
+  const [selectedLocation, setSelectedLocation] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
+  const [viewLocationModalOpen, setViewLocationModalOpen] = useState(false);
+  const [viewingLocation, setViewingLocation] = useState<{
+    lat: number;
+    lng: number;
+    address?: string;
+  } | null>(null);
+  const [directionsDrawerOpen, setDirectionsDrawerOpen] = useState(false);
+  const [addressInput, setAddressInput] = useState("");
+  const [locationMapReady, setLocationMapReady] = useState(false);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchingAddress, setSearchingAddress] = useState(false);
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const locationMapRef = useRef<HTMLDivElement | null>(null);
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const justSelectedAddressRef = useRef(false);
+  const pinElementRef = useRef<HTMLDivElement | null>(null);
+  const isDraggingMapRef = useRef(false);
   const messageIdsRef = useRef<Set<string>>(new Set());
   const currentUserIdRef = useRef<string | null>(null);
   const pendingReceiptsRef = useRef<
@@ -270,6 +633,33 @@ export default function ConversationPage() {
       timestamp: number;
     }>
   >([]);
+  const [translations, setTranslations] = useState<
+    Record<string, MessageTranslation>
+  >({});
+  const [autoTranslateLanguages, setAutoTranslateLanguages] = useState<
+    Set<string>
+  >(() => {
+    // Load from localStorage on mount
+    try {
+      const saved = localStorage.getItem("autoTranslateLanguages");
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+  const [stoppedAutoTranslateLanguages, setStoppedAutoTranslateLanguages] =
+    useState<Set<string>>(new Set());
+  // Track message IDs that existed when auto-translate was enabled for each language
+  const preExistingMessagesRef = useRef<Record<string, Set<string>>>({});
+  const {
+    modelState,
+    loadingProgress,
+    translateText,
+    detectLanguage,
+    askSemantic,
+    initializeModel,
+    checkModelCached,
+  } = useWebLLM();
 
   const copyToClipboard = useCallback(async (text: string) => {
     try {
@@ -294,6 +684,10 @@ export default function ConversationPage() {
     } catch {
       return false;
     }
+  }, []);
+
+  const handlePhotoSelect = useCallback(() => {
+    photoInputRef.current?.click();
   }, []);
 
   const startLongPress = useCallback((id: string) => {
@@ -431,6 +825,21 @@ export default function ConversationPage() {
               console.log(
                 `Found ${incoming.length} new messages while tab was hidden`
               );
+
+              // Load translations from database for new messages
+              const translationsFromDb: Record<string, MessageTranslation> = {};
+              ((data.messages as Message[]) ?? []).forEach((m) => {
+                if (m.translation && !messageIdsRef.current.has(m.id)) {
+                  translationsFromDb[m.id] = {
+                    translatedText: m.translation.translatedText,
+                    detectedLanguage:
+                      m.translation.detectedLanguage || undefined,
+                    targetLanguage: m.translation.targetLanguage,
+                  };
+                }
+              });
+              setTranslations((prev) => ({ ...prev, ...translationsFromDb }));
+
               setMessages((prev) => sortUniqueMessages([...prev, ...incoming]));
               shouldAutoScrollRef.current = true;
             }
@@ -531,6 +940,19 @@ export default function ConversationPage() {
               })
           );
           setMessages(sortUniqueMessages(normalized ?? []));
+
+          // Load translations from database
+          const translationsFromDb: Record<string, MessageTranslation> = {};
+          (data.messages as Message[] | undefined)?.forEach((m) => {
+            if (m.translation) {
+              translationsFromDb[m.id] = {
+                translatedText: m.translation.translatedText,
+                detectedLanguage: m.translation.detectedLanguage || undefined,
+                targetLanguage: m.translation.targetLanguage,
+              };
+            }
+          });
+          setTranslations(translationsFromDb);
           const otherMsg = (data.messages as Message[] | undefined)?.find(
             (m) => m.sender_id && m.sender_id !== user?.id
           );
@@ -624,6 +1046,20 @@ export default function ConversationPage() {
               }
             : msg;
           const normalizedMsg = normalizeMessage(msgWithReceipts as Message);
+
+          // Load translation from database if it exists
+          if (msg.translation) {
+            setTranslations((prev) => ({
+              ...prev,
+              [msg.id]: {
+                translatedText: msg.translation!.translatedText,
+                detectedLanguage:
+                  msg.translation!.detectedLanguage || undefined,
+                targetLanguage: msg.translation!.targetLanguage,
+              },
+            }));
+          }
+
           shouldAutoScrollRef.current = true;
           setMessages((prev) =>
             prev.some((m) => m.id === msg.id)
@@ -641,6 +1077,27 @@ export default function ConversationPage() {
           );
         }
       );
+    channel.on(
+      "postgres_changes",
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: "messages",
+        filter: `conversation_id=eq.${conversationId}`,
+      },
+      (payload: any) => {
+        console.log("Realtime UPDATE event:", payload.new);
+        const msg = payload.new as Message;
+        if (msg.deleted_at) {
+          // Message was deleted
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === msg.id ? { ...m, deleted_at: msg.deleted_at } : m
+            )
+          );
+        }
+      }
+    );
     channel.on(
       "postgres_changes",
       {
@@ -759,6 +1216,513 @@ export default function ConversationPage() {
       } catch {}
     };
   }, [conversationId]);
+
+  // Initialize location map
+  useEffect(() => {
+    console.log("[LocationMap] useEffect triggered", {
+      locationDrawerOpen,
+      hasRef: !!locationMapRef.current,
+    });
+
+    if (!locationDrawerOpen) {
+      console.log("[LocationMap] Drawer not open, skipping");
+      setLocationMapReady(false); // Reset fade-in state
+      return;
+    }
+
+    let mapInstance: MaplibreMap | null = null;
+    let canceled = false;
+    let pinElement: HTMLElement | null = null;
+
+    const initMap = async () => {
+      try {
+        console.log("[LocationMap] Starting initMap");
+
+        // Wait for the ref to be available (drawer content to mount)
+        let retries = 0;
+        while (!locationMapRef.current && !canceled && retries < 20) {
+          console.log("[LocationMap] Waiting for ref, attempt", retries + 1);
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          retries++;
+        }
+
+        if (!locationMapRef.current || canceled) {
+          console.log("[LocationMap] Aborted - no ref or canceled", {
+            hasRef: !!locationMapRef.current,
+            canceled,
+            retries,
+          });
+          return;
+        }
+
+        // Wait a bit more for drawer animation to complete
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        // Check container dimensions
+        const rect = locationMapRef.current.getBoundingClientRect();
+        console.log("[LocationMap] Container dimensions:", {
+          width: rect.width,
+          height: rect.height,
+          top: rect.top,
+          left: rect.left,
+        });
+
+        // If container has zero dimensions, it won't work
+        if (rect.width === 0 || rect.height === 0) {
+          console.error(
+            "[LocationMap] Container has ZERO dimensions! Cannot initialize map."
+          );
+          console.error(
+            "[LocationMap] Parent dimensions:",
+            locationMapRef.current.parentElement?.getBoundingClientRect()
+          );
+          return;
+        }
+
+        console.log(
+          "[LocationMap] Initializing location map...",
+          locationMapRef.current
+        );
+
+        // Load the style (try local first, then fallback to OpenFreeMap)
+        let style: string | StyleSpecification;
+        try {
+          console.log(
+            "[LocationMap] Fetching local style from /maps/proximity-dark.json"
+          );
+          const res = await fetch("/maps/proximity-dark.json", {
+            cache: "no-store",
+          });
+          console.log("[LocationMap] Fetch response:", {
+            ok: res.ok,
+            status: res.status,
+          });
+          if (res.ok) {
+            style = (await res.json()) as StyleSpecification;
+            console.log("[LocationMap] Loaded local map style successfully", {
+              hasStyle: !!style,
+              styleType: typeof style,
+            });
+          } else {
+            style = "https://tiles.openfreemap.org/styles/positron";
+            console.log(
+              "[LocationMap] Local style not found, using OpenFreeMap"
+            );
+          }
+        } catch (err) {
+          console.warn(
+            "[LocationMap] Failed to fetch local style, using OpenFreeMap",
+            err
+          );
+          style = "https://tiles.openfreemap.org/styles/positron";
+        }
+
+        if (canceled) {
+          console.log("[LocationMap] Canceled after style load");
+          return;
+        }
+
+        // Get user location from presence context (already available from MapCanvas)
+        const userPresence = presenceUserId ? presence[presenceUserId] : null;
+        const userLat = userPresence?.lat;
+        const userLng = userPresence?.lng;
+
+        // Use user location if available, otherwise fallback to London
+        const fallbackLat = 51.5074;
+        const fallbackLng = -0.1276;
+        const initialLat =
+          userLat && Number.isFinite(userLat) ? userLat : fallbackLat;
+        const initialLng =
+          userLng && Number.isFinite(userLng) ? userLng : fallbackLng;
+
+        console.log("[LocationMap] Using location:", {
+          source: userLat && userLng ? "presence" : "fallback",
+          lat: initialLat,
+          lng: initialLng,
+        });
+
+        setSelectedLocation({ lat: initialLat, lng: initialLng });
+
+        if (!locationMapRef.current || canceled) {
+          console.warn("[LocationMap] Map container not available or canceled");
+          return;
+        }
+
+        console.log("[LocationMap] Creating map instance with config:", {
+          hasContainer: !!locationMapRef.current,
+          center: [initialLng, initialLat],
+          zoom: 15,
+          pitch: 35,
+          styleType: typeof style,
+        });
+
+        // Initialize map
+        mapInstance = new maplibregl.Map({
+          container: locationMapRef.current,
+          style,
+          center: [initialLng, initialLat],
+          zoom: 15,
+          pitch: 35,
+          // @ts-expect-error antialias is supported by MapLibre at runtime
+          antialias: true,
+          attributionControl: false,
+          minZoom: 15,
+          maxZoom: 15,
+        });
+
+        console.log("[LocationMap] Map instance created successfully");
+
+        // Store map instance reference for search results
+        if (locationMapRef.current) {
+          (locationMapRef.current as any).__mapInstance = mapInstance;
+        }
+
+        mapInstance.on("load", () => {
+          console.log("[LocationMap] Map 'load' event fired");
+          if (canceled) {
+            console.log("[LocationMap] Canceled in load handler");
+            return;
+          }
+
+          // Log map and canvas status
+          const canvas = mapInstance?.getCanvas();
+          const canvasContainer = mapInstance?.getCanvasContainer();
+          console.log("[LocationMap] Map loaded - canvas info:", {
+            hasCanvas: !!canvas,
+            canvasWidth: canvas?.width,
+            canvasHeight: canvas?.height,
+            canvasStyle: canvas?.style.cssText,
+            hasCanvasContainer: !!canvasContainer,
+          });
+
+          // Check if style has loaded
+          const mapStyle = mapInstance?.getStyle();
+          console.log("[LocationMap] Map style info:", {
+            hasStyle: !!mapStyle,
+            styleName: mapStyle?.name,
+            layerCount: mapStyle?.layers?.length,
+            sourceCount: Object.keys(mapStyle?.sources || {}).length,
+          });
+
+          // Resize map to ensure it has proper dimensions after drawer animation
+          setTimeout(() => {
+            if (mapInstance && !canceled) {
+              console.log("[LocationMap] Calling resize (100ms)");
+              mapInstance.resize();
+              const newCanvas = mapInstance.getCanvas();
+              console.log("[LocationMap] After resize:", {
+                canvasWidth: newCanvas?.width,
+                canvasHeight: newCanvas?.height,
+              });
+            }
+          }, 100);
+
+          // Additional resize after a longer delay to catch any late-rendering animations
+          setTimeout(() => {
+            if (mapInstance && !canceled) {
+              console.log("[LocationMap] Calling resize (300ms)");
+              mapInstance.resize();
+              const newCanvas = mapInstance.getCanvas();
+              console.log("[LocationMap] After second resize:", {
+                canvasWidth: newCanvas?.width,
+                canvasHeight: newCanvas?.height,
+              });
+            }
+          }, 300);
+
+          // Hide road numbers (like MapCanvas does)
+          const hideRoadNumbers = () => {
+            const layers = mapInstance?.getStyle().layers;
+            if (!layers) return;
+            layers.forEach((layer) => {
+              if (layer.type !== "symbol" || !layer.layout) return;
+              const textField = layer.layout["text-field"] as unknown;
+              const hasRefToken = (field: unknown) => {
+                if (typeof field === "string") return field.includes("{ref}");
+                if (Array.isArray(field))
+                  return JSON.stringify(field).includes('"ref"');
+                return false;
+              };
+              if (hasRefToken(textField)) {
+                mapInstance?.setLayoutProperty(layer.id, "visibility", "none");
+              }
+            });
+          };
+          hideRoadNumbers();
+
+          // Add building extrusions
+          const addBuildingExtrusions = () => {
+            const BUILDING_SOURCE_ID = "openfreemap-buildings";
+            if (mapInstance?.getSource(BUILDING_SOURCE_ID)) return;
+
+            const labelLayerId = mapInstance
+              ?.getStyle()
+              .layers?.find(
+                (layer) =>
+                  layer.type === "symbol" &&
+                  (layer.layout as { "text-field"?: unknown } | undefined)?.[
+                    "text-field"
+                  ]
+              )?.id;
+
+            mapInstance?.addSource(BUILDING_SOURCE_ID, {
+              url: "https://tiles.openfreemap.org/planet",
+              type: "vector",
+            });
+
+            mapInstance?.addLayer(
+              {
+                id: "3d-buildings",
+                source: BUILDING_SOURCE_ID,
+                "source-layer": "building",
+                type: "fill-extrusion",
+                minzoom: 15,
+                filter: ["!=", ["get", "hide_3d"], true],
+                paint: {
+                  "fill-extrusion-color": [
+                    "interpolate",
+                    ["linear"],
+                    ["get", "render_height"],
+                    0,
+                    "#0f1113",
+                    120,
+                    "#13171b",
+                    300,
+                    "#161b20",
+                  ],
+                  "fill-extrusion-height": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    15,
+                    0,
+                    16,
+                    ["get", "render_height"],
+                  ],
+                  "fill-extrusion-base": [
+                    "step",
+                    ["zoom"],
+                    0,
+                    16,
+                    ["coalesce", ["get", "render_min_height"], 0],
+                  ],
+                  "fill-extrusion-opacity": 0.4,
+                },
+              },
+              labelLayerId
+            );
+          };
+          addBuildingExtrusions();
+
+          // Create a fixed center pin using CSS positioning (not a MapLibre marker)
+          // This ensures it stays perfectly centered during zoom animations
+          const pinContainer = document.createElement("div");
+          pinContainer.style.cssText = `
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 32px;
+            height: 32px;
+            margin-left: -16px;
+            margin-top: -32px;
+            z-index: 10;
+            pointer-events: none;
+          `;
+
+          const pinSVG = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "svg"
+          );
+          pinSVG.setAttribute("viewBox", "0 0 24 24");
+          pinSVG.setAttribute("width", "32");
+          pinSVG.setAttribute("height", "32");
+          pinSVG.style.cssText = `
+            filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.3));
+            color: hsl(var(--primary));
+            transition: all 0.2s ease-out;
+          `;
+          pinSVG.innerHTML =
+            '<path fill="currentColor" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>';
+
+          pinContainer.appendChild(pinSVG);
+
+          // CRITICAL: Append to the parent of the map container, not the map container itself
+          // The map container gets internal transformations during zoom, which would move the pin
+          // By appending to the parent, the pin stays fixed in viewport coordinates
+          locationMapRef.current?.parentElement?.appendChild(pinContainer);
+
+          // Store reference for cleanup and visibility control
+          pinElement = pinContainer;
+          pinElementRef.current = pinContainer;
+
+          // Track map movement and update selected location only (not pin position)
+          const updateSelectedLocation = () => {
+            if (mapInstance) {
+              const center = mapInstance.getCenter();
+              setSelectedLocation({ lat: center.lat, lng: center.lng });
+
+              // If user dragged the map, clear the address input
+              if (isDraggingMapRef.current) {
+                setAddressInput("");
+              }
+            }
+          };
+
+          mapInstance!.on("move", updateSelectedLocation);
+          mapInstance!.on("zoom", updateSelectedLocation);
+
+          // Track dragging state for pin animation and address clearing
+          mapInstance!.on("dragstart", () => {
+            isDraggingMapRef.current = true;
+            pinSVG.style.transform = "scale(1.15) translateY(-4px)";
+          });
+
+          mapInstance!.on("dragend", () => {
+            pinSVG.style.transform = "scale(1) translateY(0)";
+            // Reset flag after a short delay to allow updateSelectedLocation to fire
+            setTimeout(() => {
+              isDraggingMapRef.current = false;
+            }, 100);
+          });
+
+          // Map is ready - fade it in
+          setLocationMapReady(true);
+
+          console.log("[LocationMap] Map loaded and centered on user location");
+        });
+
+        mapInstance.on("error", (err) => {
+          console.error("[LocationMap] Map error event:", err);
+        });
+
+        mapInstance.on("styledata", () => {
+          console.log("[LocationMap] styledata event fired");
+        });
+
+        mapInstance.on("sourcedata", (e) => {
+          console.log(
+            "[LocationMap] sourcedata event:",
+            e.sourceId,
+            e.isSourceLoaded
+          );
+        });
+
+        mapInstance.on("render", () => {
+          console.log("[LocationMap] render event");
+        });
+      } catch (error) {
+        console.error("Failed to initialize location map:", error);
+      }
+    };
+
+    initMap();
+
+    return () => {
+      canceled = true;
+      if (mapInstance) {
+        try {
+          mapInstance.remove();
+        } catch {
+          // ignore
+        }
+      }
+      // Clean up the pin element
+      if (pinElement && pinElement.parentElement) {
+        pinElement.parentElement.removeChild(pinElement);
+      }
+    };
+  }, [locationDrawerOpen]);
+
+  // Debounced address search using Nominatim
+  useEffect(() => {
+    if (!addressInput.trim()) {
+      setSearchResults([]);
+      setShowSearchResults(false);
+      return;
+    }
+
+    // Don't search if we just selected an address
+    if (justSelectedAddressRef.current) {
+      justSelectedAddressRef.current = false;
+      return;
+    }
+
+    // Clear existing timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    // Show results view immediately when typing
+    setShowSearchResults(true);
+    setSearchingAddress(true);
+
+    // Debounce the API call
+    searchTimeoutRef.current = setTimeout(async () => {
+      try {
+        // Nominatim bounding box for Greater London
+        // South-West: 51.28, -0.51 | North-East: 51.69, 0.33
+        const response = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+            addressInput
+          )}&limit=5&bounded=1&viewbox=-0.51,51.69,0.33,51.28`,
+          {
+            headers: {
+              "User-Agent": "ProximityApp/1.0",
+            },
+          }
+        );
+        const data = await response.json();
+        setSearchResults(data);
+        setSearchingAddress(false);
+      } catch (error) {
+        console.error("[LocationMap] Address search error:", error);
+        setSearchResults([]);
+        setSearchingAddress(false);
+      }
+    }, 500);
+
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [addressInput]);
+
+  // Handle selecting a search result
+  const handleSelectSearchResult = useCallback((result: any) => {
+    const lat = parseFloat(result.lat);
+    const lng = parseFloat(result.lon);
+
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      // Mark that we're programmatically setting the input
+      justSelectedAddressRef.current = true;
+
+      setSelectedLocation({ lat, lng });
+      setAddressInput(result.display_name);
+      setShowSearchResults(false);
+
+      // Animate map to new location with flyTo
+      const mapContainer = locationMapRef.current;
+      if (mapContainer && (mapContainer as any).__mapInstance) {
+        const mapInstance = (mapContainer as any).__mapInstance;
+        // Use easeTo instead of flyTo as zoom is locked at 15
+        mapInstance.easeTo({
+          center: [lng, lat],
+          duration: 1500,
+          easing: (t: number) => t * (2 - t), // easeOutQuad
+        });
+      }
+    }
+  }, []);
+
+  // Hide/show pin based on search results visibility
+  useEffect(() => {
+    if (pinElementRef.current) {
+      pinElementRef.current.style.display = showSearchResults
+        ? "none"
+        : "block";
+    }
+  }, [showSearchResults]);
 
   // scroll to bottom on new messages
   useEffect(() => {
@@ -963,6 +1927,140 @@ export default function ConversationPage() {
     // noop route protection; keep simple
   }, [conversationId, messages.length]);
 
+  // Persist auto-translate languages to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "autoTranslateLanguages",
+        JSON.stringify(Array.from(autoTranslateLanguages))
+      );
+    } catch (err) {
+      console.error("Failed to save auto-translate state:", err);
+    }
+  }, [autoTranslateLanguages]);
+
+  // Initialize pre-existing messages for languages loaded from localStorage
+  useEffect(() => {
+    if (messages.length === 0) return;
+
+    // For each enabled language that doesn't have pre-existing tracking yet,
+    // record all current messages as pre-existing
+    autoTranslateLanguages.forEach((lang) => {
+      if (!preExistingMessagesRef.current[lang]) {
+        preExistingMessagesRef.current[lang] = new Set(
+          messages.map((m) => m.id)
+        );
+        console.log(
+          "[Auto-translate] Initialized pre-existing tracking for",
+          lang,
+          "with",
+          messages.length,
+          "messages"
+        );
+      }
+    });
+  }, [messages.length, autoTranslateLanguages]);
+
+  // Auto-translate new messages in enabled languages
+  useEffect(() => {
+    if (autoTranslateLanguages.size === 0 || messages.length === 0) return;
+    if (!currentUserId) return;
+    if (modelState !== "ready") return;
+
+    const messagesToTranslate = messages.filter(
+      (m) =>
+        !translations[m.id] && m.sender_id !== currentUserId && !m.deleted_at
+    );
+
+    if (messagesToTranslate.length === 0) return;
+
+    console.log(
+      "[Auto-translate] Checking",
+      messagesToTranslate.length,
+      "messages, enabled:",
+      Array.from(autoTranslateLanguages)
+    );
+
+    const autoTranslateNewMessages = async () => {
+      for (const message of messagesToTranslate) {
+        try {
+          const rawMsgLang = await detectLanguage(message.body);
+          const msgLang = normalizeLanguage(rawMsgLang);
+
+          // Check if this message existed before auto-translate was enabled for this language
+          const preExistingIds = preExistingMessagesRef.current[msgLang];
+          const isPreExisting =
+            preExistingIds && preExistingIds.has(message.id);
+
+          if (
+            autoTranslateLanguages.has(msgLang) &&
+            !stoppedAutoTranslateLanguages.has(msgLang) &&
+            !isPreExisting // Only translate messages that arrived AFTER enabling auto-translate
+          ) {
+            console.log(
+              "[Auto-translate] Translating",
+              message.id,
+              "from",
+              rawMsgLang
+            );
+            setTranslations((prev) => ({
+              ...prev,
+              [message.id]: {
+                translatedText: "",
+                targetLanguage: "English",
+                isLoading: true,
+                loadingMessage: `Auto-translating ${rawMsgLang}...`,
+              },
+            }));
+
+            const result = await translateText(
+              message.body,
+              "English",
+              rawMsgLang
+            );
+
+            setTranslations((prev) => ({
+              ...prev,
+              [message.id]: {
+                ...result,
+                detectedLanguage: rawMsgLang, // Store original for display
+                isLoading: false,
+              },
+            }));
+
+            // Save to database
+            try {
+              await fetch(`/api/messages/${message.id}/translation`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  translatedText: result.translatedText,
+                  detectedLanguage: msgLang,
+                  targetLanguage: result.targetLanguage,
+                }),
+              });
+            } catch (saveErr) {
+              console.error("Failed to save auto-translation:", saveErr);
+            }
+          }
+        } catch (err) {
+          console.error("Auto-translation error:", err);
+        }
+      }
+    };
+
+    autoTranslateNewMessages();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    messages,
+    autoTranslateLanguages,
+    stoppedAutoTranslateLanguages,
+    translations,
+    currentUserId,
+    modelState, // Added to ensure we only auto-translate when model is ready
+    // NOTE: detectLanguage and translateText intentionally omitted to prevent re-running when model loads
+  ]);
+
   useEffect(() => {
     if (!conversationId || !currentUserId) return;
     const hasUnreadFromOthers = messages.some(
@@ -1041,6 +2139,183 @@ export default function ConversationPage() {
     }
   };
 
+  // Normalize language names for consistent comparison
+  const normalizeLanguage = useCallback((lang: string): string => {
+    return lang
+      .toLowerCase()
+      .trim()
+      .replace(/\s+language$/i, "") // Remove " language" suffix
+      .replace(/\s+/g, " "); // Normalize whitespace
+  }, []);
+
+  // Helper function to perform translation without cache checks
+  const performTranslation = useCallback(
+    async (msg: Message) => {
+      try {
+        // Set loading state
+        setTranslations((prev) => ({
+          ...prev,
+          [msg.id]: {
+            translatedText: "",
+            targetLanguage: "English",
+            isLoading: true,
+            loadingMessage: "Detecting language...",
+          },
+        }));
+
+        // Detect language and translate
+        const rawLang = await detectLanguage(msg.body);
+        const detectedLang = normalizeLanguage(rawLang);
+
+        // Update with fun language-specific message
+        setTranslations((prev) => ({
+          ...prev,
+          [msg.id]: {
+            ...prev[msg.id],
+            loadingMessage: `Learning ${rawLang}...`,
+          },
+        }));
+
+        const result = await translateText(msg.body, "English", rawLang);
+
+        const translation = {
+          ...result,
+          detectedLanguage: rawLang, // Store the original (capitalized) name for display
+          isLoading: false,
+        };
+
+        setTranslations((prev) => ({
+          ...prev,
+          [msg.id]: translation,
+        }));
+
+        // Enable auto-translate for this language (using normalized name)
+        setAutoTranslateLanguages((prev) => {
+          const next = new Set(prev);
+          if (!next.has(detectedLang)) {
+            // First time enabling for this language - record all existing message IDs
+            // These are messages that are already on screen when we enable auto-translate
+            preExistingMessagesRef.current[detectedLang] = new Set(
+              messages.map((m) => m.id)
+            );
+            console.log(
+              "[Auto-translate] Enabled for",
+              detectedLang,
+              "- recorded",
+              preExistingMessagesRef.current[detectedLang].size,
+              "pre-existing messages"
+            );
+          }
+          next.add(detectedLang);
+          return next;
+        });
+
+        // Save translation to database
+        try {
+          await fetch(`/api/messages/${msg.id}/translation`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              translatedText: result.translatedText,
+              detectedLanguage: detectedLang,
+              targetLanguage: result.targetLanguage,
+            }),
+          });
+        } catch (saveErr) {
+          console.error("Failed to save translation to database:", saveErr);
+          // Don't show error to user - translation still works in-memory
+        }
+
+        // Auto-translate other messages in the same language
+        const messagesToAutoTranslate = messages.filter(
+          (m) =>
+            m.id !== msg.id &&
+            !translations[m.id] &&
+            m.sender_id !== currentUserId &&
+            !m.deleted_at
+        );
+
+        for (const message of messagesToAutoTranslate) {
+          try {
+            const rawMsgLang = await detectLanguage(message.body);
+            const msgLang = normalizeLanguage(rawMsgLang);
+            if (
+              msgLang === detectedLang &&
+              !stoppedAutoTranslateLanguages.has(msgLang)
+            ) {
+              setTranslations((prev) => ({
+                ...prev,
+                [message.id]: {
+                  translatedText: "",
+                  targetLanguage: "English",
+                  isLoading: true,
+                  loadingMessage: `Translating ${rawMsgLang}...`,
+                },
+              }));
+
+              const autoResult = await translateText(
+                message.body,
+                "English",
+                rawMsgLang
+              );
+
+              setTranslations((prev) => ({
+                ...prev,
+                [message.id]: {
+                  ...autoResult,
+                  detectedLanguage: rawMsgLang, // Store original for display
+                  isLoading: false,
+                },
+              }));
+
+              // Save auto-translation to database
+              try {
+                await fetch(`/api/messages/${message.id}/translation`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    translatedText: autoResult.translatedText,
+                    detectedLanguage: msgLang,
+                    targetLanguage: autoResult.targetLanguage,
+                  }),
+                });
+              } catch (saveErr) {
+                console.error("Failed to save auto-translation:", saveErr);
+              }
+            }
+          } catch (err) {
+            console.error(
+              "Auto-translation error for message:",
+              message.id,
+              err
+            );
+          }
+        }
+      } catch (err) {
+        console.error("Translation error:", err);
+        setTranslations((prev) => ({
+          ...prev,
+          [msg.id]: {
+            translatedText: "",
+            targetLanguage: "English",
+            isLoading: false,
+            error: "Failed to translate message",
+          },
+        }));
+        toast.error("Translation failed");
+      }
+    },
+    [
+      detectLanguage,
+      translateText,
+      normalizeLanguage,
+      messages,
+      translations,
+      currentUserId,
+      stoppedAutoTranslateLanguages,
+    ]
+  );
+
   const handleMessageAction = useCallback(
     async (
       action: "reply" | "copy" | "info" | "translate" | "delete",
@@ -1068,12 +2343,44 @@ export default function ConversationPage() {
       } else if (action === "info" && msg) {
         setInfoMessage(msg);
         setInfoDrawerOpen(true);
+      } else if (action === "translate" && msg) {
+        // Translation feature disabled for now
+        toast.info("Translation feature coming soon");
+      } else if (action === "delete" && msg) {
+        try {
+          console.log(
+            "Deleting message:",
+            msg.id,
+            "from conversation:",
+            conversationId
+          );
+          const res = await fetch(`/api/messages/${conversationId}/${msg.id}`, {
+            method: "DELETE",
+          });
+          const data = await res.json().catch(() => ({}));
+          console.log("Delete response:", res.status, data);
+          if (res.ok) {
+            toast.success("Message deleted");
+          } else {
+            toast.error(data.error || "Failed to delete message");
+          }
+        } catch (err) {
+          console.error("Delete message error:", err);
+          toast.error("Failed to delete message");
+        }
       }
-      // TODO: wire translate/delete if needed
+      // TODO: wire if needed
       setFocusedMessageId(null);
       setFocusedMessageRect(null);
     },
-    [copyToClipboard]
+    [
+      conversationId,
+      copyToClipboard,
+      checkModelCached,
+      modelState,
+      initializeModel,
+      performTranslation,
+    ]
   );
 
   const handleReactionToggle = useCallback(
@@ -1203,6 +2510,19 @@ export default function ConversationPage() {
         );
       setHasMore(Boolean(data.hasMore));
       if (incoming.length) {
+        // Load translations from database for older messages
+        const translationsFromDb: Record<string, MessageTranslation> = {};
+        ((data.messages as Message[]) ?? []).forEach((m) => {
+          if (m.translation) {
+            translationsFromDb[m.id] = {
+              translatedText: m.translation.translatedText,
+              detectedLanguage: m.translation.detectedLanguage || undefined,
+              targetLanguage: m.translation.targetLanguage,
+            };
+          }
+        });
+        setTranslations((prev) => ({ ...prev, ...translationsFromDb }));
+
         prevHeightRef.current = container?.scrollHeight ?? null;
         prevScrollTopRef.current = container?.scrollTop ?? null;
         pendingPrependAdjustRef.current = true;
@@ -1400,6 +2720,26 @@ export default function ConversationPage() {
     el.addEventListener("scroll", handleScroll, { passive: true });
     return () => el.removeEventListener("scroll", handleScroll);
   }, [hasMore, loadingOlder, loadOlder, messages.length, cancelLongPress]);
+
+  // Calculate the latest translated message for each language
+  const latestTranslatedMessageByLanguage = useMemo(() => {
+    const latest: Record<string, string> = {}; // language -> message id
+
+    // Iterate in reverse (latest messages first)
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      const translation = translations[m.id];
+
+      if (
+        translation?.detectedLanguage &&
+        !latest[translation.detectedLanguage]
+      ) {
+        latest[translation.detectedLanguage] = m.id;
+      }
+    }
+
+    return latest;
+  }, [messages, translations]);
 
   return (
     <div className="h-svh min-h-svh bg-background text-foreground flex flex-col">
@@ -1790,17 +3130,6 @@ export default function ConversationPage() {
                           className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleMessageAction("info", m);
-                            setReactionTargetId(null);
-                          }}
-                        >
-                          <Info className="h-4 w-4" />
-                          Info
-                        </button>
-                        <button
-                          className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
-                          onClick={(e) => {
-                            e.stopPropagation();
                             handleMessageAction("translate", m);
                             setReactionTargetId(null);
                           }}
@@ -1808,18 +3137,35 @@ export default function ConversationPage() {
                           <Languages className="h-4 w-4" />
                           Translate
                         </button>
-                        <div className="my-1 border-t border-border" />
-                        <button
-                          className="flex w-full items-center gap-2 px-3 py-2 text-sm text-destructive hover:bg-destructive/10 transition-colors"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleMessageAction("delete", m);
-                            setReactionTargetId(null);
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          Delete
-                        </button>
+                        {isMe && (
+                          <button
+                            className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleMessageAction("info", m);
+                              setReactionTargetId(null);
+                            }}
+                          >
+                            <Info className="h-4 w-4" />
+                            Info
+                          </button>
+                        )}
+                        {isMe && (
+                          <div className="my-1 border-t border-border" />
+                        )}
+                        {isMe && (
+                          <button
+                            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-destructive hover:bg-destructive/10 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleMessageAction("delete", m);
+                              setReactionTargetId(null);
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Delete
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1859,114 +3205,271 @@ export default function ConversationPage() {
                     </div>
                   );
                 })}
-              <div
-                className={`relative rounded-lg px-3 py-2 max-w-[75%] sm:max-w-[65%] lg:max-w-[55%] ${
-                  isMe
-                    ? "bg-primary text-white rounded-br-none"
-                    : "bg-muted text-foreground rounded-bl-none"
-                } transition-all duration-300 ease-out overflow-hidden pointer-events-auto`}
-                onMouseDown={(e) => {
-                  if (e.button !== 0) return;
-                  startLongPress(m.id);
-                }}
-                onMouseUp={cancelLongPress}
-                onMouseLeave={cancelLongPress}
-                onTouchStart={() => startLongPress(m.id)}
-                onTouchEnd={cancelLongPress}
-                onTouchCancel={cancelLongPress}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setReactionTargetId(m.id);
-                }}
-                onDoubleClick={(e) => {
-                  e.stopPropagation();
-                  void handleReactionToggle(m, "heart");
-                }}
-              >
-                {m.reply_to_id && m.reply_to_body ? (
-                  <div
-                    className={`mb-2 rounded px-2 py-1.5 border-l-2 ${
-                      isMe
-                        ? "bg-white/20 border-white/40"
-                        : "bg-black/10 border-black/30"
-                    }`}
-                  >
-                    <div
-                      className={`text-[10px] font-semibold mb-0.5 ${
-                        isMe ? "text-white/90" : "text-foreground/80"
-                      }`}
-                    >
-                      {m.reply_to_sender_id === currentUserId
-                        ? "You"
-                        : participantName || "Them"}
-                    </div>
-                    <div
-                      className={`text-xs line-clamp-2 ${
-                        isMe ? "text-white/80" : "text-foreground/70"
-                      }`}
-                    >
-                      {m.reply_to_body}
-                    </div>
-                  </div>
-                ) : null}
-                <p className="text-sm leading-relaxed wrap-break-word">
-                  {m.body}
-                </p>
+              {m.deleted_at ? (
                 <div
-                  className={`mt-1 text-xs flex items-center gap-2 ${
-                    isMe ? "text-blue-100" : "text-muted-foreground"
+                  className={`text-sm italic text-muted-foreground px-3 py-2 ${
+                    isMe ? "text-right" : "text-left"
                   }`}
-                  style={{
-                    justifyContent: isMe ? "space-between" : "space-between",
+                >
+                  Message deleted
+                </div>
+              ) : (
+                <div
+                  className={`relative rounded-lg px-3 py-2 ${
+                    m.message_type === "location"
+                      ? "w-[75%] sm:w-[65%] lg:w-[55%]"
+                      : "max-w-[75%] sm:max-w-[65%] lg:max-w-[55%]"
+                  } ${
+                    isMe
+                      ? "bg-primary text-white rounded-br-none"
+                      : "bg-muted text-foreground rounded-bl-none"
+                  } transition-all duration-300 ease-out overflow-hidden pointer-events-auto`}
+                  onMouseDown={(e) => {
+                    if (e.button !== 0) return;
+                    startLongPress(m.id);
+                  }}
+                  onMouseUp={cancelLongPress}
+                  onMouseLeave={cancelLongPress}
+                  onTouchStart={() => startLongPress(m.id)}
+                  onTouchEnd={cancelLongPress}
+                  onTouchCancel={cancelLongPress}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setReactionTargetId(m.id);
+                  }}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    void handleReactionToggle(m, "heart");
                   }}
                 >
-                  {isMe ? (
-                    <>
-                      <div className="flex-1 flex items-center gap-1">
-                        {reactionChip}
+                  {m.reply_to_id && m.reply_to_body ? (
+                    <div
+                      className={`mb-2 rounded px-2 py-1.5 border-l-2 ${
+                        isMe
+                          ? "bg-white/20 border-white/40"
+                          : "bg-black/10 border-black/30"
+                      }`}
+                    >
+                      <div
+                        className={`text-[10px] font-semibold mb-0.5 ${
+                          isMe ? "text-white/90" : "text-foreground/80"
+                        }`}
+                      >
+                        {m.reply_to_sender_id === currentUserId
+                          ? "You"
+                          : participantName || "Them"}
                       </div>
-                      <div className="flex items-center gap-1">
-                        <span>
-                          {new Date(m.created_at).toLocaleTimeString(
-                            undefined,
-                            {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                              hour12: false,
-                            }
-                          )}
-                        </span>
-                        {m.read_at ? (
-                          <CheckCheck className="h-3.5 w-3.5 text-white" />
-                        ) : m.delivered_at ? (
-                          <div className="flex gap-0.5">
-                            <Check className="h-3.5 w-3.5 text-muted-foreground" />
-                            <Check className="h-3.5 w-3.5 text-muted-foreground" />
-                          </div>
-                        ) : (
-                          <Check className="h-3.5 w-3.5 text-muted-foreground" />
-                        )}
+                      <div
+                        className={`text-xs line-clamp-2 ${
+                          isMe ? "text-white/80" : "text-foreground/70"
+                        }`}
+                      >
+                        {m.reply_to_body}
                       </div>
-                    </>
+                    </div>
+                  ) : null}
+
+                  {/* Location message content */}
+                  {m.message_type === "location" && m.metadata?.location ? (
+                    <div className="space-y-2 w-full">
+                      {/* Static map preview */}
+                      <StaticMapPreview
+                        location={{
+                          lat: m.metadata.location.lat,
+                          lng: m.metadata.location.lng,
+                        }}
+                        onClick={() => {
+                          if (m.metadata?.location) {
+                            setViewingLocation({
+                              lat: m.metadata.location.lat,
+                              lng: m.metadata.location.lng,
+                              address: m.metadata.location.address,
+                            });
+                            setViewLocationModalOpen(true);
+                          }
+                        }}
+                      />
+                      {/* Address text */}
+                      {m.metadata.location.address && (
+                        <p className="text-xs text-muted-foreground truncate">
+                          {m.metadata.location.address}
+                        </p>
+                      )}
+                    </div>
                   ) : (
-                    <>
-                      <div className="flex items-center gap-1">
-                        <span>
-                          {new Date(m.created_at).toLocaleTimeString(
-                            undefined,
-                            {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                              hour12: false,
-                            }
-                          )}
-                        </span>
-                      </div>
-                      {reactionChip}
-                    </>
+                    <p className="text-sm leading-relaxed wrap-break-word">
+                      {m.body}
+                    </p>
                   )}
+
+                  {translations[m.id] && (
+                    <div
+                      className={`mt-2 pt-2 border-t ${
+                        isMe ? "border-white/20" : "border-black/20"
+                      }`}
+                    >
+                      {translations[m.id].isLoading ? (
+                        <div
+                          className={`text-xs ${
+                            isMe ? "text-white/70" : "text-foreground/60"
+                          }`}
+                        >
+                          {modelState === "loading" && loadingProgress.text ? (
+                            <div className="flex items-center gap-2">
+                              <span className="italic">
+                                {loadingProgress.text}
+                              </span>
+                              {loadingProgress.progress > 0 && (
+                                <span className="font-semibold">
+                                  {loadingProgress.progress}%
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="italic">
+                              {translations[m.id].loadingMessage ||
+                                "Translating..."}
+                            </span>
+                          )}
+                        </div>
+                      ) : translations[m.id].error ? (
+                        <div
+                          className={`text-xs italic ${
+                            isMe ? "text-red-200" : "text-red-600"
+                          }`}
+                        >
+                          {translations[m.id].error}
+                        </div>
+                      ) : (
+                        <>
+                          <div
+                            className={`flex items-center justify-between gap-2 mb-1`}
+                          >
+                            <div
+                              className={`text-[10px] font-semibold ${
+                                isMe ? "text-white/70" : "text-foreground/60"
+                              }`}
+                            >
+                              {translations[m.id].detectedLanguage
+                                ? `Translated from ${
+                                    translations[m.id].detectedLanguage
+                                  }`
+                                : "Translation"}
+                            </div>
+                            {translations[m.id].detectedLanguage &&
+                              (() => {
+                                const normalizedLang = normalizeLanguage(
+                                  translations[m.id].detectedLanguage!
+                                );
+                                return (
+                                  autoTranslateLanguages.has(normalizedLang) &&
+                                  latestTranslatedMessageByLanguage[
+                                    translations[m.id].detectedLanguage!
+                                  ] === m.id
+                                );
+                              })() && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const rawLang =
+                                      translations[m.id].detectedLanguage;
+                                    if (rawLang) {
+                                      const normalizedLang =
+                                        normalizeLanguage(rawLang);
+                                      setStoppedAutoTranslateLanguages(
+                                        (prev) => {
+                                          const next = new Set(prev);
+                                          next.add(normalizedLang);
+                                          return next;
+                                        }
+                                      );
+                                      setAutoTranslateLanguages((prev) => {
+                                        const next = new Set(prev);
+                                        next.delete(normalizedLang);
+                                        return next;
+                                      });
+                                      toast.success(
+                                        `Stopped auto-translating ${rawLang}`
+                                      );
+                                    }
+                                  }}
+                                  className={`text-[9px] px-1.5 py-0.5 rounded transition-colors ${
+                                    isMe
+                                      ? "bg-white/20 hover:bg-white/30 text-white"
+                                      : "bg-black/10 hover:bg-black/20 text-foreground/70"
+                                  }`}
+                                >
+                                  Stop auto-translate
+                                </button>
+                              )}
+                          </div>
+                          <p
+                            className={`text-sm leading-relaxed wrap-break-word ${
+                              isMe ? "text-white/90" : "text-foreground/90"
+                            }`}
+                          >
+                            {translations[m.id].translatedText}
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  <div
+                    className={`mt-1 text-xs flex items-center gap-2 ${
+                      isMe ? "text-blue-100" : "text-muted-foreground"
+                    }`}
+                    style={{
+                      justifyContent: isMe ? "space-between" : "space-between",
+                    }}
+                  >
+                    {isMe ? (
+                      <>
+                        <div className="flex-1 flex items-center gap-1">
+                          {reactionChip}
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <span>
+                            {new Date(m.created_at).toLocaleTimeString(
+                              undefined,
+                              {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                hour12: false,
+                              }
+                            )}
+                          </span>
+                          {m.read_at ? (
+                            <CheckCheck className="h-3.5 w-3.5 text-white" />
+                          ) : m.delivered_at ? (
+                            <div className="flex gap-0.5">
+                              <Check className="h-3.5 w-3.5 text-muted-foreground" />
+                              <Check className="h-3.5 w-3.5 text-muted-foreground" />
+                            </div>
+                          ) : (
+                            <Check className="h-3.5 w-3.5 text-muted-foreground" />
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-1">
+                          <span>
+                            {new Date(m.created_at).toLocaleTimeString(
+                              undefined,
+                              {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                hour12: false,
+                              }
+                            )}
+                          </span>
+                        </div>
+                        {reactionChip}
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           );
         })}
@@ -2019,6 +3522,7 @@ export default function ConversationPage() {
               variant="ghost"
               className="rounded-full bg-muted text-foreground hover:bg-muted/80"
               aria-label="Add"
+              onClick={() => setSendDrawerOpen(true)}
             >
               <Plus className="h-4 w-4" />
             </InputGroupButton>
@@ -2129,6 +3633,402 @@ export default function ConversationPage() {
         </DrawerContent>
       </Drawer>
 
+      {/* Send drawer */}
+      <Drawer open={sendDrawerOpen} onOpenChange={setSendDrawerOpen}>
+        <DrawerContent className="pb-2">
+          <DrawerHeader className="sr-only">
+            <DrawerTitle>Send</DrawerTitle>
+          </DrawerHeader>
+          <div className="grid grid-cols-4 gap-3 px-4 pb-5">
+            <div
+              className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-xs font-semibold text-foreground transition hover:bg-muted/30 cursor-pointer"
+              onClick={handlePhotoSelect}
+            >
+              <Image className="h-5 w-5 text-foreground" />
+              <span>Photo</span>
+            </div>
+            <div
+              className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-xs font-semibold text-foreground transition hover:bg-muted/30 cursor-pointer"
+              onClick={() => setAlbumDrawerOpen(true)}
+            >
+              <BookOpen className="h-5 w-5 text-foreground" />
+              <span>Album</span>
+            </div>
+            <div
+              className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-xs font-semibold text-foreground transition hover:bg-muted/30 cursor-pointer"
+              onClick={() => setLocationDrawerOpen(true)}
+            >
+              <MapPin className="h-5 w-5 text-foreground" />
+              <span>Location</span>
+            </div>
+            <div
+              className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-xs font-semibold text-foreground transition hover:bg-muted/30 cursor-pointer"
+              onClick={() => setSendDrawerOpen(false)}
+            >
+              <UsersRound className="h-5 w-5 text-foreground" />
+              <span>Profile</span>
+            </div>
+            <div
+              className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-xs font-semibold text-foreground transition hover:bg-muted/30 cursor-pointer"
+              onClick={() => setSendDrawerOpen(false)}
+            >
+              <Calendar className="h-5 w-5 text-foreground" />
+              <span>Event</span>
+            </div>
+            <div
+              className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-xs font-semibold text-foreground transition hover:bg-muted/30 cursor-pointer"
+              onClick={() => setSendDrawerOpen(false)}
+            >
+              <UserRound className="h-5 w-5 text-foreground" />
+              <span>Contact</span>
+            </div>
+          </div>
+        </DrawerContent>
+      </Drawer>
+
+      {/* Album drawer */}
+      <Drawer open={albumDrawerOpen} onOpenChange={setAlbumDrawerOpen}>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>Send album</DrawerTitle>
+          </DrawerHeader>
+          <div className="px-4 pb-5">
+            <div className="flex gap-3 overflow-x-auto pb-2">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div
+                  key={i}
+                  className="flex-shrink-0 w-24 cursor-pointer hover:opacity-80 transition-opacity"
+                  onClick={() => setAlbumDrawerOpen(false)}
+                >
+                  <div className="w-24 h-24 rounded-lg bg-muted/30 flex items-center justify-center mb-2">
+                    <BookOpen className="h-6 w-6 text-muted-foreground" />
+                  </div>
+                  <p className="text-xs font-medium truncate">Album {i}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </DrawerContent>
+      </Drawer>
+
+      {/* Location drawer */}
+      <Drawer open={locationDrawerOpen} onOpenChange={setLocationDrawerOpen}>
+        <DrawerContent className="flex flex-col p-0" style={{ height: "85vh" }}>
+          <DrawerHeader className="px-4 pb-3 shrink-0">
+            <DrawerTitle>Send location</DrawerTitle>
+          </DrawerHeader>
+          <div className="relative flex-1 min-h-0">
+            {/* Map - full width, no border */}
+            <div
+              ref={locationMapRef}
+              className="absolute inset-0 touch-none transition-opacity duration-500"
+              style={{
+                width: "100%",
+                height: "100%",
+                zIndex: 1,
+                opacity: locationMapReady && !showSearchResults ? 1 : 0,
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+            />
+
+            {/* Search results list */}
+            <div
+              className="absolute inset-0 bg-background transition-opacity duration-500"
+              style={{
+                zIndex: 2,
+                opacity: showSearchResults ? 1 : 0,
+                pointerEvents: showSearchResults ? "auto" : "none",
+              }}
+            >
+              <ScrollArea className="h-full [&>div]:overflow-y-auto! [&>div]:scrollbar-hide">
+                <div className="px-4 pt-20 pb-32 space-y-2">
+                  {searchingAddress ? (
+                    <>
+                      {[1, 2, 3, 4, 5].map((i) => (
+                        <div key={i} className="flex items-start gap-3 p-3">
+                          <Skeleton className="h-4 w-4 shrink-0 mt-0.5" />
+                          <div className="flex-1 space-y-2">
+                            <Skeleton className="h-4 w-full" />
+                            <Skeleton className="h-3 w-2/3" />
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  ) : searchResults.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      No results found
+                    </div>
+                  ) : (
+                    (() => {
+                      // Dedupe results by display_name
+                      const uniqueResults = searchResults.filter(
+                        (result, index, self) =>
+                          index ===
+                          self.findIndex(
+                            (r) => r.display_name === result.display_name
+                          )
+                      );
+
+                      return uniqueResults.map((result, index) => {
+                        // Clean up address - remove England, United Kingdom, Greater London, and borough names
+                        let cleanAddress = result.display_name
+                          .replace(/, England/gi, "")
+                          .replace(/, United Kingdom/gi, "")
+                          .replace(/, Greater London/gi, "");
+
+                        // Remove borough names (common London boroughs)
+                        const boroughs = [
+                          "Westminster",
+                          "Camden",
+                          "Islington",
+                          "Hackney",
+                          "Tower Hamlets",
+                          "Greenwich",
+                          "Lewisham",
+                          "Southwark",
+                          "Lambeth",
+                          "Wandsworth",
+                          "Hammersmith and Fulham",
+                          "Kensington and Chelsea",
+                          "Brent",
+                          "Ealing",
+                          "Hounslow",
+                          "Richmond upon Thames",
+                          "Kingston upon Thames",
+                          "Merton",
+                          "Sutton",
+                          "Croydon",
+                          "Bromley",
+                          "Bexley",
+                          "Havering",
+                          "Barking and Dagenham",
+                          "Redbridge",
+                          "Newham",
+                          "Waltham Forest",
+                          "Haringey",
+                          "Enfield",
+                          "Barnet",
+                          "Harrow",
+                          "Hillingdon",
+                        ];
+                        boroughs.forEach((borough) => {
+                          cleanAddress = cleanAddress.replace(
+                            new RegExp(`, ${borough}`, "gi"),
+                            ""
+                          );
+                        });
+
+                        // Get icon based on type
+                        const getTypeIcon = (type: string) => {
+                          const iconMap: Record<string, React.ReactNode> = {
+                            house: <Home className="h-4 w-4" />,
+                            apartment: <Building2 className="h-4 w-4" />,
+                            building: <Building className="h-4 w-4" />,
+                            university: <GraduationCap className="h-4 w-4" />,
+                            school: <School className="h-4 w-4" />,
+                            hospital: <Hospital className="h-4 w-4" />,
+                            reservoir: <Droplet className="h-4 w-4" />,
+                            park: <Trees className="h-4 w-4" />,
+                            restaurant: <UtensilsCrossed className="h-4 w-4" />,
+                            cafe: <Coffee className="h-4 w-4" />,
+                            pub: <Beer className="h-4 w-4" />,
+                            hotel: <Hotel className="h-4 w-4" />,
+                            shop: <ShoppingBag className="h-4 w-4" />,
+                            supermarket: <ShoppingCart className="h-4 w-4" />,
+                            bank: <Landmark className="h-4 w-4" />,
+                            atm: <Banknote className="h-4 w-4" />,
+                            post_office: <Mail className="h-4 w-4" />,
+                            library: <BookMarked className="h-4 w-4" />,
+                            museum: <Landmark className="h-4 w-4" />,
+                            theatre: <Theater className="h-4 w-4" />,
+                            cinema: <Film className="h-4 w-4" />,
+                            station: <Train className="h-4 w-4" />,
+                            bus_stop: <Bus className="h-4 w-4" />,
+                            parking: <ParkingCircle className="h-4 w-4" />,
+                            fuel: <Fuel className="h-4 w-4" />,
+                            church: <Church className="h-4 w-4" />,
+                            mosque: <Church className="h-4 w-4" />,
+                            synagogue: <Church className="h-4 w-4" />,
+                            cemetery: <Church className="h-4 w-4" />,
+                            stadium: <Star className="h-4 w-4" />,
+                            sports_centre: <Star className="h-4 w-4" />,
+                            swimming_pool: <Droplet className="h-4 w-4" />,
+                          };
+                          return (
+                            iconMap[type.toLowerCase()] || (
+                              <MapPin className="h-4 w-4" />
+                            )
+                          );
+                        };
+
+                        return (
+                          <button
+                            key={index}
+                            onClick={() => handleSelectSearchResult(result)}
+                            className="w-full text-left p-3 rounded-lg hover:bg-muted/50 transition-colors flex items-start gap-3"
+                          >
+                            <span className="shrink-0 mt-0.5 text-muted-foreground">
+                              {getTypeIcon(result.type)}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-sm">
+                                {cleanAddress}
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      });
+                    })()
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
+
+            {/* Gradient overlay at top */}
+            <div className="absolute top-0 left-0 right-0 h-32 bg-linear-to-b from-background to-transparent pointer-events-none z-10" />
+
+            {/* Overlaid search input */}
+            <div className="absolute top-2 left-4 right-4 z-20 pointer-events-auto">
+              <InputGroup className="shadow-lg bg-background/95 backdrop-blur-sm">
+                <InputGroupInput
+                  type="text"
+                  placeholder="Search address..."
+                  value={addressInput}
+                  onChange={(e) => setAddressInput(e.target.value)}
+                />
+                <InputGroupAddon>
+                  <Search className="h-4 w-4" />
+                </InputGroupAddon>
+              </InputGroup>
+            </div>
+
+            {/* Gradient overlay at bottom - only shows near the button */}
+            <div className="absolute bottom-0 left-0 right-0 h-40 bg-linear-to-t from-background via-background/70 via-40% to-transparent pointer-events-none z-10" />
+
+            {/* Overlaid send button */}
+            <div className="absolute bottom-4 left-4 right-4 z-20 pointer-events-auto">
+              <Button
+                onClick={async () => {
+                  if (!selectedLocation || !conversationId) return;
+
+                  const payload = {
+                    body:
+                      addressInput ||
+                      `Location: ${selectedLocation.lat.toFixed(
+                        6
+                      )}, ${selectedLocation.lng.toFixed(6)}`,
+                    message_type: "location",
+                    metadata: {
+                      location: {
+                        lat: selectedLocation.lat,
+                        lng: selectedLocation.lng,
+                        address: addressInput || undefined,
+                      },
+                    },
+                  };
+
+                  try {
+                    const res = await fetch(`/api/messages/${conversationId}`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify(payload),
+                    });
+
+                    if (!res.ok) {
+                      throw new Error("Failed to send location");
+                    }
+
+                    setLocationDrawerOpen(false);
+                    setSelectedLocation(null);
+                    setAddressInput("");
+                  } catch (error) {
+                    console.error("Error sending location:", error);
+                    toast.error("Failed to send location");
+                  }
+                }}
+                disabled={!selectedLocation}
+                className="w-full shadow-lg"
+              >
+                Send location
+              </Button>
+            </div>
+          </div>
+        </DrawerContent>
+      </Drawer>
+
+      {/* Full-page location viewer modal */}
+      <Dialog
+        open={viewLocationModalOpen}
+        onOpenChange={setViewLocationModalOpen}
+      >
+        <DialogContent className="max-w-[100vw] w-full h-full max-h-screen p-0 gap-0">
+          <DialogTitle className="sr-only">Location Viewer</DialogTitle>
+          <div className="relative w-full h-full flex flex-col">
+            {/* Map container */}
+            <div className="flex-1 relative">
+              {viewingLocation && (
+                <LocationViewerMap
+                  location={viewingLocation}
+                  onGetDirections={() => {
+                    setDirectionsDrawerOpen(true);
+                  }}
+                />
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Directions drawer */}
+      <MapDirections
+        open={directionsDrawerOpen}
+        onOpenChange={setDirectionsDrawerOpen}
+        station={
+          viewingLocation
+            ? {
+                name: viewingLocation.address || "Selected Location",
+                coordinates: [viewingLocation.lng, viewingLocation.lat],
+              }
+            : null
+        }
+      />
+
+      {/* Hidden photo input */}
+      <input
+        ref={photoInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          // TODO: Handle photo selection
+          setSendDrawerOpen(false);
+        }}
+      />
+
+      {/* AI Tools Install Dialog */}
+      <AIToolsDialog
+        open={aiToolsDialogOpen}
+        onOpenChange={(open) => {
+          setAiToolsDialogOpen(open);
+          if (!open && pendingTranslateMessage && modelState === "ready") {
+            // Dialog closed and model is ready - now translate in the message bubble
+            const msg = pendingTranslateMessage;
+            setPendingTranslateMessage(null);
+            performTranslation(msg);
+          } else if (!open) {
+            setPendingTranslateMessage(null);
+          }
+        }}
+        modelState={modelState}
+        loadingProgress={loadingProgress}
+        onInstall={async () => {
+          // Just initialize the model, don't translate yet
+          await initializeModel();
+          // Translation will happen when dialog closes via onOpenChange
+        }}
+      />
+
       {/* Message Info drawer */}
       <Drawer open={infoDrawerOpen} onOpenChange={setInfoDrawerOpen}>
         <DrawerContent>
@@ -2141,7 +4041,7 @@ export default function ConversationPage() {
               <>
                 {/* Quoted message */}
                 <div className="rounded-lg bg-muted/50 p-3 border-l-2 border-primary">
-                  <p className="text-sm leading-relaxed text-foreground break-words">
+                  <p className="text-sm leading-relaxed text-foreground wrap-break-word">
                     {infoMessage.body}
                   </p>
                 </div>

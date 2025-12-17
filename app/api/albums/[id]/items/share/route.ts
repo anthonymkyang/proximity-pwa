@@ -3,8 +3,9 @@ import { createClient } from "@/utils/supabase/server";
 
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const resolvedParams = await params;
   try {
     // FIX: await your server-side createClient()
     const supabase = await createClient();
@@ -32,7 +33,7 @@ export async function POST(
     const { data: album, error: albErr } = await supabase
       .from("photo_albums")
       .select("id, user_id")
-      .eq("id", params.id)
+      .eq("id", resolvedParams.id)
       .single();
 
     if (albErr) {
@@ -51,7 +52,7 @@ export async function POST(
         .from("album_shares")
         .upsert(
           {
-            album_id: params.id,
+            album_id: resolvedParams.id,
             owner_id: user.id,
             recipient_id,
             expires_at,
@@ -69,7 +70,7 @@ export async function POST(
       const { error } = await supabase
         .from("album_shares")
         .delete()
-        .eq("album_id", params.id)
+        .eq("album_id", resolvedParams.id)
         .eq("owner_id", user.id)
         .eq("recipient_id", recipient_id);
 
