@@ -34,13 +34,13 @@ const sections = [
     icon: MapPin,
   },
   {
-    title: "Shop",
-    href: "/app/shop",
+    title: "Marketplace",
+    href: "/app/marketplace",
     icon: ShoppingBag,
   },
   {
-    title: "Marketplace",
-    href: "/app/activity/marketplace",
+    title: "Channels",
+    href: "/app/channels",
     icon: ShoppingBag,
   },
 ];
@@ -141,7 +141,7 @@ export default function ActivityPage() {
                 key={g.id}
                 className="min-w-[60vw] max-w-[520px] rounded-xl sm:min-w-[380px]"
               >
-                <div className="relative mb-3 aspect-[14/9] w-full overflow-hidden rounded-xl bg-card/60">
+                <div className="relative mb-3 aspect-14/9 w-full overflow-hidden rounded-xl bg-card/60">
                   <div className="absolute left-3 bottom-3">
                     <Avatar className="size-12 border-2 border-background shadow">
                       <AvatarFallback className="text-[12px] font-semibold">
@@ -215,8 +215,8 @@ export default function ActivityPage() {
                       p.badge === "New"
                         ? "ring-sky-400"
                         : p.badge === "Flash"
-                          ? "ring-amber-300"
-                          : "ring-primary"
+                        ? "ring-amber-300"
+                        : "ring-primary"
                     }`}
                   >
                     <AvatarFallback className="text-[14px] font-semibold">
@@ -229,8 +229,8 @@ export default function ActivityPage() {
                         p.badge === "New"
                           ? "bg-sky-500 text-white"
                           : p.badge === "Flash"
-                            ? "bg-amber-400 text-black"
-                            : "bg-primary text-primary-foreground"
+                          ? "bg-amber-400 text-black"
+                          : "bg-primary text-primary-foreground"
                       }`}
                     >
                       {p.badge}
@@ -250,7 +250,7 @@ export default function ActivityPage() {
             Find places near you
           </p>
           <div className="relative h-48 w-full overflow-hidden rounded-2xl bg-card/70 shadow-sm">
-            <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 opacity-90" />
+            <div className="absolute inset-0 bg-linear-to-br from-slate-900 via-slate-800 to-slate-900 opacity-90" />
             <div className="absolute inset-0">
               <div className="absolute left-6 top-8 h-3 w-3 rounded-full bg-primary shadow-md" />
               <div className="absolute left-1/2 top-16 h-3 w-3 rounded-full bg-primary shadow-md" />

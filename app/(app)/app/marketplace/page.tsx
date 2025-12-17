@@ -119,7 +119,7 @@ export default function ShopPage() {
         </div>
 
         {/* Hero banner */}
-        <div className="overflow-hidden rounded-2xl bg-gradient-to-r from-amber-700 via-amber-500 to-amber-300 text-white shadow">
+        <div className="overflow-hidden rounded-2xl bg-linear-to-r from-amber-700 via-amber-500 to-amber-300 text-white shadow">
           <div className="flex items-center justify-between px-4 py-4">
             <div>
               <p className="text-xs font-semibold uppercase opacity-80">

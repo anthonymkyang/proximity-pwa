@@ -40,7 +40,10 @@ import {
   EmptyContent,
 } from "@/components/ui/empty";
 import getAvatarProxyUrl from "@/lib/profiles/getAvatarProxyUrl";
-import { usePresence, toUiPresence } from "@/components/providers/presence-context";
+import {
+  usePresence,
+  toUiPresence,
+} from "@/components/providers/presence-context";
 
 // -----------------------------------------------------------------------------
 // LOCAL MOCK
@@ -699,7 +702,8 @@ export default function MessagesPage() {
                 if (c.id !== convoId) return c;
                 if (!c.lastMessageId || c.lastMessageId !== msgId) return c;
                 const nextReceipt = {
-                  delivered_at: r.delivered_at ?? c.lastReceipt?.delivered_at ?? null,
+                  delivered_at:
+                    r.delivered_at ?? c.lastReceipt?.delivered_at ?? null,
                   read_at: r.read_at ?? c.lastReceipt?.read_at ?? null,
                 };
                 return { ...c, lastReceipt: nextReceipt };
@@ -731,12 +735,18 @@ export default function MessagesPage() {
             user_id?: string;
             status?: string | null;
             updated_at?: string | null;
+            last_seen?: string | null;
+            lat?: number | null;
+            lng?: number | null;
           };
           const uid = row?.user_id;
           if (!uid) return;
           const uiPresence = toUiPresence({
-            status: (row.status ?? null) as any,
-            updated_at: (row.updated_at ?? null) as any,
+            status: row.status ?? null,
+            updated_at: row.updated_at ?? null,
+            last_seen: row.last_seen ?? null,
+            lat: row.lat ?? null,
+            lng: row.lng ?? null,
           });
           const convos = userToConvoRef.current[uid];
           if (!convos || convos.length === 0) return;
@@ -780,7 +790,10 @@ export default function MessagesPage() {
       .then((res) => res.json())
       .then((body) => {
         if (!active) return;
-        const map: Record<string, { name?: string | null; profileTitle?: string | null }> = {};
+        const map: Record<
+          string,
+          { name?: string | null; profileTitle?: string | null }
+        > = {};
         for (const conn of body?.connections ?? []) {
           if (conn.type === "contact") {
             const contact = Array.isArray(conn.connection_contacts)

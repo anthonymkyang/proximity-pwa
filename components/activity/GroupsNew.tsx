@@ -34,7 +34,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { updateGroup } from "@/lib/groups/client";
 import { createClient } from "@/utils/supabase/client";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -87,10 +86,7 @@ type ApprovedAttendee = {
 
 type ActivityResponse = {
   groups?: MyGroupCard[];
-  attendeeAvatars?: Record<
-    string,
-    { avatars: Avatar14Item[]; extra: number }
-  >;
+  attendeeAvatars?: Record<string, { avatars: Avatar14Item[]; extra: number }>;
   listings?: NearbyGroup[];
 };
 
@@ -204,9 +200,6 @@ function formatRequestDate(dateStr?: string | null): string {
 export default function GroupsNew() {
   const router = useRouter();
   const supabase = React.useMemo(() => createClient(), []);
-  const [activeTab, setActiveTab] = React.useState<
-    "hosting" | "attending" | "live" | "listings"
-  >("listings");
   const [myGroups, setMyGroups] = React.useState<MyGroupCard[] | null>(null);
   const [loadingGroups, setLoadingGroups] = React.useState(false);
   const [userPos, setUserPos] = React.useState<{
@@ -410,7 +403,10 @@ export default function GroupsNew() {
           .select("id, profile_title, name, avatar_url")
           .in("id", ids);
         if (profilesErr) {
-          console.warn("[GroupsNew] attendees profile fetch error", profilesErr);
+          console.warn(
+            "[GroupsNew] attendees profile fetch error",
+            profilesErr
+          );
         } else if (profiles) {
           profiles.forEach((p: any) => {
             profileMap.set(p.id, {
@@ -460,7 +456,9 @@ export default function GroupsNew() {
           return;
         }
 
-        const data = (await res.json().catch(() => null)) as ActivityResponse | null;
+        const data = (await res
+          .json()
+          .catch(() => null)) as ActivityResponse | null;
 
         if (!data) {
           if (!cancelled) {
@@ -513,7 +511,6 @@ export default function GroupsNew() {
     };
   }, []);
 
-
   React.useEffect(() => {
     if (!userPos || !Array.isArray(myGroups)) return;
     setMyGroups((prev) => {
@@ -557,8 +554,6 @@ export default function GroupsNew() {
       });
     });
   }, [userPos, nearbyGroups?.length]);
-
-
 
   const allGroups = myGroups || [];
   const hostingGroups = allGroups.filter(
@@ -636,8 +631,12 @@ export default function GroupsNew() {
           return ts >= Date.now();
         })
         .sort((a, b) => {
-          const ta = a.start_time ? Date.parse(a.start_time) : Number.POSITIVE_INFINITY;
-          const tb = b.start_time ? Date.parse(b.start_time) : Number.POSITIVE_INFINITY;
+          const ta = a.start_time
+            ? Date.parse(a.start_time)
+            : Number.POSITIVE_INFINITY;
+          const tb = b.start_time
+            ? Date.parse(b.start_time)
+            : Number.POSITIVE_INFINITY;
           return ta - tb;
         })
     : [];
@@ -666,84 +665,84 @@ export default function GroupsNew() {
   const renderMenuButton = (group: MyGroupCard) => {
     const allowSetLive = group.lifecycleStatus !== "in_progress";
     return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="secondary"
-          size="icon"
-          className="h-8 w-8 rounded-full text-muted-foreground"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-          aria-label="More options"
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            className="h-8 w-8 rounded-full text-muted-foreground"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            aria-label="More options"
+            data-stop-row-nav="true"
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          className="w-44"
+          onPointerDown={(e) => e.stopPropagation()}
           data-stop-row-nav="true"
         >
-          <MoreHorizontal className="h-4 w-4" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="end"
-        className="w-44"
-        onPointerDown={(e) => e.stopPropagation()}
-        data-stop-row-nav="true"
-      >
-        <DropdownMenuItem
-          onSelect={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            openEditSheet(group.id);
-          }}
-          data-stop-row-nav="true"
-        >
-          Edit
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onSelect={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            openRequestsSheet(group.id);
-          }}
-          data-stop-row-nav="true"
-        >
-          Requests
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onSelect={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            openAttendeesSheet(group.id);
-          }}
-          data-stop-row-nav="true"
-        >
-          Attending
-        </DropdownMenuItem>
-        {allowSetLive ? (
           <DropdownMenuItem
             onSelect={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              handleMarkLive(group);
+              openEditSheet(group.id);
             }}
             data-stop-row-nav="true"
           >
-            Set in progress
+            Edit
           </DropdownMenuItem>
-        ) : null}
-        <DropdownMenuItem
-          variant="destructive"
-          data-stop-row-nav="true"
-          onSelect={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-          }}
-        >
-          Cancel
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
+          <DropdownMenuItem
+            onSelect={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              openRequestsSheet(group.id);
+            }}
+            data-stop-row-nav="true"
+          >
+            Requests
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              openAttendeesSheet(group.id);
+            }}
+            data-stop-row-nav="true"
+          >
+            Attending
+          </DropdownMenuItem>
+          {allowSetLive ? (
+            <DropdownMenuItem
+              onSelect={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                handleMarkLive(group);
+              }}
+              data-stop-row-nav="true"
+            >
+              Set in progress
+            </DropdownMenuItem>
+          ) : null}
+          <DropdownMenuItem
+            variant="destructive"
+            data-stop-row-nav="true"
+            onSelect={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+          >
+            Cancel
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
   };
 
   function canMarkLive(group: MyGroupCard): boolean {
@@ -867,7 +866,8 @@ export default function GroupsNew() {
                 </span>
               ) : group.nextDate ? (
                 <span className="text-[10px] text-muted-foreground">
-                  {formatDateShort(group.nextDate)} · {formatTime(group.nextDate)}
+                  {formatDateShort(group.nextDate)} ·{" "}
+                  {formatTime(group.nextDate)}
                 </span>
               ) : null
             ) : null}
@@ -1018,347 +1018,276 @@ export default function GroupsNew() {
 
   return (
     <>
-      <section className="mt-4">
-        <div className="px-1 mb-3">
-          <h1 className="text-lg font-semibold">Groups</h1>
+      <section className="space-y-8">
+        {/* Coming up (Listings) */}
+        <div>
+          <div className="flex items-center justify-between px-1 mb-2">
+            <h3 className="text-base font-semibold">Coming up</h3>
+          </div>
+          {!Array.isArray(nearbyGroups) ? (
+            renderGroupSkeleton(4)
+          ) : listingsComingSoon.length === 0 ? (
+            <div className="w-full py-4">
+              <Empty>
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <Users className="h-6 w-6" />
+                  </EmptyMedia>
+                  <EmptyTitle>No upcoming listings</EmptyTitle>
+                  <EmptyDescription>
+                    There are no public groups scheduled yet.
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {listingsComingSoon.slice(0, 10).map((g) => renderListingRow(g))}
+            </div>
+          )}
         </div>
-        <Tabs
-          value={activeTab}
-          onValueChange={(value) =>
-            setActiveTab(
-              (value as "hosting" | "attending" | "live" | "listings") ??
-                "listings"
-            )
-          }
-        >
-          <TabsList className="mb-4">
-            <TabsTrigger value="listings">Listings</TabsTrigger>
-            <TabsTrigger value="live">Live</TabsTrigger>
-            <TabsTrigger value="hosting">Hosting</TabsTrigger>
-            <TabsTrigger value="attending">Attending</TabsTrigger>
-          </TabsList>
 
-          <TabsContent value="hosting" className="space-y-8">
-            <div>
-              <div className="flex items-center justify-between px-1 mb-2 gap-3">
-                <h3 className="text-base font-semibold">Upcoming</h3>
-                <div className="flex items-center gap-2">
-                  <Link
-                    href="/app/activity/groups/manage"
-                    aria-label="Manage your groups"
+        {/* Live Hosting */}
+        {hostingLiveGroups.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between px-1 mb-2">
+              <h3 className="text-base font-semibold">Hosting · live now</h3>
+            </div>
+            <div className="space-y-3">
+              {hostingLiveGroups.map((g) =>
+                renderGroupRow(g, null, {
+                  hideMembership: true,
+                  hideDate: true,
+                  showTimeChip: true,
+                  menuButton: renderMenuButton(g),
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Live Attending */}
+        {attendingLiveGroups.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between px-1 mb-2">
+              <h3 className="text-base font-semibold">Attending · live now</h3>
+            </div>
+            <div className="space-y-3">
+              {attendingLiveGroups.map((g) =>
+                renderGroupRow(g, null, { menuButton: renderMenuButton(g) })
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Hosting Upcoming */}
+        {hostingUpcomingGroups.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between px-1 mb-2 gap-3">
+              <h3 className="text-base font-semibold">Upcoming</h3>
+              <div className="flex items-center gap-2">
+                <Link
+                  href="/app/activity/groups/manage"
+                  aria-label="Manage your groups"
+                >
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-full gap-2"
                   >
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="rounded-full gap-2"
-                    >
-                      Manage
-                    </Button>
-                  </Link>
-                  <Link
-                    href="/app/activity/groups/create"
-                    aria-label="Host a new group or event"
+                    Manage
+                  </Button>
+                </Link>
+                <Link
+                  href="/app/activity/groups/create"
+                  aria-label="Host a new group or event"
+                >
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-full gap-2"
                   >
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="rounded-full gap-2"
-                    >
-                      <Plus className="h-4 w-4" />
-                      Host
-                    </Button>
-                  </Link>
-                </div>
+                    <Plus className="h-4 w-4" />
+                    Host
+                  </Button>
+                </Link>
               </div>
-              <div className="mt-3 space-y-4">
-                <div className="relative rounded-2xl bg-foreground/90 text-background p-4 shadow-[0_20px_40px_-15px_rgba(0,0,0,0.35)]">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h4 className="text-lg tracking-tight">Calendar</h4>
-                      <p className="text-sm/6 opacity-70">Next 2 weeks</p>
-                    </div>
+            </div>
+            <div className="mt-3 space-y-4">
+              <div className="relative rounded-2xl bg-foreground/90 text-background p-4 shadow-[0_20px_40px_-15px_rgba(0,0,0,0.35)]">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h4 className="text-lg tracking-tight">Calendar</h4>
+                    <p className="text-sm/6 opacity-70">Next 2 weeks</p>
+                  </div>
+                  <button
+                    className="opacity-60 hover:opacity-100 transition"
+                    aria-label="More options"
+                  >
+                    <MoreHorizontal className="h-5 w-5" />
+                  </button>
+                </div>
+                <div className="mt-6 grid grid-cols-7 gap-2 place-items-center">
+                  {upcomingDays.map((day, index) => (
                     <button
-                      className="opacity-60 hover:opacity-100 transition"
-                      aria-label="More options"
+                      key={day.toISOString()}
+                      onClick={() => setSelectedHostingDayIndex(index)}
+                      className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium transition ${
+                        index === selectedHostingDayIndex
+                          ? "bg-background text-foreground ring-2 ring-background/80"
+                          : "bg-background/10 text-background/80"
+                      }`}
+                      aria-pressed={index === selectedHostingDayIndex}
                     >
-                      <MoreHorizontal className="h-5 w-5" />
+                      {day.getDate()}
                     </button>
-                  </div>
-                  <div className="mt-6 grid grid-cols-7 gap-2 place-items-center">
-                    {upcomingDays.map((day, index) => (
-                      <button
-                        key={day.toISOString()}
-                        onClick={() => setSelectedHostingDayIndex(index)}
-                        className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium transition ${
-                          index === selectedHostingDayIndex
-                            ? "bg-background text-foreground ring-2 ring-background/80"
-                            : "bg-background/10 text-background/80"
-                        }`}
-                        aria-pressed={index === selectedHostingDayIndex}
-                      >
-                        {day.getDate()}
-                      </button>
-                    ))}
-                  </div>
+                  ))}
                 </div>
-
-                {loadingGroups && !allGroups.length ? (
-                  renderGroupSkeleton()
-                ) : hostingUpcomingGroups.length === 0 ? (
-                  <div className="w-full py-4">
-                    <Empty>
-                      <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                          <Users className="h-6 w-6" />
-                        </EmptyMedia>
-                        <EmptyTitle>No upcoming hosting</EmptyTitle>
-                        <EmptyDescription>
-                          Create or host a group and it will show here.
-                        </EmptyDescription>
-                      </EmptyHeader>
-                    </Empty>
-                  </div>
-                ) : hostingGroupsForSelectedDay.length === 0 ? (
-                  <div className="w-full py-4">
-                    <Empty>
-                      <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                          <Users className="h-6 w-6" />
-                        </EmptyMedia>
-                        <EmptyTitle>No groups this day</EmptyTitle>
-                        <EmptyDescription>
-                          Pick another date to see upcoming hosts.
-                        </EmptyDescription>
-                      </EmptyHeader>
-                    </Empty>
-                  </div>
-                ) : (
-                  <div className="space-y-5">
-                    {hostingDayHosts.length > 0 ? (
-                      <div className="space-y-2">
-                        <div className="text-xs uppercase text-muted-foreground px-1">
-                          Hosting
-                        </div>
-                        <div className="space-y-3">
-                          {hostingDayHosts.map((g) => {
-                            const showMarkLive = canMarkLive(g);
-                            return renderGroupRow(
-                              g,
-                              showMarkLive ? (
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-7 px-2 text-[11px]"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    handleMarkLive(g);
-                                  }}
-                                  disabled={markingLiveId === g.id}
-                                >
-                                  {markingLiveId === g.id
-                                    ? "Marking…"
-                                    : "Mark live"}
-                                </Button>
-                              ) : null,
-                              {
-                                hideMembership: true,
-                                hideDate: true,
-                                showTimeChip: true,
-                                menuButton: renderMenuButton(g),
-                              }
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {hostingDayCohosts.length > 0 ? (
-                      <div className="space-y-2">
-                        <div className="text-xs uppercase text-muted-foreground px-1">
-                          Co-hosting
-                        </div>
-                        <div className="space-y-3">
-                          {hostingDayCohosts.map((g) => {
-                            const showMarkLive = canMarkLive(g);
-                            return renderGroupRow(
-                              g,
-                              showMarkLive ? (
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-7 px-2 text-[11px]"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    handleMarkLive(g);
-                                  }}
-                                  disabled={markingLiveId === g.id}
-                                >
-                                  {markingLiveId === g.id
-                                    ? "Marking…"
-                                    : "Mark live"}
-                                </Button>
-                              ) : null,
-                              {
-                                hideMembership: true,
-                                hideDate: true,
-                                showTimeChip: true,
-                                menuButton: renderMenuButton(g),
-                              }
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {hostingDayHosts.length === 0 &&
-                    hostingDayCohosts.length === 0 ? (
-                      <div className="w-full py-4">
-                        <Empty>
-                          <EmptyHeader>
-                            <EmptyMedia variant="icon">
-                              <Users className="h-6 w-6" />
-                            </EmptyMedia>
-                            <EmptyTitle>No upcoming hosting</EmptyTitle>
-                            <EmptyDescription>
-                              Create or host a group and it will show here.
-                            </EmptyDescription>
-                          </EmptyHeader>
-                        </Empty>
-                      </div>
-                    ) : null}
-                  </div>
-                )}
               </div>
-            </div>
 
-          </TabsContent>
-
-          <TabsContent value="live" className="space-y-8">
-            <div>
-              <div className="flex items-center justify-between px-1 mb-2">
-                <h3 className="text-base font-semibold">Hosting · live now</h3>
-              </div>
-              {hostingLiveGroups.length === 0 ? (
-                <div className="w-full py-4">
-                  <Empty>
-                    <EmptyHeader>
-                      <EmptyMedia variant="icon">
-                        <Users className="h-6 w-6" />
-                      </EmptyMedia>
-                      <EmptyTitle>No live hosting</EmptyTitle>
-                      <EmptyDescription>
-                        When you mark a group in progress it will appear here.
-                      </EmptyDescription>
-                    </EmptyHeader>
-                  </Empty>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {hostingLiveGroups.map((g) =>
-                    renderGroupRow(
-                      g,
-                      null,
-                      {
-                        hideMembership: true,
-                        hideDate: true,
-                        showTimeChip: true,
-                        menuButton: renderMenuButton(g),
-                      }
-                    )
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between px-1 mb-2">
-                <h3 className="text-base font-semibold">Attending · live now</h3>
-              </div>
-              {attendingLiveGroups.length === 0 ? (
-                <div className="w-full py-4">
-                  <Empty>
-                    <EmptyHeader>
-                      <EmptyMedia variant="icon">
-                        <Users className="h-6 w-6" />
-                      </EmptyMedia>
-                      <EmptyTitle>No live groups</EmptyTitle>
-                      <EmptyDescription>
-                        When a host marks a group in progress, it appears here.
-                      </EmptyDescription>
-                    </EmptyHeader>
-                  </Empty>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {attendingLiveGroups.map((g) =>
-                    renderGroupRow(g, null, { menuButton: renderMenuButton(g) })
-                  )}
-                </div>
-              )}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="attending" className="space-y-8">
-            <div>
-              <div className="flex items-center justify-between px-1 mb-2">
-                <h3 className="text-base font-semibold">Next up</h3>
-              </div>
               {loadingGroups && !allGroups.length ? (
                 renderGroupSkeleton()
-              ) : attendingUpcomingGroups.length === 0 ? (
+              ) : hostingUpcomingGroups.length === 0 ? (
                 <div className="w-full py-4">
                   <Empty>
                     <EmptyHeader>
                       <EmptyMedia variant="icon">
                         <Users className="h-6 w-6" />
                       </EmptyMedia>
-                      <EmptyTitle>No attending groups</EmptyTitle>
+                      <EmptyTitle>No upcoming hosting</EmptyTitle>
                       <EmptyDescription>
-                        When you are approved for a group, it appears here.
+                        Create or host a group and it will show here.
                       </EmptyDescription>
                     </EmptyHeader>
                   </Empty>
                 </div>
-              ) : (
-                <div className="space-y-3">
-                  {attendingUpcomingGroups.map((g) => renderGroupRow(g))}
-                </div>
-              )}
-            </div>
-
-          </TabsContent>
-
-          <TabsContent value="listings" className="space-y-8">
-            <div>
-              <div className="flex items-center justify-between px-1 mb-2">
-                <h3 className="text-base font-semibold">Coming up</h3>
-              </div>
-              {!Array.isArray(nearbyGroups) ? (
-                renderGroupSkeleton(4)
-              ) : listingsComingSoon.length === 0 ? (
+              ) : hostingGroupsForSelectedDay.length === 0 ? (
                 <div className="w-full py-4">
                   <Empty>
                     <EmptyHeader>
                       <EmptyMedia variant="icon">
                         <Users className="h-6 w-6" />
                       </EmptyMedia>
-                      <EmptyTitle>No upcoming listings</EmptyTitle>
+                      <EmptyTitle>No groups this day</EmptyTitle>
                       <EmptyDescription>
-                        There are no public groups scheduled yet.
+                        Pick another date to see upcoming hosts.
                       </EmptyDescription>
                     </EmptyHeader>
                   </Empty>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {listingsComingSoon.slice(0, 10).map((g) => renderListingRow(g))}
+                <div className="space-y-5">
+                  {hostingDayHosts.length > 0 ? (
+                    <div className="space-y-2">
+                      <div className="text-xs uppercase text-muted-foreground px-1">
+                        Hosting
+                      </div>
+                      <div className="space-y-3">
+                        {hostingDayHosts.map((g) => {
+                          const showMarkLive = canMarkLive(g);
+                          return renderGroupRow(
+                            g,
+                            showMarkLive ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 px-2 text-[11px]"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  handleMarkLive(g);
+                                }}
+                                disabled={markingLiveId === g.id}
+                              >
+                                {markingLiveId === g.id
+                                  ? "Marking…"
+                                  : "Mark live"}
+                              </Button>
+                            ) : null,
+                            {
+                              hideMembership: true,
+                              hideDate: true,
+                              showTimeChip: true,
+                              menuButton: renderMenuButton(g),
+                            }
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {hostingDayCohosts.length > 0 ? (
+                    <div className="space-y-2">
+                      <div className="text-xs uppercase text-muted-foreground px-1">
+                        Co-hosting
+                      </div>
+                      <div className="space-y-3">
+                        {hostingDayCohosts.map((g) => {
+                          const showMarkLive = canMarkLive(g);
+                          return renderGroupRow(
+                            g,
+                            showMarkLive ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 px-2 text-[11px]"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  handleMarkLive(g);
+                                }}
+                                disabled={markingLiveId === g.id}
+                              >
+                                {markingLiveId === g.id
+                                  ? "Marking…"
+                                  : "Mark live"}
+                              </Button>
+                            ) : null,
+                            {
+                              hideMembership: true,
+                              hideDate: true,
+                              showTimeChip: true,
+                              menuButton: renderMenuButton(g),
+                            }
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {hostingDayHosts.length === 0 &&
+                  hostingDayCohosts.length === 0 ? (
+                    <div className="w-full py-4">
+                      <Empty>
+                        <EmptyHeader>
+                          <EmptyMedia variant="icon">
+                            <Users className="h-6 w-6" />
+                          </EmptyMedia>
+                          <EmptyTitle>No upcoming hosting</EmptyTitle>
+                          <EmptyDescription>
+                            Create or host a group and it will show here.
+                          </EmptyDescription>
+                        </EmptyHeader>
+                      </Empty>
+                    </div>
+                  ) : null}
                 </div>
               )}
             </div>
-          </TabsContent>
-        </Tabs>
+          </div>
+        )}
+
+        {/* Attending Upcoming */}
+        {attendingUpcomingGroups.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between px-1 mb-2">
+              <h3 className="text-base font-semibold">Attending</h3>
+            </div>
+            <div className="space-y-3">
+              {attendingUpcomingGroups.map((g) => renderGroupRow(g))}
+            </div>
+          </div>
+        )}
       </section>
 
       <Sheet open={editSheetOpen} onOpenChange={handleEditSheetOpenChange}>
@@ -1404,7 +1333,9 @@ export default function GroupsNew() {
         >
           <TopBar
             className="px-4"
-            leftContent={<BackButton onClick={() => setRequestsSheetOpen(false)} />}
+            leftContent={
+              <BackButton onClick={() => setRequestsSheetOpen(false)} />
+            }
           />
           <SheetHeader className="sr-only">
             <SheetTitle>Requests</SheetTitle>

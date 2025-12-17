@@ -60,6 +60,8 @@ import {
   Fuel,
   Church,
   Star,
+  Archive,
+  Ghost,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -252,10 +254,7 @@ function LinkPreview({
   isMe?: boolean;
 }) {
   return (
-    <div
-      className="w-full cursor-pointer transition-colors"
-      onClick={onClick}
-    >
+    <div className="w-full cursor-pointer transition-colors" onClick={onClick}>
       {link.image && (
         <div className="w-full aspect-[1.91/1] bg-muted relative rounded overflow-hidden shadow-md">
           <img
@@ -271,15 +270,29 @@ function LinkPreview({
       )}
       <div className="py-3 space-y-1">
         {link.siteName && (
-          <p className={`text-[10px] uppercase tracking-wide ${isMe ? "text-white/70" : "text-muted-foreground"}`}>
+          <p
+            className={`text-[10px] uppercase tracking-wide ${
+              isMe ? "text-white/70" : "text-muted-foreground"
+            }`}
+          >
             {link.siteName}
           </p>
         )}
         {link.title && (
-          <p className={`font-semibold text-sm line-clamp-2 ${isMe ? "text-white" : ""}`}>{link.title}</p>
+          <p
+            className={`font-semibold text-sm line-clamp-2 ${
+              isMe ? "text-white" : ""
+            }`}
+          >
+            {link.title}
+          </p>
         )}
         {link.description && (
-          <p className={`text-xs line-clamp-2 ${isMe ? "text-white/80" : "text-muted-foreground"}`}>
+          <p
+            className={`text-xs line-clamp-2 ${
+              isMe ? "text-white/80" : "text-muted-foreground"
+            }`}
+          >
             {link.description}
           </p>
         )}
@@ -295,12 +308,16 @@ function LinkPreview({
               }}
             />
           )}
-          <p className={`text-[10px] truncate ${isMe ? "text-white/70" : "text-muted-foreground"}`}>
+          <p
+            className={`text-[10px] truncate ${
+              isMe ? "text-white/70" : "text-muted-foreground"
+            }`}
+          >
             {(() => {
               try {
                 const url = new URL(link.url);
-                const hostname = url.hostname.replace(/^www\./, '');
-                const pathParts = url.pathname.split('/').filter(Boolean);
+                const hostname = url.hostname.replace(/^www\./, "");
+                const pathParts = url.pathname.split("/").filter(Boolean);
 
                 if (pathParts.length === 0) {
                   return hostname;
@@ -309,7 +326,7 @@ function LinkPreview({
                 // Show domain + first path segment + ... if there are more segments
                 const firstPath = pathParts[0];
                 const hasMore = pathParts.length > 1;
-                return `${hostname}/${firstPath}${hasMore ? '/...' : ''}`;
+                return `${hostname}/${firstPath}${hasMore ? "/..." : ""}`;
               } catch {
                 return link.url;
               }
@@ -716,6 +733,19 @@ export default function ConversationPage() {
   const [infoMessage, setInfoMessage] = useState<Message | null>(null);
   const [linkViewerDrawerOpen, setLinkViewerDrawerOpen] = useState(false);
   const [viewingLinkUrl, setViewingLinkUrl] = useState<string | null>(null);
+  const [profilePickerDrawerOpen, setProfilePickerDrawerOpen] = useState(false);
+  const [profilePickerContacts, setProfilePickerContacts] = useState<
+    Array<{
+      id: string;
+      name: string;
+      avatar?: string | null;
+      profileId?: string | null;
+    }>
+  >([]);
+  const [profilePickerLoading, setProfilePickerLoading] = useState(false);
+  const [isGhosted, setIsGhosted] = useState(false);
+  const [loadingGhosted, setLoadingGhosted] = useState(true);
+  const [ghostedRecordId, setGhostedRecordId] = useState<string | null>(null);
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const longPressTargetRef = useRef<string | null>(null);
   const prevBodyOverflowRef = useRef<string | null>(null);
@@ -2049,6 +2079,218 @@ export default function ConversationPage() {
     }
   };
 
+  // Check if profile is ghosted
+  useEffect(() => {
+    if (!otherUserId) {
+      setLoadingGhosted(false);
+      return;
+    }
+
+    const checkGhosted = async () => {
+      try {
+        const supabase = createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data, error } = await supabase
+          .from("ghosted_profiles")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("ghosted_profile_id", otherUserId)
+          .maybeSingle();
+
+        if (!error && data) {
+          setIsGhosted(true);
+          setGhostedRecordId(data.id);
+        } else {
+          setIsGhosted(false);
+          setGhostedRecordId(null);
+        }
+      } catch (error) {
+        console.error("Error checking ghosted status:", error);
+      } finally {
+        setLoadingGhosted(false);
+      }
+    };
+
+    checkGhosted();
+  }, [otherUserId]);
+
+  // Toggle ghosted status
+  const handleToggleGhosted = async () => {
+    if (!otherUserId) return;
+
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      if (isGhosted && ghostedRecordId) {
+        // Remove ghosted status
+        const { error } = await supabase
+          .from("ghosted_profiles")
+          .delete()
+          .eq("id", ghostedRecordId);
+
+        if (!error) {
+          setIsGhosted(false);
+          setGhostedRecordId(null);
+          toast.success("Unmarked as ghosted");
+        } else {
+          toast.error("Failed to unmark as ghosted");
+        }
+      } else {
+        // Add ghosted status
+        const { data, error } = await supabase
+          .from("ghosted_profiles")
+          .insert({
+            user_id: user.id,
+            ghosted_profile_id: otherUserId,
+          })
+          .select("id")
+          .single();
+
+        if (!error && data) {
+          setIsGhosted(true);
+          setGhostedRecordId(data.id);
+          toast.success("Marked as ghosted");
+        } else {
+          toast.error("Failed to mark as ghosted");
+        }
+      }
+    } catch (error) {
+      console.error("Error toggling ghosted status:", error);
+      toast.error("An error occurred");
+    }
+  };
+
+  // Fetch and deduplicate contacts for profile picker
+  useEffect(() => {
+    if (!profilePickerDrawerOpen) return;
+
+    const fetchContacts = async () => {
+      try {
+        setProfilePickerLoading(true);
+        const supabase = createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const userMap = new Map<
+          string,
+          {
+            id: string;
+            name: string;
+            avatar: string | null;
+            profileId: string;
+          }
+        >();
+
+        // 1. Fetch connections using the API endpoint (same as connections page)
+        const connectionsRes = await fetch("/api/connections");
+        if (connectionsRes.ok) {
+          const { connections } = await connectionsRes.json();
+
+          for (const conn of connections ?? []) {
+            const contact = Array.isArray(conn.connection_contacts)
+              ? conn.connection_contacts[0]
+              : conn.connection_contacts;
+            const pin = Array.isArray(conn.connection_pins)
+              ? conn.connection_pins[0]
+              : conn.connection_pins;
+
+            const contactProfile = contact?.profiles || null;
+            const pinnedProfile = pin?.pinned_profile || null;
+
+            const profileId =
+              conn.type === "pin"
+                ? pin?.pinned_profile_id || pinnedProfile?.id
+                : contact?.profile_id || contactProfile?.id;
+
+            const avatarUrl =
+              pinnedProfile?.avatar_url || contactProfile?.avatar_url || null;
+
+            const title =
+              pin?.nickname ||
+              contact?.display_name ||
+              pinnedProfile?.profile_title ||
+              contactProfile?.profile_title ||
+              conn.title ||
+              "Unknown";
+
+            if (profileId && profileId !== user.id && !userMap.has(profileId)) {
+              userMap.set(profileId, {
+                id: conn.id,
+                name: title,
+                avatar: avatarUrl,
+                profileId: profileId,
+              });
+            }
+          }
+        }
+
+        // 2. Fetch conversation members (same pattern as messages page)
+        const { data: myMemberships } = await supabase
+          .from("conversation_members")
+          .select("conversation_id, user_id")
+          .eq("user_id", user.id);
+
+        if (myMemberships && myMemberships.length > 0) {
+          const convoIds = Array.from(
+            new Set(myMemberships.map((m) => m.conversation_id))
+          );
+
+          // Fetch all members for those conversations
+          const { data: allMembers } = await supabase
+            .from("conversation_members")
+            .select("conversation_id, user_id")
+            .in("conversation_id", convoIds);
+
+          // Collect all user IDs from other members
+          const allUserIds = Array.from(
+            new Set(
+              (allMembers ?? [])
+                .map((m) => m.user_id)
+                .filter((id) => id !== user.id)
+            )
+          );
+
+          if (allUserIds.length > 0) {
+            // Fetch profiles for those users
+            const { data: profiles } = await supabase
+              .from("profiles")
+              .select("id, profile_title, avatar_url")
+              .in("id", allUserIds);
+
+            for (const profile of profiles ?? []) {
+              if (profile.id && !userMap.has(profile.id)) {
+                userMap.set(profile.id, {
+                  id: profile.id,
+                  name: profile.profile_title || "Unknown",
+                  avatar: profile.avatar_url,
+                  profileId: profile.id,
+                });
+              }
+            }
+          }
+        }
+
+        setProfilePickerContacts(Array.from(userMap.values()));
+      } catch (error) {
+        console.error("Error fetching contacts:", error);
+      } finally {
+        setProfilePickerLoading(false);
+      }
+    };
+
+    fetchContacts();
+  }, [profilePickerDrawerOpen]);
+
   // redirect if conversation missing (optional)
   useEffect(() => {
     if (!conversationId) return;
@@ -3011,6 +3253,22 @@ export default function ConversationPage() {
               {pinConnectionId ? "Unpin profile" : "Pin profile"}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
+            <DropdownMenuItem>
+              <Archive className="h-4 w-4" />
+              Archive chat
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={loadingGhosted}
+              onSelect={(e) => {
+                e.preventDefault();
+                void handleToggleGhosted();
+              }}
+            >
+              <Ghost className={`h-4 w-4 ${isGhosted ? "fill-current" : ""}`} />
+              Ghosted me
+              {isGhosted && <Check className="h-4 w-4 ml-auto" />}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive">
               <Shield className="h-4 w-4" />
               Block contact
@@ -3632,6 +3890,17 @@ export default function ConversationPage() {
         ) : null}
         <div ref={endRef} style={{ height: 0 }} />
       </div>
+
+      {/* Ghosted indicator card */}
+      {isGhosted && !loadingGhosted && (
+        <div style={{ padding: "0 1rem 0.75rem 1rem" }}>
+          <div className="rounded-lg bg-black/20 backdrop-blur-xl border border-white/10 px-3 py-2 flex items-center gap-2 text-sm text-muted-foreground shadow-lg animate-in fade-in duration-300">
+            <Ghost className="h-4 w-4 shrink-0" />
+            <span>You marked this user as ghosted you.</span>
+          </div>
+        </div>
+      )}
+
       <div className="bg-card/80 backdrop-blur px-3 py-2">
         {replyTarget ? (
           <div className="mb-2 flex items-start gap-2 rounded-lg bg-muted px-3 py-2 text-xs shadow-sm border-l-2 border-primary">
@@ -3783,18 +4052,20 @@ export default function ConversationPage() {
             <DrawerTitle>Send</DrawerTitle>
           </DrawerHeader>
 
-          {/* Recently used section */}
-          <div className="px-4 pb-4">
-            <h3 className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold mb-3">
-              Recently used
-            </h3>
-            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-              {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-                <div
-                  key={i}
-                  className="shrink-0 w-20 h-20 rounded-lg bg-muted/40 hover:bg-muted/60 transition-colors cursor-pointer"
-                />
-              ))}
+          <div className="px-4">
+            {/* Recently used section */}
+            <div className="pb-4">
+              <h3 className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold mb-3">
+                Recently used
+              </h3>
+              <div className="flex gap-2 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] -mx-4 px-4">
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+                  <div
+                    key={i}
+                    className="shrink-0 w-24 h-24 rounded-lg bg-muted/40 hover:bg-muted/60 transition-colors cursor-pointer"
+                  />
+                ))}
+              </div>
             </div>
           </div>
 
@@ -3822,7 +4093,10 @@ export default function ConversationPage() {
             </div>
             <div
               className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-xs font-semibold text-foreground transition hover:bg-muted/30 cursor-pointer"
-              onClick={() => setSendDrawerOpen(false)}
+              onClick={() => {
+                setSendDrawerOpen(false);
+                setProfilePickerDrawerOpen(true);
+              }}
             >
               <UsersRound className="h-5 w-5 text-foreground" />
               <span>Profile</span>
@@ -4275,11 +4549,16 @@ export default function ConversationPage() {
       </Drawer>
 
       {/* Link Viewer drawer */}
-      <Drawer open={linkViewerDrawerOpen} onOpenChange={setLinkViewerDrawerOpen}>
+      <Drawer
+        open={linkViewerDrawerOpen}
+        onOpenChange={setLinkViewerDrawerOpen}
+      >
         <DrawerContent className="h-[90vh]">
           <DrawerHeader>
             <DrawerTitle className="truncate text-sm">
-              {viewingLinkUrl ? new URL(viewingLinkUrl).hostname.replace(/^www\./, '') : 'Link'}
+              {viewingLinkUrl
+                ? new URL(viewingLinkUrl).hostname.replace(/^www\./, "")
+                : "Link"}
             </DrawerTitle>
           </DrawerHeader>
           <ScrollArea className="flex-1 px-4">
@@ -4304,8 +4583,84 @@ export default function ConversationPage() {
             >
               Open in browser
             </Button>
-            <Button variant="ghost" onClick={() => setLinkViewerDrawerOpen(false)}>
+            <Button
+              variant="ghost"
+              onClick={() => setLinkViewerDrawerOpen(false)}
+            >
               Close
+            </Button>
+          </div>
+        </DrawerContent>
+      </Drawer>
+
+      {/* Profile Picker drawer */}
+      <Drawer
+        open={profilePickerDrawerOpen}
+        onOpenChange={setProfilePickerDrawerOpen}
+      >
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>Send Profile</DrawerTitle>
+            <DrawerDescription>Select a contact to share</DrawerDescription>
+          </DrawerHeader>
+          <ScrollArea className="max-h-[60vh]">
+            <div className="px-4 pb-4">
+              {profilePickerLoading ? (
+                <div className="space-y-1">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <div key={i} className="flex items-center gap-3 py-2 px-2">
+                      <Skeleton className="h-10 w-10 rounded-full" />
+                      <div className="flex-1 space-y-2">
+                        <Skeleton className="h-4 w-32 rounded" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : profilePickerContacts.length === 0 ? (
+                <div className="py-8 text-center text-muted-foreground text-sm">
+                  No contacts found
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {profilePickerContacts.map((contact) => (
+                    <div
+                      key={contact.id}
+                      className="flex items-center gap-3 py-2 px-2 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors"
+                      onClick={() => {
+                        // TODO: Send profile card
+                        console.log("Send profile:", contact);
+                        setProfilePickerDrawerOpen(false);
+                      }}
+                    >
+                      <Avatar className="h-10 w-10">
+                        <AvatarImage
+                          src={
+                            contact.avatar
+                              ? getAvatarProxyUrl(contact.avatar) ?? undefined
+                              : undefined
+                          }
+                        />
+                        <AvatarFallback>
+                          {contact.name.slice(0, 2).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-sm truncate">
+                          {contact.name}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+          <div className="flex justify-end px-4 pb-4">
+            <Button
+              variant="ghost"
+              onClick={() => setProfilePickerDrawerOpen(false)}
+            >
+              Cancel
             </Button>
           </div>
         </DrawerContent>
