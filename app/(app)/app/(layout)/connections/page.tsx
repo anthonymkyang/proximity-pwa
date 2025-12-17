@@ -662,7 +662,7 @@ export default function ConnectionsPage() {
             <div className="relative">
               <div
                 className={cn(
-                  "absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-background to-transparent transition-opacity pointer-events-none",
+                  "absolute top-0 left-0 right-0 h-8 bg-linear-to-b from-background to-transparent transition-opacity pointer-events-none",
                   canScrollTop ? "opacity-100" : "opacity-0"
                 )}
               />
@@ -749,7 +749,7 @@ export default function ConnectionsPage() {
                                 value={selectedCountry}
                                 onValueChange={setSelectedCountry}
                               >
-                                <SelectTrigger className="w-[80px] rounded-r-none focus:ring-0 focus:ring-offset-0 border-0 bg-transparent">
+                                <SelectTrigger className="w-20 rounded-r-none focus:ring-0 focus:ring-offset-0 border-0 bg-transparent">
                                   <SelectValue asChild>
                                     <div className="flex items-center gap-2">
                                       {(Flags as any)[selectedCountry] &&
@@ -1021,7 +1021,7 @@ export default function ConnectionsPage() {
               </ScrollArea>
               <div
                 className={cn(
-                  "absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-background to-transparent transition-opacity pointer-events-none",
+                  "absolute bottom-0 left-0 right-0 h-8 bg-linear-to-t from-background to-transparent transition-opacity pointer-events-none",
                   canScrollBottom ? "opacity-100" : "opacity-0"
                 )}
               />

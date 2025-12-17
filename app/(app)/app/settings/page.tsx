@@ -25,7 +25,7 @@ export default function SettingsPage() {
         </p>
         <div className="grid w-full grid-cols-[1fr_2fr] items-start gap-4">
           <div className="flex justify-center md:justify-start">
-            <div className="relative w-full max-w-[320px] aspect-[8560/5398]">
+            <div className="relative w-full max-w-[320px] aspect-8560/5398">
               <div className="relative h-full w-full overflow-hidden rounded-[12px] border border-white/10 bg-[radial-gradient(circle_at_40%_30%,#14151b,#0e0f14_65%)] shadow-[0_18px_55px_rgba(0,0,0,0.28)]">
                 <div className="absolute left-2 top-2 z-10 flex flex-col gap-1 text-white/70">
                   <span className="text-[10px] md:text-[11px] font-semibold tracking-[0.08em]">

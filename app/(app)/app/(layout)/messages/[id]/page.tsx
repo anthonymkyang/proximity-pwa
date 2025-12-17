@@ -125,12 +125,20 @@ type Message = {
     profile_title?: string | null;
     avatar_url?: string | null;
   } | null;
-  message_type?: "text" | "location" | null;
+  message_type?: "text" | "location" | "link" | null;
   metadata?: {
     location?: {
       lat: number;
       lng: number;
       address?: string;
+    };
+    link?: {
+      url: string;
+      title?: string;
+      description?: string;
+      image?: string;
+      siteName?: string;
+      favicon?: string;
     };
   } | null;
 };
@@ -225,6 +233,93 @@ const formatRelativeDate = (dateStr: string) => {
   });
   return `${dateStr2}, ${time}`;
 };
+
+// Link preview component for message bubbles
+function LinkPreview({
+  link,
+  onClick,
+  isMe,
+}: {
+  link: {
+    url: string;
+    title?: string;
+    description?: string;
+    image?: string;
+    siteName?: string;
+    favicon?: string;
+  };
+  onClick: () => void;
+  isMe?: boolean;
+}) {
+  return (
+    <div
+      className="w-full cursor-pointer transition-colors"
+      onClick={onClick}
+    >
+      {link.image && (
+        <div className="w-full aspect-[1.91/1] bg-muted relative rounded overflow-hidden shadow-md">
+          <img
+            src={link.image}
+            alt={link.title || "Link preview"}
+            className="w-full h-full object-cover"
+            onError={(e) => {
+              // Hide image on error
+              e.currentTarget.parentElement!.style.display = "none";
+            }}
+          />
+        </div>
+      )}
+      <div className="py-3 space-y-1">
+        {link.siteName && (
+          <p className={`text-[10px] uppercase tracking-wide ${isMe ? "text-white/70" : "text-muted-foreground"}`}>
+            {link.siteName}
+          </p>
+        )}
+        {link.title && (
+          <p className={`font-semibold text-sm line-clamp-2 ${isMe ? "text-white" : ""}`}>{link.title}</p>
+        )}
+        {link.description && (
+          <p className={`text-xs line-clamp-2 ${isMe ? "text-white/80" : "text-muted-foreground"}`}>
+            {link.description}
+          </p>
+        )}
+        <div className="flex items-center gap-1.5">
+          {link.favicon && (
+            <img
+              src={link.favicon}
+              alt=""
+              className="w-3 h-3 shrink-0"
+              onError={(e) => {
+                // Hide favicon on error
+                e.currentTarget.style.display = "none";
+              }}
+            />
+          )}
+          <p className={`text-[10px] truncate ${isMe ? "text-white/70" : "text-muted-foreground"}`}>
+            {(() => {
+              try {
+                const url = new URL(link.url);
+                const hostname = url.hostname.replace(/^www\./, '');
+                const pathParts = url.pathname.split('/').filter(Boolean);
+
+                if (pathParts.length === 0) {
+                  return hostname;
+                }
+
+                // Show domain + first path segment + ... if there are more segments
+                const firstPath = pathParts[0];
+                const hasMore = pathParts.length > 1;
+                return `${hostname}/${firstPath}${hasMore ? '/...' : ''}`;
+              } catch {
+                return link.url;
+              }
+            })()}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // Static map preview component for message bubbles
 function StaticMapPreview({
@@ -330,11 +425,11 @@ function StaticMapPreview({
 
   return (
     <div
-      className="w-full h-40 rounded-lg overflow-hidden bg-muted cursor-pointer transition-opacity duration-500"
+      className="w-full h-40 rounded-lg overflow-hidden bg-muted cursor-pointer transition-opacity duration-500 shadow-md"
       style={{ opacity: isLoaded ? 1 : 0 }}
       onClick={onClick}
     >
-      <div ref={mapRef} style={{ width: '100%', height: '160px' }} />
+      <div ref={mapRef} style={{ width: "100%", height: "160px" }} />
     </div>
   );
 }
@@ -619,6 +714,8 @@ export default function ConversationPage() {
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [infoDrawerOpen, setInfoDrawerOpen] = useState(false);
   const [infoMessage, setInfoMessage] = useState<Message | null>(null);
+  const [linkViewerDrawerOpen, setLinkViewerDrawerOpen] = useState(false);
+  const [viewingLinkUrl, setViewingLinkUrl] = useState<string | null>(null);
   const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const longPressTargetRef = useRef<string | null>(null);
   const prevBodyOverflowRef = useRef<string | null>(null);
@@ -1906,7 +2003,39 @@ export default function ConversationPage() {
       }
     }
     try {
-      const payload = { body: text, ...replyMeta };
+      // Detect URLs in the message
+      const urlRegex = /(https?:\/\/[^\s]+)/gi;
+      const urls = text.match(urlRegex);
+
+      let payload: any = { body: text, ...replyMeta };
+
+      // If message contains exactly one URL and nothing else (or just the URL), treat it as a link message
+      if (urls && urls.length === 1 && text.trim() === urls[0].trim()) {
+        try {
+          // Fetch link preview
+          const previewRes = await fetch("/api/messages/link-preview", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: urls[0] }),
+          });
+
+          if (previewRes.ok) {
+            const previewData = await previewRes.json();
+            payload = {
+              body: text,
+              message_type: "link",
+              metadata: {
+                link: previewData,
+              },
+              ...replyMeta,
+            };
+          }
+        } catch (previewErr) {
+          console.error("Failed to fetch link preview:", previewErr);
+          // Continue with regular message if preview fails
+        }
+      }
+
       console.log("Sending message with payload:", payload);
       const res = await fetch(`/api/messages/${conversationId}`, {
         method: "POST",
@@ -3215,10 +3344,10 @@ export default function ConversationPage() {
                 </div>
               ) : (
                 <div
-                  className={`relative rounded-lg px-3 py-2 ${
-                    m.message_type === "location"
-                      ? "w-[75%] sm:w-[65%] lg:w-[55%]"
-                      : "max-w-[75%] sm:max-w-[65%] lg:max-w-[55%]"
+                  className={`relative rounded-lg ${
+                    m.message_type === "location" || m.message_type === "link"
+                      ? "p-2 w-[75%] sm:w-[65%] lg:w-[55%]"
+                      : "px-3 py-2 max-w-[75%] sm:max-w-[65%] lg:max-w-[55%]"
                   } ${
                     isMe
                       ? "bg-primary text-white rounded-br-none"
@@ -3269,8 +3398,22 @@ export default function ConversationPage() {
                     </div>
                   ) : null}
 
-                  {/* Location message content */}
-                  {m.message_type === "location" && m.metadata?.location ? (
+                  {/* Link message content */}
+                  {m.message_type === "link" && m.metadata?.link ? (
+                    <div className="w-full">
+                      <LinkPreview
+                        link={m.metadata.link}
+                        onClick={() => {
+                          if (m.metadata?.link?.url) {
+                            setViewingLinkUrl(m.metadata.link.url);
+                            setLinkViewerDrawerOpen(true);
+                          }
+                        }}
+                        isMe={isMe}
+                      />
+                    </div>
+                  ) : /* Location message content */
+                  m.message_type === "location" && m.metadata?.location ? (
                     <div className="space-y-2 w-full">
                       {/* Static map preview */}
                       <StaticMapPreview
@@ -3442,11 +3585,11 @@ export default function ConversationPage() {
                             <CheckCheck className="h-3.5 w-3.5 text-white" />
                           ) : m.delivered_at ? (
                             <div className="flex gap-0.5">
-                              <Check className="h-3.5 w-3.5 text-muted-foreground" />
-                              <Check className="h-3.5 w-3.5 text-muted-foreground" />
+                              <Check className="h-3.5 w-3.5 text-white/70" />
+                              <Check className="h-3.5 w-3.5 text-white/70" />
                             </div>
                           ) : (
-                            <Check className="h-3.5 w-3.5 text-muted-foreground" />
+                            <Check className="h-3.5 w-3.5 text-white/70" />
                           )}
                         </div>
                       </>
@@ -3639,6 +3782,22 @@ export default function ConversationPage() {
           <DrawerHeader className="sr-only">
             <DrawerTitle>Send</DrawerTitle>
           </DrawerHeader>
+
+          {/* Recently used section */}
+          <div className="px-4 pb-4">
+            <h3 className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold mb-3">
+              Recently used
+            </h3>
+            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+              {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+                <div
+                  key={i}
+                  className="shrink-0 w-20 h-20 rounded-lg bg-muted/40 hover:bg-muted/60 transition-colors cursor-pointer"
+                />
+              ))}
+            </div>
+          </div>
+
           <div className="grid grid-cols-4 gap-3 px-4 pb-5">
             <div
               className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-xs font-semibold text-foreground transition hover:bg-muted/30 cursor-pointer"
@@ -3697,7 +3856,7 @@ export default function ConversationPage() {
               {[1, 2, 3, 4, 5, 6].map((i) => (
                 <div
                   key={i}
-                  className="flex-shrink-0 w-24 cursor-pointer hover:opacity-80 transition-opacity"
+                  className="shrink-0 w-24 cursor-pointer hover:opacity-80 transition-opacity"
                   onClick={() => setAlbumDrawerOpen(false)}
                 >
                   <div className="w-24 h-24 rounded-lg bg-muted/30 flex items-center justify-center mb-2">
@@ -4111,6 +4270,43 @@ export default function ConversationPage() {
                 Close
               </Button>
             </div>
+          </div>
+        </DrawerContent>
+      </Drawer>
+
+      {/* Link Viewer drawer */}
+      <Drawer open={linkViewerDrawerOpen} onOpenChange={setLinkViewerDrawerOpen}>
+        <DrawerContent className="h-[90vh]">
+          <DrawerHeader>
+            <DrawerTitle className="truncate text-sm">
+              {viewingLinkUrl ? new URL(viewingLinkUrl).hostname.replace(/^www\./, '') : 'Link'}
+            </DrawerTitle>
+          </DrawerHeader>
+          <ScrollArea className="flex-1 px-4">
+            {viewingLinkUrl && (
+              <iframe
+                src={viewingLinkUrl}
+                className="w-full h-full min-h-[70vh] border-0 rounded"
+                sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                title="Link preview"
+              />
+            )}
+          </ScrollArea>
+          <div className="flex justify-between items-center px-4 pb-4 pt-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                if (viewingLinkUrl) {
+                  window.open(viewingLinkUrl, "_blank");
+                }
+              }}
+            >
+              Open in browser
+            </Button>
+            <Button variant="ghost" onClick={() => setLinkViewerDrawerOpen(false)}>
+              Close
+            </Button>
           </div>
         </DrawerContent>
       </Drawer>
