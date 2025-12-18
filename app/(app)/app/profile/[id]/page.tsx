@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/client";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/status/Badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
@@ -1027,15 +1028,20 @@ export default function ProfilePage() {
             {/* Top bar overlay */}
             <TopBar
               className="absolute top-0 left-0 right-0 z-30 bg-transparent px-4"
-              leftContent={<BackButton />}
+              leftContent={
+                <BackButton
+                  variant="ghost"
+                  className="bg-background/60 supports-backdrop-filter:bg-background/50 backdrop-blur-md rounded-full ring-1 ring-border text-foreground hover:bg-background/60 hover:text-foreground"
+                />
+              }
               rightContent={
                 <Button
                   aria-label="More options"
                   variant="ghost"
                   size="icon"
-                  className="rounded-full"
+                  className="rounded-full bg-background/60 supports-backdrop-filter:bg-background/50 backdrop-blur-md ring-1 ring-border text-foreground hover:bg-background/60 hover:text-foreground"
                 >
-                  <MoreVertical className="h-5 w-5 text-muted-foreground" />
+                  <MoreVertical className="h-6 w-6" />
                 </Button>
               }
             />
@@ -1061,7 +1067,7 @@ export default function ProfilePage() {
                 aria-label="Open profile info"
               >
                 <div className="relative">
-                  <Avatar className="h-16 w-16 ring-2 ring-white shadow-md">
+                  <Avatar className="h-16 w-16 ring-2 ring-white shadow-2xl">
                     <AvatarImage
                       src={avatarUrl}
                       alt={
@@ -1082,21 +1088,10 @@ export default function ProfilePage() {
                         .toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
-                  <span
-                    className={`absolute top-1 left-1 h-3.5 w-3.5 rounded-full ${
-                      isOnline === "online"
-                        ? "bg-emerald-500"
-                        : isOnline === "away"
-                        ? "bg-amber-400"
-                        : "bg-gray-400"
-                    }`}
-                    title={
-                      isOnline === "online"
-                        ? "Online"
-                        : isOnline === "away"
-                        ? "Away"
-                        : "Offline"
-                    }
+                  <StatusBadge
+                    status={isOnline}
+                    size="sm"
+                    className="absolute bottom-0.5 right-0.5"
                   />
                 </div>
               </button>

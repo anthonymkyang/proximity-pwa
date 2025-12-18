@@ -7,7 +7,7 @@ import {
   Users,
   Calendar,
   Clock3,
-  MapPin,
+  CalendarDays,
   ShoppingBag,
   MessageSquare,
   ChevronRight,
@@ -33,9 +33,9 @@ const sections = [
     icon: Clock3,
   },
   {
-    title: "Places",
+    title: "Events",
     href: "/app/activity/events",
-    icon: MapPin,
+    icon: CalendarDays,
   },
   {
     title: "Marketplace",

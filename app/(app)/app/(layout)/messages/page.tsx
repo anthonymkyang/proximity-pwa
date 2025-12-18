@@ -22,7 +22,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Badge24 } from "@/components/shadcn-studio/badge/badge-24";
-import { Skeleton } from "@/components/ui/skeleton";
+import { StatusBadge } from "@/components/status/Badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -529,21 +529,8 @@ export default function MessagesPage() {
           const lastMessageAt = latest?.created_at ?? null;
           const lastMessageSenderId = latest?.sender_id ?? null;
 
-          // Fallback presence if we have no explicit presence row:
-          // Use last message recency to infer a lightweight status.
-          let effectivePresence = presence;
-          if (!isGroup) {
-            const ms = lastMessageAt
-              ? Date.now() - new Date(lastMessageAt).getTime()
-              : Number.POSITIVE_INFINITY;
-            const mins = Number.isFinite(ms)
-              ? ms / 60000
-              : Number.POSITIVE_INFINITY;
-            if (!effectivePresence) {
-              if (mins <= 5) effectivePresence = "online";
-              else if (mins <= 60) effectivePresence = "recent";
-            }
-          }
+          // Use only explicit presence (from Supabase or presence context)
+          const effectivePresence = presence;
 
           let lastReceipt: {
             delivered_at: string | null;
@@ -864,40 +851,13 @@ export default function MessagesPage() {
   const hasNoConvos =
     !loading && userConversations.length === 0 && !loadError && !!currentUserId;
 
-  if (loading) {
-    return (
-      <>
-        <div className="flex items-center gap-2 pb-2">
-          <h1 className="flex-1 px-1 text-4xl font-extrabold tracking-tight">
-            Messages
-          </h1>
-        </div>
-        <div className="pb-5">
-          <Skeleton className="h-10 w-full rounded-xl" />
-        </div>
-        <div className="flex gap-2 overflow-x-auto pb-3 -mx-4 px-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-8 w-20 rounded-full" />
-          ))}
-        </div>
-        <div className="space-y-4 pt-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div
-              key={i}
-              className="flex items-center gap-3 -mr-4 rounded-xl bg-card/50 px-3 py-3"
-            >
-              <Skeleton className="h-12 w-12 rounded-full" />
-              <div className="flex-1 space-y-2">
-                <Skeleton className="h-4 w-2/3 rounded" />
-                <Skeleton className="h-3 w-1/2 rounded" />
-              </div>
-              <Skeleton className="h-3 w-12 rounded" />
-            </div>
-          ))}
-        </div>
-      </>
-    );
-  }
+  const toStatus = (
+    presence: DBConversation["presence"]
+  ): "online" | "away" | "offline" => {
+    if (presence === "online") return "online";
+    if (presence === "away" || presence === "recent") return "away";
+    return "offline";
+  };
 
   return (
     <>
@@ -1037,13 +997,20 @@ export default function MessagesPage() {
                     )}
                     <ListItemRow
                       left={
-                        <Badge24
-                          src={avatarUrl}
-                          alt={c.name}
-                          fallback={c.name?.slice(0, 2).toUpperCase() || "??"}
-                          presence={c.presence}
-                          ring
-                        />
+                        <div className="relative">
+                          <Badge24
+                            src={avatarUrl}
+                            alt={c.name}
+                            fallback={c.name?.slice(0, 2).toUpperCase() || "??"}
+                            presence={null}
+                            ring
+                          />
+                          <StatusBadge
+                            status={toStatus(c.presence)}
+                            size="sm"
+                            className="absolute -bottom-0.5 -right-0.5"
+                          />
+                        </div>
                       }
                       right={
                         <div className="min-w-0 grid grid-cols-[minmax(0,1fr)_auto] gap-x-3">

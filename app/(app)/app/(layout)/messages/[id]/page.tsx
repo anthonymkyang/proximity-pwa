@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 import {
@@ -95,7 +96,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { AnimatedEmoji } from "@/components/emoji/AnimatedEmoji";
 import { useWebLLM } from "@/hooks/useWebLLM";
 import { AIToolsDialog } from "@/components/ai/AIToolsDialog";
-import { usePresence } from "@/components/providers/presence-context";
+import {
+  usePresence,
+  toUiPresence,
+} from "@/components/providers/presence-context";
 import maplibregl, {
   type Map as MaplibreMap,
   type StyleSpecification,
@@ -103,6 +107,7 @@ import maplibregl, {
 import "maplibre-gl/dist/maplibre-gl.css";
 import MapDirections from "@/components/map/MapDirections";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { StatusBadge } from "@/components/status/Badge";
 
 type Message = {
   id: string;
@@ -649,6 +654,22 @@ export default function ConversationPage() {
   const [newMessage, setNewMessage] = useState("");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [otherUserId, setOtherUserId] = useState<string | null>(null);
+  const participantPresence = useMemo(
+    () => (otherUserId ? toUiPresence(presence[otherUserId]) : null),
+    [otherUserId, presence]
+  );
+  const participantStatusBadge: "online" | "away" | "offline" =
+    participantPresence === "online"
+      ? "online"
+      : participantPresence === "away"
+      ? "away"
+      : "offline";
+  const participantStatusText =
+    participantPresence === "online"
+      ? "Online"
+      : participantPresence === "away"
+      ? "Away"
+      : "Offline";
   const [contactConnectionId, setContactConnectionId] = useState<string | null>(
     null
   );
@@ -3177,15 +3198,26 @@ export default function ConversationPage() {
                   <div className="h-3 w-24 rounded bg-muted/80 animate-pulse" />
                 </div>
               </>
-            ) : (
-              <>
-                <Avatar className="h-12 w-12">
-                  <AvatarImage
-                    alt={participantName}
-                    src={participantAvatar ?? undefined}
+            ) : otherUserId ? (
+              <Link
+                href={`/app/profile/${otherUserId}`}
+                className="flex items-center gap-3"
+                aria-label={(displayName || "Contact") + " profile"}
+              >
+                <div className="relative h-12 w-12">
+                  <Avatar className="h-12 w-12">
+                    <AvatarImage
+                      alt={participantName}
+                      src={participantAvatar ?? undefined}
+                    />
+                    <AvatarFallback>{participantInitials}</AvatarFallback>
+                  </Avatar>
+                  <StatusBadge
+                    status={participantStatusBadge}
+                    size="sm"
+                    className="absolute bottom-0.5 right-0.5"
                   />
-                  <AvatarFallback>{participantInitials}</AvatarFallback>
-                </Avatar>
+                </div>
                 <div className="leading-tight">
                   <div className="text-sm font-medium flex items-center gap-1 max-w-60">
                     <span className="truncate">{displayName || "Contact"}</span>
@@ -3196,8 +3228,37 @@ export default function ConversationPage() {
                     ) : null}
                   </div>
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span className="size-2 rounded-full bg-green-500" />
-                    <span>Online</span>
+                    <span>{participantStatusText}</span>
+                  </div>
+                </div>
+              </Link>
+            ) : (
+              <>
+                <div className="relative h-12 w-12">
+                  <Avatar className="h-12 w-12">
+                    <AvatarImage
+                      alt={participantName}
+                      src={participantAvatar ?? undefined}
+                    />
+                    <AvatarFallback>{participantInitials}</AvatarFallback>
+                  </Avatar>
+                  <StatusBadge
+                    status={participantStatusBadge}
+                    size="sm"
+                    className="absolute bottom-0.5 right-0.5"
+                  />
+                </div>
+                <div className="leading-tight">
+                  <div className="text-sm font-medium flex items-center gap-1 max-w-60">
+                    <span className="truncate">{displayName || "Contact"}</span>
+                    {secondaryName ? (
+                      <span className="text-xs text-muted-foreground truncate max-w-[140px]">
+                        {secondaryName}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span>{participantStatusText}</span>
                   </div>
                 </div>
               </>

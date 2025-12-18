@@ -60,6 +60,7 @@ import {
   usePresence,
   toUiPresence,
 } from "@/components/providers/presence-context";
+import { StatusBadge } from "@/components/status/Badge";
 import * as Flags from "country-flag-icons/react/3x2";
 import { SocialIcon } from "react-social-icons";
 
@@ -589,6 +590,14 @@ export default function ConnectionsPage() {
     );
   }, [connections, query, activeFilter]);
 
+  const toStatus = (
+    presence: UIConnection["presence"]
+  ): "online" | "away" | "offline" => {
+    if (presence === "online") return "online";
+    if (presence === "away" || presence === "recent") return "away";
+    return "offline";
+  };
+
   return (
     <>
       <div className="flex items-center gap-2 pb-2">
@@ -1107,18 +1116,10 @@ export default function ConnectionsPage() {
                       />
                       <AvatarFallback>{c.fallback}</AvatarFallback>
                     </Avatar>
-                    <span
-                      className={cn(
-                        "absolute -bottom-0.5 -right-0.5 z-10 block h-2.5 w-2.5 rounded-full ring ring-background transition-all duration-200",
-                        c.presence
-                          ? "opacity-100 scale-100"
-                          : "opacity-0 scale-75",
-                        c.presence === "online"
-                          ? "bg-green-500"
-                          : c.presence === "recent"
-                          ? "bg-muted-foreground"
-                          : "bg-transparent"
-                      )}
+                    <StatusBadge
+                      status={toStatus(c.presence)}
+                      size="sm"
+                      className="absolute -bottom-0.5 -right-0.5"
                     />
                   </div>
                 }
