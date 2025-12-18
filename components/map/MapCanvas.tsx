@@ -3178,9 +3178,18 @@ export default function MapCanvas() {
                             if (s.includes("good service")) return "#22c55e"; // green
                             if (s.includes("minor delays")) return "#eab308"; // yellow
                             if (s.includes("severe delays")) return "#ef4444"; // red
-                            if (s.includes("part suspended") || s.includes("part closure")) return "#f97316"; // orange
-                            if (s.includes("suspended") || s.includes("closed")) return "#dc2626"; // dark red
-                            if (s.includes("planned closure") || s.includes("service closed")) return "#6b7280"; // gray
+                            if (
+                              s.includes("part suspended") ||
+                              s.includes("part closure")
+                            )
+                              return "#f97316"; // orange
+                            if (s.includes("suspended") || s.includes("closed"))
+                              return "#dc2626"; // dark red
+                            if (
+                              s.includes("planned closure") ||
+                              s.includes("service closed")
+                            )
+                              return "#6b7280"; // gray
                             if (s.includes("reduced service")) return "#f59e0b"; // amber
                             return "#9ca3af"; // default gray
                           };
