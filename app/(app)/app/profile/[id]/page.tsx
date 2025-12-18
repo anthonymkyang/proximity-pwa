@@ -33,6 +33,7 @@ import {
   Flame,
   Hand,
   Droplet,
+  Pin,
 } from "lucide-react";
 
 import TopBar from "@/components/nav/TopBar";
@@ -48,6 +49,7 @@ import {
   ItemDescription,
 } from "@/components/ui/item";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { AnimatedEmoji } from "@/components/emoji/AnimatedEmoji";
 import {
   Drawer,
   DrawerContent,
@@ -68,6 +70,8 @@ type SaferSex = {
   last_test_date?: string | null; // some schemas use this
   notes?: string | null;
 };
+
+type ReactionType = "heart" | "fire" | "imp" | "peeking";
 
 interface Profile {
   id: string;
@@ -280,15 +284,25 @@ function PhotoCarouselOverlay({
 }
 
 export default function ProfilePage() {
-  // ---- Reactions (long-press) ----
-  type ReactionType = "fire" | "heart" | "slap" | "lick";
-
-  const REACTIONS: { key: ReactionType; label: string; Icon: any }[] = [
-    { key: "fire", label: "Fire", Icon: Flame },
-    { key: "heart", label: "Heart", Icon: Heart },
-    { key: "slap", label: "Slap", Icon: Hand },
-    { key: "lick", label: "Lick", Icon: Droplet },
+  // ---- Reactions (emoji picker) ----
+  const REACTIONS = [
+    { type: "heart" as const, emoji: "❤️", src: "/emoji/red-heart.json" },
+    { type: "fire" as const, emoji: "🔥", src: "/emoji/fire.json" },
+    {
+      type: "imp" as const,
+      emoji: "😈",
+      src: "/emoji/imp-smile.json",
+      restFrameFraction: 0.5,
+    },
+    { type: "peeking" as const, emoji: "👀", src: "/emoji/peeking.json" },
   ];
+
+  const reactionMeta = REACTIONS.reduce<
+    Record<string, (typeof REACTIONS)[number]>
+  >((acc, r) => {
+    acc[r.type] = r;
+    return acc;
+  }, {});
 
   const [reactionMenu, setReactionMenu] = useState<{
     open: boolean;
@@ -296,9 +310,10 @@ export default function ProfilePage() {
     y: number;
     target: null | { toUserId: string; context?: string };
   }>({ open: false, x: 0, y: 0, target: null });
+  const [reactionMenuClosing, setReactionMenuClosing] = useState(false);
 
   const longPressTimerRef = useRef<number | null>(null);
-  const reactionBtnRef = useRef<HTMLButtonElement | null>(null);
+  const reactionBtnRef = useRef<HTMLDivElement | null>(null);
 
   const clearLongPressTimer = () => {
     if (longPressTimerRef.current != null) {
@@ -353,27 +368,43 @@ export default function ProfilePage() {
 
   const sendReaction = useCallback(
     async (type: ReactionType) => {
+      // Update button with selected emoji and trigger animation
+      setSelectedReaction(type);
+      setTriggerAnimation(true);
+      setTimeout(() => setTriggerAnimation(false), 600);
+
+      // Trigger fade-out animation
+      setReactionMenuClosing(true);
+      setTimeout(() => {
+        setReactionMenu({ open: false, x: 0, y: 0, target: null });
+        setReactionMenuClosing(false);
+      }, 300); // Duration for fade-out
+
       const t = reactionMenu.target;
       if (!t?.toUserId) return;
       try {
-        await fetch("/api/reactions/send", {
+        await fetch("/api/profile-reactions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             to_user_id: t.toUserId,
-            type,
+            reaction_type: type,
             context: t.context ?? null,
           }),
         });
       } catch {
         // ignore
-      } finally {
-        setReactionMenu({ open: false, x: 0, y: 0, target: null });
       }
     },
     [reactionMenu.target]
   );
 
+  const [selectedReaction, setSelectedReaction] = useState<ReactionType | null>(
+    null
+  );
+  const [triggerAnimation, setTriggerAnimation] = useState(false);
+  const [pinning, setPinning] = useState(false);
+  const [pinConnectionId, setPinConnectionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -652,6 +683,36 @@ export default function ProfilePage() {
     };
   }, [routeId]);
 
+  // Subscribe to profile reactions realtime updates
+  useEffect(() => {
+    if (!routeId || !myUserId) return;
+    const supabase = createClient();
+
+    const channel = supabase
+      .channel(`profile-reactions:${routeId}:${myUserId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "profile_reactions",
+          filter: `from_user_id=eq.${myUserId},to_user_id=eq.${routeId}`,
+        },
+        (payload: any) => {
+          if (payload.eventType === "DELETE") {
+            setSelectedReaction(null);
+          } else if (payload.new?.reaction_type) {
+            setSelectedReaction(payload.new.reaction_type as ReactionType);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [routeId, myUserId]);
+
   // If permission is already granted, immediately request once and start watch on mount
   useEffect(() => {
     if (geoPermission === "granted" && geoState === "idle") {
@@ -816,6 +877,109 @@ export default function ProfilePage() {
     };
     run();
   }, [routeId]);
+
+  // --------- Load user's existing reaction for this profile ---------
+  useEffect(() => {
+    const loadReaction = async () => {
+      if (!routeId) return;
+      try {
+        const response = await fetch(
+          `/api/profile-reactions?to_user_id=${routeId}`
+        );
+        if (!response.ok) return;
+        const data = await response.json();
+        if (data.reaction?.reaction_type) {
+          setSelectedReaction(data.reaction.reaction_type as ReactionType);
+        }
+      } catch (err) {
+        console.error("Failed to load existing reaction:", err);
+      }
+    };
+    loadReaction();
+  }, [routeId]);
+
+  // --------- Load pin connection status ---------
+  useEffect(() => {
+    const loadPinStatus = async () => {
+      if (!routeId) return;
+      try {
+        const res = await fetch("/api/connections");
+        if (!res.ok) return;
+        const body = await res.json();
+        const list = body?.connections ?? [];
+        const pin = list.find((c: any) => {
+          if (c.type !== "pin") return false;
+          const rows = Array.isArray(c.connection_pins)
+            ? c.connection_pins
+            : [c.connection_pins].filter(Boolean);
+          return rows.some((r: any) => {
+            const candidate =
+              r?.pinned_profile_id ??
+              r?.pinned_profile?.id ??
+              c.target_profile_id;
+            return candidate === routeId;
+          });
+        });
+        if (pin) {
+          setPinConnectionId(pin.id);
+        }
+      } catch (err) {
+        console.error("Failed to load pin status:", err);
+      }
+    };
+    loadPinStatus();
+  }, [routeId]);
+
+  // --------- Handle pin toggle ---------
+  const handlePinToggle = useCallback(async () => {
+    if (!routeId || pinning) return;
+
+    // Optimistically update the UI
+    const previousPinConnectionId = pinConnectionId;
+    const wasUnpinning = !!pinConnectionId;
+
+    setPinning(true);
+    setPinConnectionId(wasUnpinning ? null : "optimistic");
+
+    try {
+      if (wasUnpinning) {
+        const res = await fetch(`/api/connections/${previousPinConnectionId}`, {
+          method: "DELETE",
+        });
+        if (!res.ok) {
+          throw new Error("Failed to unpin profile");
+        }
+      } else {
+        const res = await fetch("/api/connections", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "pin",
+            target_profile_id: routeId,
+            nickname:
+              profile?.profile_title ||
+              profile?.name ||
+              profile?.username ||
+              "Profile",
+          }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(body?.error || "Unable to pin profile");
+        }
+        setPinConnectionId(body?.connection?.id ?? null);
+      }
+    } catch (err) {
+      console.error("Pin toggle error:", err);
+      // Revert optimistic update
+      setPinConnectionId(previousPinConnectionId);
+      // Alert the user
+      alert(wasUnpinning ? "Failed to unpin profile" : "Failed to pin profile");
+    } finally {
+      setPinning(false);
+    }
+  }, [routeId, pinConnectionId, pinning, profile]);
+
   // --------- Utility: Get age from date_of_birth ---------
   const getAgeFromISODate = (iso: string | null | undefined): number | null => {
     if (!iso) return null;
@@ -1356,7 +1520,7 @@ export default function ProfilePage() {
             </div>
 
             {/* Avatar overlay + Reaction trigger (moved up) */}
-            <div className="absolute right-4 bottom-24 z-40 flex flex-col items-end gap-2">
+            <div className="absolute right-4 bottom-24 z-40 flex flex-col items-center gap-4">
               <button
                 type="button"
                 onClick={() => setProfileDrawerOpen(true)}
@@ -1393,20 +1557,76 @@ export default function ProfilePage() {
                 </div>
               </button>
 
-              {/* Reaction trigger button (press & hold to open menu) */}
-              <button
+              {/* Reaction trigger icon (tap to open emoji menu) */}
+              <div
                 ref={reactionBtnRef}
-                type="button"
+                role="button"
                 aria-label="React"
-                className="relative rounded-full bg-background/80 backdrop-blur p-2 shadow ring-1 ring-border hover:bg-background"
-                onPointerDown={beginLongPressFromIcon}
-                onPointerUp={cancelLongPress}
-                onPointerCancel={cancelLongPress}
-                onPointerLeave={cancelLongPress}
+                className="relative cursor-pointer"
+                onClick={(e) => {
+                  const el = e.currentTarget as HTMLElement;
+                  const rect = el.getBoundingClientRect();
+                  setReactionMenu({
+                    open: true,
+                    x: rect.left - 8,
+                    y: rect.top + rect.height / 2,
+                    target: {
+                      toUserId: String(routeId),
+                      context: "profile:react",
+                    },
+                  });
+                }}
                 onContextMenu={(e) => e.preventDefault()}
               >
-                <Smile
-                  className="h-5 w-5 text-foreground/70"
+                {selectedReaction ? (
+                  <div
+                    key={triggerAnimation ? "animate" : "static"}
+                    className={
+                      triggerAnimation
+                        ? "animate-in zoom-in-75 duration-300"
+                        : ""
+                    }
+                  >
+                    <AnimatedEmoji
+                      src={reactionMeta[selectedReaction]?.src}
+                      fallback={reactionMeta[selectedReaction]?.emoji}
+                      size={32}
+                      playOnce
+                      restAtEnd
+                      restFrameFraction={
+                        reactionMeta[selectedReaction]?.restFrameFraction
+                      }
+                    />
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      filter: "grayscale(100%) brightness(1.8) opacity(0.6)",
+                    }}
+                  >
+                    <AnimatedEmoji
+                      src="/emoji/red-heart.json"
+                      fallback="❤️"
+                      size={32}
+                      playOnce
+                      restAtEnd
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Pin icon */}
+              <button
+                type="button"
+                onClick={handlePinToggle}
+                disabled={pinning}
+                className="relative cursor-pointer disabled:opacity-50"
+                aria-label={pinConnectionId ? "Unpin profile" : "Pin profile"}
+              >
+                <Pin
+                  className={`h-8 w-8 text-white drop-shadow-md transition-all ${
+                    pinConnectionId ? "fill-white" : ""
+                  }`}
                   aria-hidden="true"
                 />
               </button>
@@ -2034,7 +2254,7 @@ export default function ProfilePage() {
             </>
           )}
         </div>
-        {/* Floating Reactions Menu (anchored to reaction icon, slides out to the left) */}
+        {/* Reaction emoji picker menu */}
         {reactionMenu.open ? (
           <>
             <button
@@ -2045,20 +2265,52 @@ export default function ProfilePage() {
               }
             />
             <div
-              className="fixed z-100 -translate-x-full -translate-y-1/2 rounded-2xl bg-popover border shadow-lg px-2 py-1 flex gap-1 animate-in fade-in-0 zoom-in-95 slide-in-from-right-2"
+              className={`fixed z-100 -translate-x-full -translate-y-1/2 flex items-center gap-1 rounded-full border bg-background/40 px-2 py-1 shadow-lg backdrop-blur pointer-events-auto ${
+                reactionMenuClosing
+                  ? "animate-out fade-out-0 zoom-out-95 duration-300"
+                  : "animate-in fade-in-0 zoom-in-95 slide-in-from-right-2"
+              }`}
               style={{ left: reactionMenu.x, top: reactionMenu.y }}
               role="menu"
+              onClick={(e) => e.stopPropagation()}
             >
-              {REACTIONS.map(({ key, label, Icon }) => (
-                <button
-                  key={key}
-                  onClick={() => sendReaction(key)}
-                  className="p-2 rounded-xl bg-card hover:bg-accent focus:outline-none focus:ring-2 focus:ring-primary/30 border"
-                  title={label}
-                  aria-label={label}
+              {REACTIONS.map((r, idx) => (
+                <div
+                  key={r.type}
+                  role="button"
+                  tabIndex={0}
+                  className="p-2 text-2xl leading-none rounded-full transition pointer-events-auto hover:bg-muted"
+                  data-reaction={r.type}
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    sendReaction(r.type);
+                  }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    sendReaction(r.type);
+                  }}
+                  onTouchStart={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    sendReaction(r.type);
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
                 >
-                  <Icon className="h-6 w-6 text-primary" />
-                </button>
+                  <AnimatedEmoji
+                    src={r.src}
+                    fallback={r.emoji}
+                    size={32}
+                    delayMs={idx * 80}
+                    playOnce
+                    restAtEnd
+                    restFrameFraction={r.restFrameFraction}
+                  />
+                </div>
               ))}
             </div>
           </>
