@@ -111,6 +111,174 @@ interface Profile {
 const pickLabel = (row: any) =>
   row?.label ?? row?.name ?? row?.title ?? row?.value ?? null;
 
+// Lightweight custom overlay carousel (non-Drawer) with blurred dark backdrop
+function PhotoCarouselOverlay({
+  open,
+  photos,
+  index,
+  onClose,
+  onPrev,
+  onNext,
+}: {
+  open: boolean;
+  photos: string[];
+  index: number;
+  onClose: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  const [loaded, setLoaded] = useState(false);
+  const startXRef = useRef<number | null>(null);
+  const startYRef = useRef<number | null>(null);
+  const isSwipingRef = useRef(false);
+  const SWIPE_THRESHOLD = 48; // pixels
+
+  const onKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (!open) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        onPrev();
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        onNext();
+      }
+    },
+    [open, onClose, onPrev, onNext]
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onKeyDown]);
+
+  // Reset image loaded flag on photo change
+  useEffect(() => {
+    setLoaded(false);
+  }, [index, photos]);
+
+  // Lazy preload adjacent images
+  useEffect(() => {
+    if (!open || photos.length <= 1) return;
+    const prevIdx = index === 0 ? photos.length - 1 : index - 1;
+    const nextIdx = (index + 1) % photos.length;
+    [prevIdx, nextIdx].forEach((i) => {
+      const url = photos[i];
+      if (!url) return;
+      const img = document.createElement("img");
+      img.src = url;
+    });
+  }, [open, index, photos]);
+
+  if (!open) return null;
+  const current = photos[index];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/70 supports-backdrop-filter:bg-black/50 backdrop-blur-md animate-in fade-in-0 duration-200"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Photos"
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full h-full"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Image viewport */}
+        <div
+          className="absolute inset-0"
+          onTouchStart={(e) => {
+            const t = e.touches[0];
+            startXRef.current = t.clientX;
+            startYRef.current = t.clientY;
+            isSwipingRef.current = false;
+          }}
+          onTouchMove={(e) => {
+            if (startXRef.current == null || startYRef.current == null) return;
+            const t = e.touches[0];
+            const dx = t.clientX - startXRef.current;
+            const dy = t.clientY - startYRef.current;
+            // horizontal intent, prevent background scroll when strong horizontal move
+            if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) {
+              isSwipingRef.current = true;
+              e.preventDefault();
+            }
+          }}
+          onTouchEnd={(e) => {
+            if (startXRef.current == null || startYRef.current == null) return;
+            const t = e.changedTouches[0];
+            const dx = t.clientX - startXRef.current;
+            const dy = t.clientY - startYRef.current;
+            const horizontal = Math.abs(dx) > Math.abs(dy);
+            if (horizontal && Math.abs(dx) > SWIPE_THRESHOLD) {
+              if (dx < 0) onNext();
+              else onPrev();
+            }
+            startXRef.current = null;
+            startYRef.current = null;
+            isSwipingRef.current = false;
+          }}
+        >
+          {current ? (
+            <Image
+              src={current}
+              alt={`Photo ${index + 1} of ${photos.length}`}
+              fill
+              priority
+              sizes="100vw"
+              draggable={false}
+              unoptimized
+              onLoadingComplete={() => setLoaded(true)}
+              className={`object-contain transition-opacity duration-300 ${
+                loaded ? "opacity-100" : "opacity-0"
+              } animate-in zoom-in-95`}
+            />
+          ) : null}
+        </div>
+        {/* Controls */}
+        <div className="absolute inset-0 flex items-center justify-between px-2">
+          <button
+            type="button"
+            aria-label="Previous photo"
+            className="rounded-full bg-background/60 supports-backdrop-filter:bg-background/50 backdrop-blur-md ring-1 ring-border text-foreground hover:bg-background/60 p-2"
+            onClick={onPrev}
+          >
+            <ChevronRight className="h-6 w-6 rotate-180" />
+          </button>
+          <button
+            type="button"
+            aria-label="Next photo"
+            className="rounded-full bg-background/60 supports-backdrop-filter:bg-background/50 backdrop-blur-md ring-1 ring-border text-foreground hover:bg-background/60 p-2"
+            onClick={onNext}
+          >
+            <ChevronRight className="h-6 w-6" />
+          </button>
+        </div>
+        {/* Top bar: index + close */}
+        <div className="absolute top-2 left-2 right-2 flex items-center justify-between">
+          <div className="rounded-full bg-background/60 supports-backdrop-filter:bg-background/50 backdrop-blur-md ring-1 ring-border text-foreground px-3 py-1 text-xs">
+            {index + 1} / {photos.length}
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="rounded-full bg-background/60 supports-backdrop-filter:bg-background/50 backdrop-blur-md ring-1 ring-border hover:bg-background/60"
+            onClick={onClose}
+          >
+            Close
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ProfilePage() {
   // ---- Reactions (long-press) ----
   type ReactionType = "fire" | "heart" | "slap" | "lick";
@@ -212,6 +380,20 @@ export default function ProfilePage() {
   const [mainPhotoUrl, setMainPhotoUrl] = useState<string | null>(null);
   const [mainLoading, setMainLoading] = useState<boolean>(true);
   const [heroLoaded, setHeroLoaded] = useState(false);
+  // All signed profile photo URLs for carousel
+  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
+  const [carouselOpen, setCarouselOpen] = useState(false);
+  const [carouselIndex, setCarouselIndex] = useState(0);
+  const thumbUrls = useMemo(() => photoUrls.slice(1, 4), [photoUrls]);
+  const [thumbsLoaded, setThumbsLoaded] = useState<Set<number>>(new Set());
+  const allThumbsLoaded =
+    thumbsLoaded.size === thumbUrls.length && thumbUrls.length > 0;
+
+  // Reset thumbs loaded state when photos change
+  useEffect(() => {
+    setThumbsLoaded(new Set());
+  }, [thumbUrls]);
+
   // --- Realtime presence: show online/away/offline indicator driven by user_presence table ---
   // Possible status: "online", "away", "offline" (default: "offline").
   const [isOnline, setIsOnline] = useState<"online" | "away" | "offline">(
@@ -651,47 +833,64 @@ export default function ProfilePage() {
   useEffect(() => {
     let cancelled = false;
 
-    const loadMainPhoto = async () => {
+    const loadPhotos = async () => {
       if (!routeId) return;
       setMainLoading(true);
       try {
         const supabase = createClient();
 
-        // Prefer an explicit main, otherwise the lowest position
+        // Load all photos (prefer main first, then by position)
         const { data: rows, error: qErr } = await supabase
           .from("profile_photos_public")
           .select("object_key, is_main, position")
           .eq("user_id", routeId as string)
           .order("is_main", { ascending: false })
-          .order("position", { ascending: true })
-          .limit(1);
+          .order("position", { ascending: true });
 
         if (qErr) throw qErr;
 
-        const row = rows?.[0];
-        if (row?.object_key) {
-          // Always use a signed URL to avoid "flashing" broken image during public fetch
-          const { data: signed, error: sErr } = await supabase.storage
-            .from("profile_public")
-            .createSignedUrl(row.object_key, 60 * 60); // 1 hour
+        const keys = Array.isArray(rows)
+          ? rows.map((r) => r.object_key).filter(Boolean)
+          : [];
 
-          if (sErr) throw sErr;
-          const url = signed?.signedUrl || null;
+        if (keys.length) {
+          // Sign all keys; filter out failures
+          const signedResults = await Promise.all(
+            keys.map(async (key) => {
+              try {
+                const { data: signed, error: sErr } = await supabase.storage
+                  .from("profile_public")
+                  .createSignedUrl(key, 60 * 60); // 1 hour
+                if (sErr) return null;
+                return signed?.signedUrl || null;
+              } catch {
+                return null;
+              }
+            })
+          );
+          const urls = signedResults.filter(Boolean) as string[];
           if (!cancelled) {
             setHeroLoaded(false);
-            setMainPhotoUrl(url);
+            setPhotoUrls(urls);
+            setMainPhotoUrl(urls[0] ?? null);
           }
         } else {
-          if (!cancelled) setMainPhotoUrl(null);
+          if (!cancelled) {
+            setPhotoUrls([]);
+            setMainPhotoUrl(null);
+          }
         }
       } catch {
-        if (!cancelled) setMainPhotoUrl(null);
+        if (!cancelled) {
+          setPhotoUrls([]);
+          setMainPhotoUrl(null);
+        }
       } finally {
         if (!cancelled) setMainLoading(false);
       }
     };
 
-    loadMainPhoto();
+    loadPhotos();
     return () => {
       cancelled = true;
     };
@@ -1025,6 +1224,19 @@ export default function ProfilePage() {
               />
             ) : null}
 
+            {/* Tap overlay to open carousel */}
+            {photoUrls.length > 0 ? (
+              <button
+                type="button"
+                aria-label="Open photo carousel"
+                className="absolute inset-0 z-20 bg-transparent focus:outline-none cursor-zoom-in"
+                onClick={() => {
+                  setCarouselIndex(0);
+                  setCarouselOpen(true);
+                }}
+              />
+            ) : null}
+
             {/* Top bar overlay */}
             <TopBar
               className="absolute top-0 left-0 right-0 z-30 bg-transparent px-4"
@@ -1045,6 +1257,91 @@ export default function ProfilePage() {
                 </Button>
               }
             />
+
+            {/* Thumbnail stack under top-right icon (overlapping photos 2–4) */}
+            {thumbUrls.length > 0 ? (
+              <div
+                className="absolute right-4 top-20 z-30 drop-shadow-2xl"
+                style={{
+                  width: 60 + (thumbUrls.length - 1) * 8,
+                  height: 80 + (thumbUrls.length - 1) * 8,
+                  position: "absolute",
+                }}
+              >
+                <div
+                  className={`relative w-full h-full transition-opacity duration-300 ${
+                    allThumbsLoaded ? "opacity-100" : "opacity-0"
+                  }`}
+                >
+                  {thumbUrls.map((u, i) => {
+                    // Reverse order: first (index 0, image 2) is on top
+                    const rotationsByCount: Record<number, string[]> = {
+                      1: ["rotate-[0deg]"],
+                      2: ["rotate-[0deg]", "rotate-[3deg]"],
+                      3: ["rotate-[0deg]", "-rotate-[2deg]", "rotate-[7deg]"],
+                    };
+                    const classes =
+                      rotationsByCount[thumbUrls.length]?.[i] ||
+                      "rotate-[0deg]";
+                    // Alternate sides: 0=center, 1=left, 2=right
+                    const offsetsByIndex: Record<
+                      number,
+                      { left: number; top: number }[]
+                    > = {
+                      1: [{ left: 0, top: 0 }],
+                      2: [
+                        { left: 0, top: 4 },
+                        { left: -8, top: 8 },
+                      ],
+                      3: [
+                        { left: 0, top: 4 },
+                        { left: -8, top: 8 },
+                        { left: 8, top: 8 },
+                      ],
+                    };
+                    const offset = offsetsByIndex[thumbUrls.length]?.[i] || {
+                      left: 0,
+                      top: 0,
+                    };
+                    return (
+                      <button
+                        key={u}
+                        type="button"
+                        aria-label={`Open photo ${i + 2}`}
+                        className={
+                          "absolute overflow-hidden rounded-md ring-2 ring-white/90 shadow-md focus:outline-none " +
+                          classes
+                        }
+                        style={{
+                          left: offset.left,
+                          top: offset.top,
+                          width: 60,
+                          height: 80,
+                          zIndex: thumbUrls.length - i,
+                        }}
+                        onClick={() => {
+                          setCarouselIndex(1 + i);
+                          setCarouselOpen(true);
+                        }}
+                      >
+                        <Image
+                          src={u}
+                          alt={`Thumbnail ${i + 2}`}
+                          width={60}
+                          height={80}
+                          draggable={false}
+                          unoptimized
+                          onLoadingComplete={() => {
+                            setThumbsLoaded((prev) => new Set([...prev, i]));
+                          }}
+                          className="w-15 h-20 object-cover"
+                        />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
 
             {/* Hero text overlay */}
             <div className="absolute left-4 bottom-4 z-40 text-white space-y-1">
@@ -1766,6 +2063,22 @@ export default function ProfilePage() {
             </div>
           </>
         ) : null}
+
+        {/* Full-screen photo carousel overlay (non-Drawer) */}
+        <PhotoCarouselOverlay
+          open={carouselOpen}
+          photos={photoUrls}
+          index={carouselIndex}
+          onClose={() => setCarouselOpen(false)}
+          onPrev={() =>
+            setCarouselIndex((i) =>
+              i === 0 ? Math.max(0, photoUrls.length - 1) : i - 1
+            )
+          }
+          onNext={() =>
+            setCarouselIndex((i) => (i + 1) % Math.max(1, photoUrls.length))
+          }
+        />
       </main>
     </div>
   );
