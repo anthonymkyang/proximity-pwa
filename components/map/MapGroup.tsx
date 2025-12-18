@@ -6,12 +6,16 @@ import { cn } from "@/lib/utils";
 
 type MapGroupProps = {
   size?: number;
+  count?: number;
+  when?: string | null;
   className?: string;
   onClick?: () => void;
 };
 
 export default function MapGroup({
   size = 32,
+  count,
+  when,
   className,
   onClick,
 }: MapGroupProps) {
@@ -51,12 +55,16 @@ export default function MapGroup({
       >
         <Users className="h-4 w-4" />
       </div>
-      <span className="pointer-events-none absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full bg-red-600 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white shadow-[0_6px_16px_rgba(0,0,0,0.35)]">
-        Today
-      </span>
-      <span className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 rounded-full bg-red-600 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white shadow-[0_6px_16px_rgba(0,0,0,0.35)]">
-        24
-      </span>
+      {when ? (
+        <span className="pointer-events-none absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full bg-red-600 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white shadow-[0_6px_16px_rgba(0,0,0,0.35)]">
+          {when}
+        </span>
+      ) : null}
+      {typeof count === "number" ? (
+        <span className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 rounded-full bg-red-600 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white shadow-[0_6px_16px_rgba(0,0,0,0.35)]">
+          {Math.max(1, Math.floor(count))}
+        </span>
+      ) : null}
     </div>
   );
 }

@@ -98,7 +98,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     idleTimerRef.current = setTimeout(() => setAway(), IDLE_MS);
     if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
-    offlineTimerRef.current = setTimeout(() => void upsertPresence("offline"), OFFLINE_MS);
+    offlineTimerRef.current = setTimeout(
+      () => void upsertPresence("offline"),
+      OFFLINE_MS
+    );
     void upsertPresence("online");
   }, [upsertPresence]);
 
@@ -106,7 +109,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     idleTimerRef.current = null;
     if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
-    offlineTimerRef.current = setTimeout(() => void upsertPresence("offline"), OFFLINE_MS);
+    offlineTimerRef.current = setTimeout(
+      () => void upsertPresence("offline"),
+      OFFLINE_MS
+    );
     void upsertPresence("away");
   }, [upsertPresence]);
 
@@ -212,7 +218,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   // location watcher and periodic coord push
   useEffect(() => {
-    if (locationStatus !== "granted" || typeof navigator === "undefined") return;
+    if (locationStatus !== "granted" || typeof navigator === "undefined")
+      return;
 
     if (navigator.geolocation) {
       locationWatcherRef.current = navigator.geolocation.watchPosition(
@@ -268,7 +275,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       try {
         if ("permissions" in navigator && navigator.permissions?.query) {
           const perm = await navigator.permissions.query({
-            // @ts-expect-error geolocation is valid here
             name: "geolocation",
           });
           setFromPermission(perm.state);
@@ -356,7 +362,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <MapCanvas />
         </div>
         <div
-          className={`pointer-events-none fixed inset-x-0 top-0 z-10 h-24 bg-gradient-to-b from-background/90 to-transparent transition-opacity duration-300 ${
+          className={`pointer-events-none fixed inset-x-0 top-0 z-10 h-24 bg-linear-to-b from-background/90 to-transparent transition-opacity duration-300 ${
             isScrolled ? "opacity-100" : "opacity-0"
           }`}
         />

@@ -1,5 +1,7 @@
 "use client";
 
+import * as React from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Users,
@@ -7,10 +9,12 @@ import {
   Clock3,
   MapPin,
   ShoppingBag,
+  MessageSquare,
   ChevronRight,
 } from "lucide-react";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import Avatar14 from "@/components/shadcn-studio/avatar/avatar-14";
+import { Badge } from "@/components/ui/badge";
 
 const sections = [
   {
@@ -41,15 +45,49 @@ const sections = [
   {
     title: "Channels",
     href: "/app/channels",
-    icon: ShoppingBag,
+    icon: MessageSquare,
   },
 ];
 
-const upcomingGroups = [
-  { id: "g1", name: "Downtown Drinks", when: "Today · 7:30 PM" },
-  { id: "g2", name: "Sunday Brunch Crew", when: "Sun · 11:00 AM" },
-  { id: "g3", name: "Sunset Walk", when: "Mon · 6:00 PM" },
-];
+const CATEGORY_BADGE_COLORS: Record<string, string> = {
+  social: "bg-sky-200 text-sky-900",
+  sports: "bg-emerald-200 text-emerald-900",
+  food: "bg-amber-200 text-amber-900",
+  arts: "bg-violet-200 text-violet-900",
+  gaming: "bg-fuchsia-200 text-fuchsia-900",
+  learning: "bg-indigo-200 text-indigo-900",
+};
+
+function getCategoryBadgeClass(categoryName?: string): string {
+  if (!categoryName) return "";
+  const normalized = categoryName.toLowerCase().trim();
+  return CATEGORY_BADGE_COLORS[normalized] || "bg-gray-200 text-gray-900";
+}
+
+function formatDateShort(dateStr: string): string {
+  const date = new Date(dateStr);
+  const today = new Date();
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  if (date.toDateString() === today.toDateString()) return "Today";
+  if (date.toDateString() === tomorrow.toDateString()) return "Tomorrow";
+
+  return date.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function formatTime(dateStr: string): string {
+  const date = new Date(dateStr);
+  return date.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
 
 const latestOffers = [
   {
@@ -84,6 +122,65 @@ const earnPoints = [
 export default function ActivityPage() {
   const firstRow = sections.slice(0, 4);
   const secondRow = sections.slice(4);
+
+  const [myGroups, setMyGroups] = useState<any[] | null>(null);
+  const [avatarStacks, setAvatarStacks] = useState<
+    Record<
+      string,
+      {
+        avatars: { src?: string; name?: string; fallback?: string }[];
+        extra: number;
+      }
+    >
+  >({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadGroups() {
+      try {
+        const response = await fetch("/api/groups/activity");
+        if (!response.ok) throw new Error("Failed to load groups");
+
+        const data = await response.json();
+        setMyGroups(data.groups || []);
+        setAvatarStacks(data.attendeeAvatars || {});
+      } catch (error) {
+        console.error("Error fetching groups:", error);
+        setMyGroups([]);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadGroups();
+  }, []);
+
+  // Helper functions from groups page
+  function isFuture(dateStr?: string | null): boolean {
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return false;
+    return d.getTime() > new Date().getTime();
+  }
+
+  function isCurrentlyHappening(dateStr?: string | null): boolean {
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return false;
+    const now = new Date().getTime();
+    const fourHoursInMs = 4 * 60 * 60 * 1000;
+    const eventTime = d.getTime();
+    return eventTime <= now + fourHoursInMs && eventTime > now - fourHoursInMs;
+  }
+
+  // Filter for upcoming groups (same as groups page)
+  const upcomingGroups = React.useMemo(
+    () =>
+      myGroups?.filter(
+        (g) => isFuture(g.nextDate) && g.lifecycleStatus !== "in_progress"
+      ) || [],
+    [myGroups]
+  );
 
   return (
     <>
@@ -136,39 +233,132 @@ export default function ActivityPage() {
             Upcoming groups
           </p>
           <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]{display:none;}">
-            {upcomingGroups.map((g) => (
-              <div
-                key={g.id}
-                className="min-w-[60vw] max-w-[520px] rounded-xl sm:min-w-[380px]"
-              >
-                <div className="relative mb-3 aspect-14/9 w-full overflow-hidden rounded-xl bg-card/60">
-                  <div className="absolute left-3 bottom-3">
-                    <Avatar className="size-12 border-2 border-background shadow">
-                      <AvatarFallback className="text-[12px] font-semibold">
-                        HG
-                      </AvatarFallback>
-                    </Avatar>
+            {loading ? (
+              <div className="flex gap-3">
+                {[1, 2, 3].map((i) => (
+                  <div
+                    key={i}
+                    className="min-w-[60vw] max-w-[520px] rounded-xl sm:min-w-[380px] space-y-2"
+                  >
+                    <div className="aspect-14/9 w-full rounded-xl bg-muted animate-pulse" />
+                    <div className="h-4 bg-muted rounded animate-pulse" />
+                    <div className="h-3 bg-muted rounded w-2/3 animate-pulse" />
                   </div>
-                </div>
-                <div className="relative px-1">
-                  <div className="text-sm font-semibold text-foreground pr-14">
-                    {g.name}
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground pr-14">
-                    {g.when}
-                  </div>
-                  <Avatar14
-                    className="absolute right-1 top-1/2 -translate-y-1/2"
-                    avatars={[
-                      { fallback: "HG" },
-                      { fallback: "AM" },
-                      { fallback: "LR" },
-                      { fallback: "XY" },
-                    ]}
-                  />
-                </div>
+                ))}
               </div>
-            ))}
+            ) : upcomingGroups.length > 0 ? (
+              upcomingGroups.map((g) => {
+                const groupName = g.title || g.name || "Unnamed Group";
+                const dateStr = g.nextDate;
+                const coverUrl = g.cover_image_url
+                  ? g.cover_image_url.startsWith("http")
+                    ? g.cover_image_url
+                    : `/api/groups/storage?path=${encodeURIComponent(
+                        g.cover_image_url.replace(/^\//, "")
+                      )}`
+                  : null;
+
+                return (
+                  <div
+                    key={g.id}
+                    className="min-w-[60vw] max-w-[520px] rounded-xl sm:min-w-[380px] cursor-pointer hover:opacity-80 transition"
+                  >
+                    <div className="relative mb-3 aspect-14/9 w-full overflow-hidden rounded-xl bg-card/60">
+                      {coverUrl && (
+                        <img
+                          src={coverUrl}
+                          alt={groupName}
+                          className="h-full w-full object-cover"
+                          onError={(e) => {
+                            (
+                              e.currentTarget as HTMLImageElement
+                            ).style.display = "none";
+                          }}
+                        />
+                      )}
+                      <div className="absolute left-3 bottom-3">
+                        <Avatar className="size-12 border-2 border-background shadow-lg drop-shadow-lg">
+                          {g.hostProfile?.avatar_url && (
+                            <AvatarImage
+                              src={
+                                g.hostProfile.avatar_url.startsWith("http")
+                                  ? g.hostProfile.avatar_url
+                                  : `/api/photos/avatars?path=${encodeURIComponent(
+                                      g.hostProfile.avatar_url
+                                    )}`
+                              }
+                              alt={g.hostProfile.name || groupName}
+                            />
+                          )}
+                          <AvatarFallback className="text-[12px] font-semibold">
+                            {(g.hostProfile?.name || groupName)
+                              ?.slice(0, 2)
+                              .toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                      </div>
+                    </div>
+                    <div className="relative px-1">
+                      <div className="text-sm font-semibold text-foreground pr-14 truncate">
+                        {groupName}
+                      </div>
+                      {g.categoryName && (
+                        <div className="mt-0.5 pr-14">
+                          <Badge
+                            className={`px-2 py-0.5 text-[10px] rounded-full ${getCategoryBadgeClass(
+                              g.categoryName
+                            )}`}
+                          >
+                            {g.categoryName}
+                          </Badge>
+                        </div>
+                      )}
+                      {dateStr && (
+                        <div className="mt-1 text-xs text-muted-foreground pr-14">
+                          {formatDateShort(dateStr)} · {formatTime(dateStr)}
+                        </div>
+                      )}
+                      {avatarStacks &&
+                      avatarStacks[g.id] &&
+                      avatarStacks[g.id].avatars.length > 0 ? (
+                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex -space-x-2">
+                          {avatarStacks[g.id].avatars.map((a, idx) => (
+                            <Avatar
+                              key={`${g.id}-av-${idx}`}
+                              className="h-7 w-7 ring-2 ring-background"
+                            >
+                              {a.src ? (
+                                <img
+                                  src={a.src}
+                                  alt={a.name || "User"}
+                                  className="h-full w-full object-cover rounded-full"
+                                />
+                              ) : null}
+                              {!a.src ? (
+                                <AvatarFallback className="text-[10px]">
+                                  {a.fallback || ""}
+                                </AvatarFallback>
+                              ) : null}
+                            </Avatar>
+                          ))}
+                          {avatarStacks[g.id].extra > 0 && (
+                            <Avatar className="h-7 w-7 ring-2 ring-background">
+                              <AvatarFallback className="text-[10px]">
+                                +{avatarStacks[g.id].extra}
+                              </AvatarFallback>
+                            </Avatar>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="w-full py-8 text-center text-sm text-muted-foreground">
+                No upcoming groups
+              </div>
+            )}
           </div>
         </section>
 

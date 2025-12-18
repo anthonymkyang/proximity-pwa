@@ -32,6 +32,8 @@ type ListingGroup = {
   start_time: string | null;
   cover_image_url: string | null;
   categoryName: string | null;
+  host_id: string | null;
+  cohost_ids: string[];
   location_lat: number | null;
   location_lng: number | null;
   distanceKm: number | null;
@@ -68,7 +70,9 @@ function resolveAvatarUrl(path?: string | null): string | undefined {
 function normalizeLifecycle(status?: string | null): GroupLifecycleStatus {
   if (!status) return null;
   const lower = status.toLowerCase();
-  return lower === "in_progress" || lower === "active" ? (lower as GroupLifecycleStatus) : null;
+  return lower === "in_progress" || lower === "active"
+    ? (lower as GroupLifecycleStatus)
+    : null;
 }
 
 export async function GET() {
@@ -112,7 +116,10 @@ export async function GET() {
         console.warn("[groups/activity] cohost fetch error", cohostRes.error);
       }
       if (attendeeRes.error) {
-        console.warn("[groups/activity] attendee fetch error", attendeeRes.error);
+        console.warn(
+          "[groups/activity] attendee fetch error",
+          attendeeRes.error
+        );
       }
 
       let colorIdx = 0;
@@ -228,7 +235,18 @@ export async function GET() {
           attendeesByGroup.get(gid)!.push(row);
         });
 
+        // Add hostProfile to each group
         for (const group of groups) {
+          if (group.host_id) {
+            const hp = hostProfileMap.get(group.host_id);
+            (group as any).hostProfile = hp
+              ? {
+                  name: hp.profile_title || hp.name || null,
+                  avatar_url: hp.avatar_url || null,
+                }
+              : null;
+          }
+
           const items: AvatarStackItem[] = [];
           const seen = new Set<string>();
 
@@ -287,7 +305,7 @@ export async function GET() {
       const { data: listingRows, error: listingsErr } = await supabase
         .from("groups")
         .select(
-          "id, title, start_time, cover_image_url, is_public, status, location_lat, location_lng, group_categories(name)"
+          "id, title, start_time, cover_image_url, is_public, status, host_id, cohost_ids, location_lat, location_lng, group_categories(name)"
         )
         .in("status", ["active", "in_progress"])
         .eq("is_public", true)
@@ -304,6 +322,10 @@ export async function GET() {
           start_time: row.start_time || null,
           cover_image_url: row.cover_image_url || null,
           categoryName: row.group_categories?.name ?? null,
+          host_id: row.host_id || null,
+          cohost_ids: Array.isArray(row.cohost_ids)
+            ? row.cohost_ids.map((cid: any) => String(cid))
+            : [],
           location_lat:
             typeof row.location_lat === "number" ? row.location_lat : null,
           location_lng:
@@ -316,10 +338,69 @@ export async function GET() {
       console.warn("[groups/activity] listings fetch threw", e);
     }
 
+    // Compute people counts for badge rendering (host + co-hosts + attendees)
+    const peopleCounts: Record<string, number> = {};
+    try {
+      const allGroups = [
+        ...groups.map((g) => ({
+          id: g.id,
+          host_id: g.host_id,
+          cohost_ids: Array.isArray(g.cohost_ids) ? g.cohost_ids : [],
+        })),
+        ...listings.map((g) => ({
+          id: g.id,
+          host_id: g.host_id,
+          cohost_ids: Array.isArray(g.cohost_ids) ? g.cohost_ids : [],
+        })),
+      ];
+
+      const allIds = Array.from(new Set(allGroups.map((g) => g.id)));
+      const sets = new Map<string, Set<string>>();
+      for (const g of allGroups) {
+        if (!g.id) continue;
+        if (!sets.has(g.id)) sets.set(g.id, new Set());
+        const s = sets.get(g.id)!;
+        if (g.host_id) s.add(String(g.host_id));
+        for (const cid of g.cohost_ids || []) {
+          if (cid) s.add(String(cid));
+        }
+      }
+
+      if (allIds.length) {
+        const { data: attendeeRows, error: attendeeErr } = await supabase
+          .from("group_attendees")
+          .select("group_id, user_id")
+          .in("group_id", allIds)
+          .eq("status", "accepted");
+
+        if (attendeeErr) {
+          console.warn(
+            "[groups/activity] attendee count fetch error",
+            attendeeErr
+          );
+        } else {
+          (attendeeRows || []).forEach((row: any) => {
+            const gid = row?.group_id ? String(row.group_id) : null;
+            const uid = row?.user_id ? String(row.user_id) : null;
+            if (!gid || !uid) return;
+            if (!sets.has(gid)) sets.set(gid, new Set());
+            sets.get(gid)!.add(uid);
+          });
+        }
+      }
+
+      for (const id of allIds) {
+        peopleCounts[id] = sets.get(id)?.size ?? 0;
+      }
+    } catch (e) {
+      console.warn("[groups/activity] people count compute failed", e);
+    }
+
     return NextResponse.json({
       groups,
       attendeeAvatars,
       listings,
+      peopleCounts,
     });
   } catch (e) {
     console.error("[groups/activity] failed", e);

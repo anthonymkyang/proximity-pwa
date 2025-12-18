@@ -650,6 +650,9 @@ export default function ConnectionsPage() {
             <div className="border rounded-lg bg-card text-card-foreground hover:bg-muted transition-colors">
               <div className="p-4 flex items-center justify-between gap-4">
                 <p className="font-semibold">My contact card</p>
+                <Button size="sm" variant="outline">
+                  Add details
+                </Button>
               </div>
             </div>
           </div>

@@ -44,6 +44,7 @@ import MapAvatar from "./MapAvatar";
 import MapPlace from "./MapPlace";
 import MapFiltering from "./MapFiltering";
 import MapCruising from "./MapCruising";
+import MapGroup from "./MapGroup";
 import DrawerWalls from "./DrawerWalls";
 import MapDirections from "./MapDirections";
 import { getContrastingText, getLineColor } from "./MapInstructions";
@@ -675,6 +676,36 @@ export default function MapCanvas() {
   const cruisingMarkersRef = useRef<
     { marker: maplibregl.Marker; root: Root; id: string }[]
   >([]);
+  const groupMarkersRef = useRef<
+    Map<string, { marker: maplibregl.Marker; root: Root }>
+  >(new Map());
+  const listingMarkersRef = useRef<
+    Map<string, { marker: maplibregl.Marker; root: Root }>
+  >(new Map());
+  const [userGroups, setUserGroups] = useState<
+    {
+      id: string;
+      title: string;
+      nextDate: string | null;
+      categoryName?: string | null;
+      location_lat: number | null;
+      location_lng: number | null;
+      peopleCount?: number;
+      whenLabel?: string | null;
+    }[]
+  >([]);
+  const [activeGroupListings, setActiveGroupListings] = useState<
+    {
+      id: string;
+      title: string;
+      start_time: string | null;
+      categoryName?: string | null;
+      location_lat: number | null;
+      location_lng: number | null;
+      peopleCount?: number;
+      whenLabel?: string | null;
+    }[]
+  >([]);
   const fallbackAvatarUrl =
     "/api/photos/avatars?path=fb66cdef-296f-48f9-9c6e-29114cce6624%2F1762977064388.jpg";
   const placeMarkersRef = useRef<{ marker: maplibregl.Marker; root: Root }[]>(
@@ -815,7 +846,15 @@ export default function MapCanvas() {
   const [showGroupDrawer, setShowGroupDrawer] = useState(false);
   const [showCruisingDrawer, setShowCruisingDrawer] = useState(false);
   const [showWallDrawer, setShowWallDrawer] = useState(false);
-  const [groupCoords] = useState<[number, number] | null>(null);
+  const [groupCoords, setGroupCoords] = useState<[number, number] | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<{
+    id: string;
+    title: string;
+    categoryName: string | null;
+    whenLabel: string | null;
+    peopleCount: number | null;
+    coords: [number, number] | null;
+  } | null>(null);
   const [selectedCruising, setSelectedCruising] = useState<{
     id: string;
     name: string;
@@ -1395,6 +1434,130 @@ export default function MapCanvas() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    fetch("/api/groups/activity")
+      .then((res) => res.json())
+      .then((data) => {
+        if (!active) return;
+
+        const formatClock = (d: Date) => {
+          const h = d.getHours();
+          const m = d.getMinutes();
+          const hour12 = ((h + 11) % 12) + 1;
+          const suffix = h >= 12 ? "pm" : "am";
+          if (m === 0) return `${hour12}${suffix}`;
+          return `${hour12}:${String(m).padStart(2, "0")}${suffix}`;
+        };
+
+        // Returns label string, null for "no badge", or "__HIDE__" to omit marker (>4 days away).
+        const computeWhenLabel = (
+          value: unknown
+        ): string | null | "__HIDE__" => {
+          if (!value) return null;
+          const ts = typeof value === "string" ? Date.parse(value) : Number.NaN;
+          if (!Number.isFinite(ts)) return null;
+          const when = new Date(ts);
+          const now = new Date();
+
+          const startOfDay = (d: Date) =>
+            new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+
+          const dayDiff = Math.round(
+            (startOfDay(when) - startOfDay(now)) / 86_400_000
+          );
+
+          // Spec: anything more than 4 days away => do not show on map.
+          if (dayDiff > 4) return "__HIDE__";
+
+          if (dayDiff === 0) {
+            const msUntil = ts - now.getTime();
+            if (msUntil <= 0) return "Today";
+            if (msUntil <= 4 * 60 * 60 * 1000) {
+              if (msUntil < 60 * 60 * 1000) {
+                const mins = Math.max(1, Math.ceil(msUntil / 60_000));
+                return `In ${mins} min${mins === 1 ? "" : "s"}`;
+              }
+              const hrs = Math.max(1, Math.ceil(msUntil / 3_600_000));
+              return `In ${hrs} hour${hrs === 1 ? "" : "s"}`;
+            }
+            return `At ${formatClock(when)}`;
+          }
+
+          if (dayDiff === 1) return "Tomorrow";
+          if (dayDiff >= 2 && dayDiff <= 4) {
+            return when.toLocaleDateString("en-US", { weekday: "long" });
+          }
+
+          // Past dates (or anything else) => no badge.
+          return null;
+        };
+
+        const peopleCounts: Record<string, number> =
+          data && typeof data === "object" && data.peopleCounts
+            ? (data.peopleCounts as Record<string, number>)
+            : {};
+        const groups = (data.groups ?? [])
+          .filter((g: any) => g?.membershipStatus === "hosting")
+          .map((g: any) => {
+            const lat = Number(g?.location_lat);
+            const lng = Number(g?.location_lng);
+            const whenLabel = computeWhenLabel(g?.nextDate);
+            if (whenLabel === "__HIDE__") return null;
+            return {
+              id: String(g.id),
+              title: g.title || g.name || "Unnamed Group",
+              nextDate: g.nextDate || null,
+              categoryName: g.categoryName ?? null,
+              location_lat: Number.isFinite(lat) ? lat : null,
+              location_lng: Number.isFinite(lng) ? lng : null,
+              peopleCount: Number(peopleCounts?.[String(g.id)] ?? 0),
+              whenLabel: typeof whenLabel === "string" ? whenLabel : null,
+            };
+          })
+          .filter(Boolean)
+          .filter(
+            (g: any) =>
+              g.location_lat != null &&
+              g.location_lng != null &&
+              Number.isFinite(g.location_lat) &&
+              Number.isFinite(g.location_lng)
+          );
+        setUserGroups(groups);
+
+        const listings = (data.listings ?? [])
+          .map((g: any) => {
+            const lat = Number(g?.location_lat);
+            const lng = Number(g?.location_lng);
+            const whenLabel = computeWhenLabel(g?.start_time);
+            if (whenLabel === "__HIDE__") return null;
+            return {
+              id: String(g.id),
+              title: g.name || g.title || "Untitled group",
+              start_time: g.start_time || null,
+              categoryName: g.categoryName ?? null,
+              location_lat: Number.isFinite(lat) ? lat : null,
+              location_lng: Number.isFinite(lng) ? lng : null,
+              peopleCount: Number(peopleCounts?.[String(g.id)] ?? 0),
+              whenLabel: typeof whenLabel === "string" ? whenLabel : null,
+            };
+          })
+          .filter(Boolean)
+          .filter(
+            (g: any) =>
+              g.location_lat != null &&
+              g.location_lng != null &&
+              Number.isFinite(g.location_lat) &&
+              Number.isFinite(g.location_lng)
+          );
+        setActiveGroupListings(listings);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     const missing = visiblePresences
       .map((p) => p.id)
       .filter((id) => !profileCacheRef.current[id]);
@@ -1499,6 +1662,156 @@ export default function MapCanvas() {
       entry.marker.setLngLat([p.lng, p.lat]).addTo(map);
     });
   }, [visiblePresences, mapReady, profileCacheVersion]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    const groupMarkers = groupMarkersRef.current;
+    const groupIds = new Set(userGroups.map((g) => g.id));
+
+    // Remove markers for groups no longer in the list
+    for (const [id, entry] of groupMarkers.entries()) {
+      if (!groupIds.has(id)) {
+        entry.marker.remove();
+        requestAnimationFrame(() => entry.root.unmount());
+        groupMarkers.delete(id);
+      }
+    }
+
+    // Add or update group markers
+    userGroups.forEach((group) => {
+      const lat = group.location_lat;
+      const lng = group.location_lng;
+      if (!Number.isFinite(lat as number) || !Number.isFinite(lng as number))
+        return;
+
+      let entry = groupMarkers.get(group.id);
+      if (!entry) {
+        const container = document.createElement("div");
+        container.className =
+          "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
+        const root = createRoot(container);
+        const marker = new maplibregl.Marker({
+          element: container,
+          anchor: "center",
+        });
+        entry = { marker, root };
+        groupMarkers.set(group.id, entry);
+      }
+
+      entry.root.render(
+        <MapGroup
+          size={32}
+          count={
+            typeof group.peopleCount === "number" &&
+            Number.isFinite(group.peopleCount)
+              ? group.peopleCount
+              : undefined
+          }
+          when={typeof group.whenLabel === "string" ? group.whenLabel : null}
+          onClick={() => {
+            const coords: [number, number] | null =
+              group.location_lng != null && group.location_lat != null
+                ? [group.location_lng, group.location_lat]
+                : null;
+            setSelectedGroup({
+              id: group.id,
+              title: group.title,
+              categoryName: group.categoryName ?? null,
+              whenLabel: group.whenLabel ?? null,
+              peopleCount:
+                typeof group.peopleCount === "number" &&
+                Number.isFinite(group.peopleCount)
+                  ? group.peopleCount
+                  : null,
+              coords,
+            });
+            setGroupCoords(coords);
+            setShowPlaceDrawer(false);
+            setShowCruisingDrawer(false);
+            setShowGroupDrawer(true);
+          }}
+        />
+      );
+
+      entry.marker.setLngLat([lng as number, lat as number]).addTo(map);
+    });
+  }, [userGroups, mapReady]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    const listingMarkers = listingMarkersRef.current;
+    const listingIds = new Set(activeGroupListings.map((g) => g.id));
+
+    for (const [id, entry] of listingMarkers.entries()) {
+      if (!listingIds.has(id)) {
+        entry.marker.remove();
+        requestAnimationFrame(() => entry.root.unmount());
+        listingMarkers.delete(id);
+      }
+    }
+
+    activeGroupListings.forEach((group) => {
+      const lat = group.location_lat;
+      const lng = group.location_lng;
+      if (!Number.isFinite(lat as number) || !Number.isFinite(lng as number))
+        return;
+
+      let entry = listingMarkers.get(group.id);
+      if (!entry) {
+        const container = document.createElement("div");
+        container.className =
+          "pointer-events-auto z-30 drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
+        const root = createRoot(container);
+        const marker = new maplibregl.Marker({
+          element: container,
+          anchor: "center",
+        });
+        entry = { marker, root };
+        listingMarkers.set(group.id, entry);
+      }
+
+      entry.root.render(
+        <MapGroup
+          size={32}
+          count={
+            typeof group.peopleCount === "number" &&
+            Number.isFinite(group.peopleCount)
+              ? group.peopleCount
+              : undefined
+          }
+          when={typeof group.whenLabel === "string" ? group.whenLabel : null}
+          onClick={() => {
+            const coords: [number, number] | null =
+              group.location_lng != null && group.location_lat != null
+                ? [group.location_lng, group.location_lat]
+                : null;
+            setSelectedGroup({
+              id: group.id,
+              title: group.title,
+              categoryName: group.categoryName ?? null,
+              whenLabel: group.whenLabel ?? null,
+              peopleCount:
+                typeof group.peopleCount === "number" &&
+                Number.isFinite(group.peopleCount)
+                  ? group.peopleCount
+                  : null,
+              coords,
+            });
+            setGroupCoords(coords);
+            setShowPlaceDrawer(false);
+            setShowCruisingDrawer(false);
+            setShowGroupDrawer(true);
+          }}
+        />
+      );
+
+      entry.marker.setLngLat([lng as number, lat as number]).addTo(map);
+    });
+  }, [activeGroupListings, mapReady]);
 
   useEffect(() => {
     return () => {
@@ -2450,17 +2763,28 @@ export default function MapCanvas() {
         </DrawerContent>
       </Drawer>
 
-      <Drawer open={showGroupDrawer} onOpenChange={setShowGroupDrawer}>
+      <Drawer
+        open={showGroupDrawer}
+        onOpenChange={(open) => {
+          setShowGroupDrawer(open);
+          if (!open) {
+            setSelectedGroup(null);
+            setGroupCoords(null);
+          }
+        }}
+      >
         <DrawerContent className="pb-1">
           <DrawerHeader className="text-center">
             <DrawerTitle>
-              <span>TCR pump n dump</span>
+              <span>{selectedGroup?.title || "Group"}</span>
             </DrawerTitle>
-            <div className="mt-1 flex justify-center">
-              <span className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[11px] font-semibold text-white">
-                Pump n dump
-              </span>
-            </div>
+            {selectedGroup?.categoryName ? (
+              <div className="mt-1 flex justify-center">
+                <span className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[11px] font-semibold text-white">
+                  {selectedGroup.categoryName}
+                </span>
+              </div>
+            ) : null}
           </DrawerHeader>
           <div className="grid grid-cols-3 gap-3 px-4 pb-2">
             <div className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground">
