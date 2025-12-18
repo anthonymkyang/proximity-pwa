@@ -635,6 +635,7 @@ export default function MapCanvas() {
     null
   );
   const [selectedStation, setSelectedStation] = useState<{
+    id?: string;
     name: string;
     displayName?: string;
     modes?: string[];
@@ -642,6 +643,32 @@ export default function MapCanvas() {
     coordinates?: [number, number];
     distanceKm?: number;
   } | null>(null);
+  const [stationBoard, setStationBoard] = useState<
+    | { status: "idle" }
+    | { status: "loading" }
+    | {
+        status: "ready";
+        departures: {
+          lineId: string | null;
+          lineName: string | null;
+          destinationName: string | null;
+          direction: string | null;
+          expectedArrival: string | null;
+          platformName: string | null;
+          timeToStationSec: number | null;
+        }[];
+        lineStatuses: {
+          lineId: string;
+          lineName: string | null;
+          status: string;
+          reason?: string;
+        }[];
+      }
+    | { status: "error"; message: string }
+  >({ status: "idle" });
+  const [lineDirectionTab, setLineDirectionTab] = useState<
+    Record<string, string | null>
+  >({});
   const liveMarkersRef = useRef<
     Map<
       string,
@@ -889,9 +916,56 @@ export default function MapCanvas() {
     [selectedCruising?.name]
   );
 
+  useEffect(() => {
+    if (!showStationDrawer || !selectedStation?.id) return;
+    let canceled = false;
+
+    const load = async () => {
+      try {
+        setStationBoard({ status: "loading" });
+        const params = new URLSearchParams({
+          stopPointId: selectedStation.id as string,
+        });
+        const res = await fetch(`/api/tfl-departures?${params.toString()}`, {
+          cache: "no-store",
+        });
+        const json = await res.json().catch(() => null);
+        if (canceled) return;
+        if (!res.ok) {
+          setStationBoard({
+            status: "error",
+            message:
+              (json as any)?.error ||
+              `Failed to load station info (${res.status})`,
+          });
+          return;
+        }
+        setStationBoard({
+          status: "ready",
+          departures: Array.isArray(json?.departures) ? json.departures : [],
+          lineStatuses: Array.isArray(json?.lineStatuses)
+            ? json.lineStatuses
+            : [],
+        });
+      } catch (e: any) {
+        if (canceled) return;
+        setStationBoard({
+          status: "error",
+          message: e?.message ?? "Failed to load station info",
+        });
+      }
+    };
+
+    void load();
+    return () => {
+      canceled = true;
+    };
+  }, [showStationDrawer, selectedStation?.id]);
+
   const findNearestStation = (
     coords: [number, number]
   ): {
+    id?: string;
     name: string;
     displayName: string;
     coordinates: [number, number];
@@ -905,6 +979,7 @@ export default function MapCanvas() {
     const toRad = (deg: number) => (deg * Math.PI) / 180;
     const [lon1, lat1] = coords;
     let nearest: {
+      id?: string;
       name: string;
       displayName: string;
       coordinates: [number, number];
@@ -943,7 +1018,9 @@ export default function MapCanvas() {
       if (distanceKm < best) {
         best = distanceKm;
         const props = (feature.properties ?? {}) as Record<string, any>;
+        const id = typeof props.id === "string" ? props.id : undefined;
         nearest = {
+          id,
           name: props.name || "Station",
           displayName: props.displayName || props.name || "Station",
           coordinates: [lon2, lat2],
@@ -1216,6 +1293,7 @@ export default function MapCanvas() {
           ? (geometry.coordinates as [number, number])
           : undefined;
         setSelectedStation({
+          id: typeof props.id === "string" ? props.id : undefined,
           name: props.name ?? props.displayName ?? "Station",
           displayName: props.displayName,
           modes: toArray(props.modes),
@@ -3007,7 +3085,226 @@ export default function MapCanvas() {
               </span>
             </DrawerTitle>
           </DrawerHeader>
-          <div className="flex flex-col gap-2 px-4 pb-4"></div>
+          <ScrollArea className="h-[60vh]">
+            <div className="flex flex-col gap-3 px-4 pb-4">
+              {stationBoard.status === "loading" ? (
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-40 rounded" />
+                  <Skeleton className="h-12 w-full rounded-2xl" />
+                  <Skeleton className="h-12 w-full rounded-2xl" />
+                  <Skeleton className="h-12 w-full rounded-2xl" />
+                </div>
+              ) : stationBoard.status === "error" ? (
+                <div className="rounded-2xl bg-muted/15 p-4 text-sm text-muted-foreground">
+                  {stationBoard.message}
+                </div>
+              ) : stationBoard.status === "ready" ? (
+                <>
+                  {stationBoard.departures.length === 0 ? (
+                    <div className="rounded-2xl bg-muted/15 p-4 text-sm text-muted-foreground">
+                      No live departures right now.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {(() => {
+                        // Group departures by line, then by direction
+                        const groupedByLine = new Map<
+                          string,
+                          Map<string | null, typeof stationBoard.departures>
+                        >();
+
+                        for (const d of stationBoard.departures) {
+                          const lineName = d.lineName || "Other";
+                          const direction = d.direction || "Other";
+
+                          if (!groupedByLine.has(lineName)) {
+                            groupedByLine.set(lineName, new Map());
+                          }
+                          const dirMap = groupedByLine.get(lineName)!;
+                          if (!dirMap.has(direction)) {
+                            dirMap.set(direction, []);
+                          }
+                          dirMap.get(direction)!.push(d);
+                        }
+
+                        const directionOrder = [
+                          "Northbound",
+                          "Southbound",
+                          "Eastbound",
+                          "Westbound",
+                        ];
+
+                        const sortedLines = Array.from(
+                          groupedByLine.keys()
+                        ).sort();
+
+                        return sortedLines.map((lineName) => {
+                          const dirMap = groupedByLine.get(lineName)!;
+                          const sortedDirs = Array.from(dirMap.keys()).sort(
+                            (a, b) => {
+                              const aIdx = a ? directionOrder.indexOf(a) : -1;
+                              const bIdx = b ? directionOrder.indexOf(b) : -1;
+                              if (aIdx !== -1 && bIdx !== -1)
+                                return aIdx - bIdx;
+                              if (aIdx !== -1) return -1;
+                              if (bIdx !== -1) return 1;
+                              return 0;
+                            }
+                          );
+
+                          const selectedDir =
+                            lineDirectionTab[lineName] ?? sortedDirs[0] ?? null;
+                          const departuresForDir = selectedDir
+                            ? dirMap.get(selectedDir) ?? []
+                            : [];
+
+                          const lineStatus = stationBoard.lineStatuses.find(
+                            (ls) => {
+                              const ln = (
+                                ls.lineName ?? ls.lineId
+                              )?.toLowerCase();
+                              return ln === lineName.toLowerCase();
+                            }
+                          );
+                          const statusText =
+                            lineStatus?.status ?? "Status unavailable";
+                          const statusReason = lineStatus?.reason;
+                          const lineBg = getLineColor(lineName);
+                          const lineFg = getContrastingText(lineBg);
+
+                          // Determine status dot color
+                          const getStatusColor = (status: string) => {
+                            const s = status.toLowerCase();
+                            if (s.includes("good service")) return "#22c55e"; // green
+                            if (s.includes("minor delays")) return "#eab308"; // yellow
+                            if (s.includes("severe delays")) return "#ef4444"; // red
+                            if (s.includes("part suspended") || s.includes("part closure")) return "#f97316"; // orange
+                            if (s.includes("suspended") || s.includes("closed")) return "#dc2626"; // dark red
+                            if (s.includes("planned closure") || s.includes("service closed")) return "#6b7280"; // gray
+                            if (s.includes("reduced service")) return "#f59e0b"; // amber
+                            return "#9ca3af"; // default gray
+                          };
+                          const statusColor = getStatusColor(statusText);
+
+                          return (
+                            <div
+                              key={lineName}
+                              className="rounded-2xl bg-muted/15 p-4"
+                            >
+                              <div className="mb-2 flex items-center justify-between gap-2">
+                                <span
+                                  className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold"
+                                  style={{
+                                    backgroundColor: lineBg,
+                                    color: lineFg,
+                                  }}
+                                >
+                                  {lineName}
+                                </span>
+                                <span className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground">
+                                  <span
+                                    className="h-2 w-2 rounded-full"
+                                    style={{ backgroundColor: statusColor }}
+                                  />
+                                  {statusText}
+                                </span>
+                              </div>
+                              {statusReason ? (
+                                <div className="-mt-1 mb-2 text-[11px] text-muted-foreground">
+                                  {statusReason}
+                                </div>
+                              ) : null}
+                              <div className="mb-3 flex flex-wrap gap-2">
+                                {sortedDirs.map((direction) => {
+                                  const active = direction === selectedDir;
+                                  return (
+                                    <button
+                                      key={direction || "Other"}
+                                      type="button"
+                                      onClick={() =>
+                                        setLineDirectionTab((prev) => ({
+                                          ...prev,
+                                          [lineName]: direction,
+                                        }))
+                                      }
+                                      className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                                        active
+                                          ? "border-amber-400 bg-amber-400/15 text-amber-200"
+                                          : "border-neutral-700 bg-neutral-900 text-neutral-200"
+                                      }`}
+                                    >
+                                      {direction || "Other"}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              {departuresForDir.length === 0 ? (
+                                <div className="text-sm text-muted-foreground">
+                                  No departures for this direction.
+                                </div>
+                              ) : (
+                                <div className="space-y-1.5">
+                                  {departuresForDir
+                                    .slice(0, 2)
+                                    .map((d, idx) => {
+                                      const mins =
+                                        typeof d.timeToStationSec ===
+                                          "number" &&
+                                        Number.isFinite(d.timeToStationSec)
+                                          ? Math.max(
+                                              0,
+                                              Math.round(
+                                                d.timeToStationSec / 60
+                                              )
+                                            )
+                                          : null;
+                                      return (
+                                        <div
+                                          key={`${d.lineId ?? lineName}-${
+                                            d.expectedArrival ?? idx
+                                          }-${idx}`}
+                                          className="flex items-center justify-between gap-3 rounded-xl border border-amber-400/30 bg-neutral-950 px-3 py-2 text-amber-200 font-mono"
+                                        >
+                                          <div className="min-w-0">
+                                            <div className="flex items-center gap-2">
+                                              <div className="truncate text-sm font-semibold tracking-tight">
+                                                {d.destinationName ?? "—"}
+                                              </div>
+                                            </div>
+                                            {d.platformName ? (
+                                              <div className="mt-0.5 truncate text-xs text-amber-300/80">
+                                                {d.platformName}
+                                              </div>
+                                            ) : null}
+                                          </div>
+                                          <div className="shrink-0 text-right">
+                                            <div className="text-sm font-semibold tracking-tight">
+                                              {mins == null
+                                                ? "—"
+                                                : mins <= 0
+                                                ? "Due"
+                                                : `${mins} min`}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="rounded-2xl bg-muted/15 p-4 text-sm text-muted-foreground">
+                  Tap a station to see departures.
+                </div>
+              )}
+            </div>
+          </ScrollArea>
         </DrawerContent>
       </Drawer>
     </div>
