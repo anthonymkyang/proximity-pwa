@@ -148,7 +148,13 @@ const hideRoadNumbers = (map: MaplibreMap) => {
 };
 
 const addBuildingExtrusions = (map: MaplibreMap) => {
-  if (map.getSource(BUILDING_SOURCE_ID)) return;
+  // Ensure source exists
+  if (!map.getSource(BUILDING_SOURCE_ID)) {
+    map.addSource(BUILDING_SOURCE_ID, {
+      url: "https://tiles.openfreemap.org/planet",
+      type: "vector",
+    });
+  }
 
   const labelLayerId = map
     .getStyle()
@@ -158,52 +164,162 @@ const addBuildingExtrusions = (map: MaplibreMap) => {
         (layer.layout as { "text-field"?: unknown } | undefined)?.["text-field"]
     )?.id;
 
-  map.addSource(BUILDING_SOURCE_ID, {
-    url: "https://tiles.openfreemap.org/planet",
-    type: "vector",
-  });
+  // 3D buildings layer
+  if (!map.getLayer("3d-buildings")) {
+    map.addLayer(
+      {
+        id: "3d-buildings",
+        source: BUILDING_SOURCE_ID,
+        "source-layer": "building",
+        type: "fill-extrusion",
+        minzoom: 15,
+        filter: ["!=", ["get", "hide_3d"], true],
+        paint: {
+          "fill-extrusion-color": [
+            "interpolate",
+            ["linear"],
+            ["get", "render_height"],
+            0,
+            "#0f1113",
+            120,
+            "#13171b",
+            300,
+            "#161b20",
+          ],
+          "fill-extrusion-height": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            15,
+            0,
+            16,
+            ["get", "render_height"],
+          ],
+          "fill-extrusion-base": [
+            "step",
+            ["zoom"],
+            0,
+            16,
+            ["coalesce", ["get", "render_min_height"], 0],
+          ],
+          "fill-extrusion-opacity": 0.4,
+        },
+      },
+      labelLayerId
+    );
+  }
 
+  // Trees canopy layer (flat fill over landcover)
+  if (map.getLayer("trees-3d")) {
+    map.removeLayer("trees-3d");
+  }
   map.addLayer(
     {
-      id: "3d-buildings",
+      id: "trees-3d",
+      type: "fill",
       source: BUILDING_SOURCE_ID,
-      "source-layer": "building",
-      type: "fill-extrusion",
-      minzoom: 15,
-      filter: ["!=", ["get", "hide_3d"], true],
+      "source-layer": "landcover",
+      minzoom: 12,
+      filter: ["in", ["get", "class"], ["literal", ["wood", "forest", "tree"]]],
       paint: {
-        "fill-extrusion-color": [
-          "interpolate",
-          ["linear"],
-          ["get", "render_height"],
-          0,
-          "#0f1113",
-          120,
-          "#13171b",
-          300,
-          "#161b20",
-        ],
-        "fill-extrusion-height": [
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-          15,
-          0,
-          16,
-          ["get", "render_height"],
-        ],
-        "fill-extrusion-base": [
-          "step",
-          ["zoom"],
-          0,
-          16,
-          ["coalesce", ["get", "render_min_height"], 0],
-        ],
-        "fill-extrusion-opacity": 0.4,
+        "fill-color": darkenColor(resolveCssVarColor("--park", "#243c2f"), 0.1),
+        "fill-opacity": 0.35,
+        "fill-outline-color": darkenColor(
+          resolveCssVarColor("--park", "#1a2d23"),
+          0.12
+        ),
       },
     },
-    labelLayerId
+    "3d-buildings"
   );
+
+  // Parks / grass areas — subtle green
+  if (!map.getLayer("parks-grass")) {
+    map.addLayer(
+      {
+        id: "parks-grass",
+        type: "fill",
+        source: BUILDING_SOURCE_ID,
+        "source-layer": "landcover",
+        minzoom: 10,
+        filter: [
+          "in",
+          ["get", "class"],
+          [
+            "literal",
+            ["grass", "meadow", "park", "recreation_ground", "pitch", "garden"],
+          ],
+        ],
+        paint: {
+          "fill-color": darkenColor(
+            resolveCssVarColor("--forest", "#1e3a29"),
+            0.1
+          ),
+          "fill-opacity": 0.28,
+          "fill-outline-color": darkenColor(
+            resolveCssVarColor("--forest", "#162b20"),
+            0.12
+          ),
+        },
+      },
+      "3d-buildings"
+    );
+  }
+};
+
+// Override water colors to match background
+const overrideWaterColors = (map: MaplibreMap) => {
+  const bg = resolveCssVarColor("--background", "#0f1113");
+  const layers = map.getStyle().layers || [];
+  layers.forEach((layer) => {
+    const srcLayer = (layer as any)["source-layer"];
+    const id = layer.id || "";
+    if (srcLayer === "water" || id.includes("water")) {
+      if (layer.type === "fill") {
+        try {
+          map.setPaintProperty(id, "fill-color", bg);
+          map.setPaintProperty(id, "fill-opacity", 1);
+        } catch {}
+      } else if (layer.type === "line") {
+        try {
+          map.setPaintProperty(id, "line-color", bg);
+          map.setPaintProperty(id, "line-opacity", 1);
+        } catch {}
+      }
+    }
+    if (srcLayer === "waterway" || id.includes("waterway")) {
+      if (layer.type === "line") {
+        try {
+          map.setPaintProperty(id, "line-color", bg);
+          map.setPaintProperty(id, "line-opacity", 1);
+        } catch {}
+      }
+    }
+  });
+};
+
+// Ensure water layers render above landcover fills (trees/parks) but below buildings
+const elevateWaterLayers = (map: MaplibreMap) => {
+  const beforeId = "3d-buildings";
+  const layers = map.getStyle().layers || [];
+  layers.forEach((layer) => {
+    const id = layer.id || "";
+    const srcLayer = (layer as any)["source-layer"];
+    const isWaterFill =
+      layer.type === "fill" && (id.includes("water") || srcLayer === "water");
+    const isWaterLine =
+      layer.type === "line" &&
+      (id.includes("water") ||
+        id.includes("waterway") ||
+        srcLayer === "waterway");
+    if (isWaterFill || isWaterLine) {
+      try {
+        map.moveLayer(id, beforeId);
+      } catch {
+        // ignore if move fails
+      }
+    }
+  });
 };
 
 const ALLOWED_STOP_TYPES = new Set([
@@ -336,6 +452,20 @@ const resolveCssVarColor = (varName: string, fallback: string) => {
     .trim();
   if (!raw) return fallback;
   return normalizeCssColor(raw, fallback);
+};
+
+// Slightly darken an rgb/rgba color string by an amount (0-1)
+const darkenColor = (input: string, amount: number) => {
+  const m = input
+    .replace(/\s+/g, "")
+    .match(/^rgba?\((\d+),(\d+),(\d+)(?:,(\d*\.?\d+))?\)$/i);
+  if (!m) return input;
+  const r = Math.max(0, Math.min(255, Math.round(Number(m[1]) * (1 - amount))));
+  const g = Math.max(0, Math.min(255, Math.round(Number(m[2]) * (1 - amount))));
+  const b = Math.max(0, Math.min(255, Math.round(Number(m[3]) * (1 - amount))));
+  const a = m[4] != null ? Number(m[4]) : null;
+  if (a == null || Number.isNaN(a)) return `rgb(${r}, ${g}, ${b})`;
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
 };
 
 const addRoundelIcons = async (map: MaplibreMap) => {
@@ -1250,7 +1380,9 @@ export default function MapCanvas() {
 
       map.on("load", () => {
         hideRoadNumbers(map);
+        overrideWaterColors(map);
         addBuildingExtrusions(map);
+        elevateWaterLayers(map);
         map.setPadding(MAP_PADDING);
         void (async () => {
           await addRoundelIcons(map);
