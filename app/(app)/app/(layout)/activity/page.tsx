@@ -184,11 +184,11 @@ export default function ActivityPage() {
 
   return (
     <>
-      <h1 className="px-1 pb-3 text-4xl font-extrabold tracking-tight">
+      <h1 className="px-5 pb-3 text-4xl font-extrabold tracking-tight">
         Activity
       </h1>
 
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-4 gap-3 px-4">
         {firstRow.map((section) => (
           <Link
             key={section.href}
@@ -206,7 +206,7 @@ export default function ActivityPage() {
       </div>
 
       {secondRow.length > 0 && (
-        <div className="mt-3 grid grid-cols-2 gap-3">
+        <div className="mt-3 grid grid-cols-2 gap-3 px-4">
           {secondRow.map((section) => (
             <Link
               key={section.href}
@@ -229,10 +229,11 @@ export default function ActivityPage() {
 
       <div className="mt-10 space-y-14 pb-8">
         <section className="space-y-3">
-          <p className="px-1 text-xs font-semibold tracking-wider text-muted-foreground uppercase mb-3">
+          <p className="px-5 text-xs font-semibold tracking-wider text-muted-foreground uppercase mb-3">
             Upcoming groups
           </p>
-          <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]{display:none;}">
+          <div className="flex gap-3 overflow-x-auto pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]{display:none;}">
+            <div className="pl-2.5"></div>
             {loading ? (
               <div className="flex gap-3">
                 {[1, 2, 3].map((i) => (
@@ -355,18 +356,20 @@ export default function ActivityPage() {
                 );
               })
             ) : (
-              <div className="w-full py-8 text-center text-sm text-muted-foreground">
+              <div className="w-full py-8 text-center text-sm text-muted-foreground px-4">
                 No upcoming groups
               </div>
             )}
+            <div className="pr-2.5"></div>
           </div>
         </section>
 
         <section className="space-y-3">
-          <p className="px-1 text-xs font-semibold tracking-wider text-muted-foreground uppercase mb-3">
+          <p className="px-5 text-xs font-semibold tracking-wider text-muted-foreground uppercase mb-3">
             Latest offers
           </p>
-          <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]{display:none;}">
+          <div className="flex gap-3 overflow-x-auto pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]{display:none;}">
+            <div className="pl-2.5"></div>
             {latestOffers.map((o) => (
               <div
                 key={o.id}
@@ -389,14 +392,16 @@ export default function ActivityPage() {
                 </div>
               </div>
             ))}
+            <div className="pr-2.5"></div>
           </div>
         </section>
 
         <section className="space-y-3">
-          <p className="px-1 text-xs font-semibold tracking-wider text-muted-foreground uppercase mb-3">
+          <p className="px-5 text-xs font-semibold tracking-wider text-muted-foreground uppercase mb-3">
             Earn points
           </p>
-          <div className="-mx-4 flex gap-3 overflow-x-auto px-4 py-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]{display:none;}">
+          <div className="flex gap-3 overflow-x-auto py-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]{display:none;}">
+            <div className="pl-2.5"></div>
             {earnPoints.map((p) => (
               <div key={p.id} className="flex flex-col items-center gap-1">
                 <div className="relative">
@@ -432,10 +437,11 @@ export default function ActivityPage() {
                 </div>
               </div>
             ))}
+            <div className="pr-2.5"></div>
           </div>
         </section>
 
-        <section className="space-y-3">
+        <section className="space-y-3 px-4">
           <p className="px-1 text-xs font-semibold tracking-wider text-muted-foreground uppercase mb-3">
             Find places near you
           </p>

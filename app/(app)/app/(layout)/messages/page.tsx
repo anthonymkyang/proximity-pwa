@@ -861,14 +861,14 @@ export default function MessagesPage() {
 
   return (
     <>
-      <div className="flex items-center gap-2 pb-2">
+      <div className="flex items-center gap-2 pb-2 px-4">
         <h1 className="flex-1 px-1 text-4xl font-extrabold tracking-tight">
           Messages
         </h1>
         {/* Actions moved to TopBar; leave space for layout if needed */}
       </div>
       {/* Search */}
-      <div className="pb-5">
+      <div className="pb-5 px-4">
         <InputGroup>
           <InputGroupInput placeholder="Ask or search messages" />
           <InputGroupAddon>
@@ -879,6 +879,7 @@ export default function MessagesPage() {
 
       {/* Filter chips */}
       <div className="flex gap-2 overflow-x-auto pb-3 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <div className="pl-2.5"></div>
         {filters.map((f) => (
           <Button
             key={f}
@@ -890,21 +891,24 @@ export default function MessagesPage() {
             {f}
           </Button>
         ))}
+        <div className="pr-2.5"></div>
       </div>
 
       {/* Archived row */}
-      <ListItemRow
-        left={<Archive className="h-5 w-5 text-muted-foreground" />}
-        right={
-          <span className="truncate text-base font-semibold text-muted-foreground">
-            Archived
-          </span>
-        }
-      />
+      <div className="px-4">
+        <ListItemRow
+          left={<Archive className="h-5 w-5 text-muted-foreground" />}
+          right={
+            <span className="truncate text-base font-semibold text-muted-foreground">
+              Archived
+            </span>
+          }
+        />
+      </div>
 
       {/* EMPTY STATE */}
       {hasNoConvos ? (
-        <div className="pt-8">
+        <div className="pt-8 px-4">
           <Empty>
             <EmptyHeader>
               <EmptyMedia variant="icon">
@@ -919,10 +923,10 @@ export default function MessagesPage() {
         </div>
       ) : (
         // CONVERSATION LIST
-        <ul className="divide-y">
+        <ul className="divide-y px-4">
           {/* if there's an error, show it in-list */}
           {loadError ? (
-            <li className="bg-destructive/5 px-4 py-3 flex items-start gap-3">
+            <li className="bg-destructive/5 py-3 flex items-start gap-3">
               <div className="h-8 w-8 rounded-full bg-destructive/10 flex items-center justify-center text-destructive">
                 <AlertTriangle className="h-4 w-4" />
               </div>

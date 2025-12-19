@@ -261,7 +261,7 @@ export default function ActivityGroupsPage() {
   return (
     <div className="flex flex-col gap-6">
       {/* Header */}
-      <div className="flex items-center justify-between px-1">
+      <div className="flex items-center justify-between px-4">
         <h1 className="text-4xl font-extrabold tracking-tight">Groups</h1>
         <div className="inline-flex w-fit -space-x-px rounded-md shadow-xs">
           <Button
@@ -287,7 +287,7 @@ export default function ActivityGroupsPage() {
       </div>
 
       {error && (
-        <div className="rounded-lg bg-destructive/10 p-4 text-sm text-destructive">
+        <div className="rounded-lg bg-destructive/10 p-4 text-sm text-destructive px-4">
           {error}
         </div>
       )}
@@ -295,7 +295,7 @@ export default function ActivityGroupsPage() {
       {/* Upcoming Groups - Horizontal Scrolling */}
       {upcomingGroups.length > 0 && (
         <section className="space-y-3">
-          <p className="px-1 text-xs font-semibold tracking-wider text-muted-foreground uppercase mb-3">
+          <p className="px-4 text-xs font-semibold tracking-wider text-muted-foreground uppercase mb-3">
             Upcoming groups
           </p>
           <GroupScrolling groups={upcomingGroups} avatarStacks={avatarStacks} />
@@ -303,20 +303,22 @@ export default function ActivityGroupsPage() {
       )}
 
       {upcomingGroups.length === 0 && (
-        <Empty>
-          <EmptyHeader>
-            <EmptyTitle>No Upcoming Groups</EmptyTitle>
-            <EmptyDescription>
-              Create a new group or join one nearby to get started
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
+        <div className="px-4">
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle>No Upcoming Groups</EmptyTitle>
+              <EmptyDescription>
+                Create a new group or join one nearby to get started
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        </div>
       )}
 
       {/* In Progress Groups */}
       {inProgressGroups.length > 0 && (
-        <section className="space-y-3">
-          <div className="flex items-center gap-2 px-1">
+        <section className="space-y-3 px-4">
+          <div className="flex items-center gap-2">
             <Users className="h-5 w-5" />
             <h2 className="text-xl font-bold">In Progress</h2>
             <Badge variant="secondary">{inProgressGroups.length}</Badge>
@@ -333,26 +335,6 @@ export default function ActivityGroupsPage() {
           </div>
         </section>
       )}
-
-      {/* Nearby Groups */}
-      <section className="space-y-3">
-        <p className="px-1 text-xs font-semibold tracking-wider text-muted-foreground uppercase mb-3">
-          Nearby groups
-        </p>
-        {availableNearbyGroups.length > 0 ? (
-          <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-            {availableNearbyGroups.map((group) => (
-              <GroupCard
-                key={group.id}
-                group={group}
-                onClick={() => router.push(`/app/groups/${group.id}`)}
-              />
-            ))}
-          </div>
-        ) : (
-          <NearbyGroupsMap groups={nearbyGroups || []} />
-        )}
-      </section>
     </div>
   );
 }

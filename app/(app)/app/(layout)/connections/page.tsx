@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/input-group";
 import { createClient } from "@/utils/supabase/client";
 import { Input } from "@/components/ui/input";
-import { Search, Plus, Check } from "lucide-react";
+import { Search, Plus, Check, ContactRound, Pin } from "lucide-react";
 import getAvatarProxyUrl from "@/lib/profiles/getAvatarProxyUrl";
 import {
   Empty,
@@ -95,6 +95,8 @@ type UIConnection = {
   nearEligible?: boolean;
   avatarUrl?: string | null;
   fallback: string;
+  isContact?: boolean;
+  isPin?: boolean;
 };
 
 // Reusable row layout similar to Messages list
@@ -449,6 +451,28 @@ export default function ConnectionsPage() {
   }, []);
 
   const connections: UIConnection[] = useMemo(() => {
+    // Build a map of profileIds to contacts for quick lookup
+    const contactsByProfileId = new Map<string, any>();
+    (rows || []).forEach((row) => {
+      if (row.type === "contact") {
+        const contact = Array.isArray(row.connection_contacts)
+          ? row.connection_contacts[0]
+          : row.connection_contacts;
+        const contactProfile = contact?.profiles || null;
+        const profileId =
+          contact?.profile_id ||
+          contactProfile?.id ||
+          contact?.user_id ||
+          contact?.contact_user_id ||
+          contact?.contact_profile_id ||
+          contact?.contact_id ||
+          null;
+        if (profileId) {
+          contactsByProfileId.set(profileId, contact);
+        }
+      }
+    });
+
     return (rows || []).map((row) => {
       const contact = Array.isArray(row.connection_contacts)
         ? row.connection_contacts[0]
@@ -474,6 +498,13 @@ export default function ConnectionsPage() {
             contact?.contact_id ||
             null) || null;
 
+      // For pins, check if this profileId also exists as a contact
+      const contactForPin =
+        row.type === "pin" && profileId
+          ? contactsByProfileId.get(profileId)
+          : null;
+      const contactProfileForPin = contactForPin?.profiles || null;
+
       const avatarUrl = pinnedProfile?.avatar_url
         ? getAvatarProxyUrl(pinnedProfile.avatar_url)
         : contactProfile?.avatar_url
@@ -483,13 +514,20 @@ export default function ConnectionsPage() {
       const title =
         pin?.nickname ||
         contact?.display_name ||
+        contactForPin?.display_name ||
         pinnedProfile?.profile_title ||
         contactProfile?.profile_title ||
+        contactProfileForPin?.profile_title ||
         row.title ||
         "Connection";
 
       const subtitle = (() => {
-        const baseProfile = row.type === "pin" ? pinnedProfile : contactProfile;
+        const baseProfile =
+          row.type === "pin" && contactProfileForPin
+            ? contactProfileForPin
+            : row.type === "pin"
+            ? pinnedProfile
+            : contactProfile;
         const age = calcAge(baseProfile?.date_of_birth);
         const position = baseProfile?.position?.label || null;
         const sexuality = baseProfile?.sexuality?.label || null;
@@ -560,6 +598,8 @@ export default function ConnectionsPage() {
           return true;
         })(),
         fallback,
+        isContact: row.type === "contact",
+        isPin: row.type === "pin",
       };
     });
   }, [rows, presence, myCoords]);
@@ -580,6 +620,44 @@ export default function ConnectionsPage() {
         .sort(
           (a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity)
         );
+    } else if (activeFilter === "All") {
+      // Build a map of profileIds to track if they exist as both contact and pin
+      const profileIdTypes = new Map<string, Set<"contact" | "pin">>();
+      for (const conn of connections) {
+        if (!conn.profileId) continue;
+        if (!profileIdTypes.has(conn.profileId)) {
+          profileIdTypes.set(conn.profileId, new Set());
+        }
+        profileIdTypes.get(conn.profileId)!.add(conn.type);
+      }
+
+      // Dedupe: if a profileId exists as both contact and pin, keep only the contact
+      const seenProfileIds = new Map<string, UIConnection>();
+      list = [];
+      for (const conn of connections) {
+        if (!conn.profileId) {
+          list.push(conn);
+          continue;
+        }
+        const existing = seenProfileIds.get(conn.profileId);
+        if (!existing) {
+          seenProfileIds.set(conn.profileId, conn);
+          // Update flags based on what types exist for this profileId
+          const types = profileIdTypes.get(conn.profileId);
+          conn.isContact = types?.has("contact") ?? false;
+          conn.isPin = types?.has("pin") ?? false;
+          list.push(conn);
+        } else if (existing.type === "pin" && conn.type === "contact") {
+          // Replace pin with contact, update flags based on what types exist for this profileId
+          const types = profileIdTypes.get(conn.profileId);
+          conn.isContact = types?.has("contact") ?? false;
+          conn.isPin = types?.has("pin") ?? false;
+          seenProfileIds.set(conn.profileId, conn);
+          const idx = list.indexOf(existing);
+          if (idx !== -1) list[idx] = conn;
+        }
+        // else: already have this profileId, skip this one
+      }
     }
 
     if (!q) return list;
@@ -600,7 +678,7 @@ export default function ConnectionsPage() {
 
   return (
     <>
-      <div className="flex items-center gap-2 pb-2">
+      <div className="flex items-center gap-2 pb-2 px-4">
         <h1 className="flex-1 px-1 text-4xl font-extrabold tracking-tight">
           Connections
         </h1>
@@ -608,7 +686,7 @@ export default function ConnectionsPage() {
       </div>
 
       {/* Search */}
-      <div className="pb-5">
+      <div className="pb-5 px-4">
         <InputGroup>
           <InputGroupInput
             placeholder="Search connections"
@@ -622,7 +700,8 @@ export default function ConnectionsPage() {
       </div>
 
       {/* Filter chips */}
-      <div className="flex gap-2 overflow-x-auto pb-3 -mx-4 px-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+      <div className="flex gap-2 overflow-x-auto pb-3 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <div className="pl-2.5"></div>
         {filters.map((f) => {
           const isAdd = f === "+ Add";
           const isAll = f === "All";
@@ -650,12 +729,13 @@ export default function ConnectionsPage() {
             </Button>
           );
         })}
+        <div className="pr-2.5"></div>
       </div>
 
       {/* My Contact Card */}
       <Drawer>
         <DrawerTrigger asChild>
-          <div className="py-2 cursor-pointer">
+          <div className="py-2 px-4 cursor-pointer">
             <div className="border rounded-lg bg-card text-card-foreground hover:bg-muted transition-colors">
               <div className="p-4 flex items-center justify-between gap-4">
                 <p className="font-semibold">My contact card</p>
@@ -1043,7 +1123,7 @@ export default function ConnectionsPage() {
       </Drawer>
 
       {/* Connections list styled like Messages */}
-      <div className="-mx-4">
+      <div>
         {loading ? null : error ? (
           <div className="px-4 text-sm text-muted-foreground">{error}</div>
         ) : filteredConnections.length === 0 ? (
@@ -1124,7 +1204,7 @@ export default function ConnectionsPage() {
                   </div>
                 }
                 right={
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0 space-y-0.5">
                       <div className="flex items-center gap-2">
                         <p className="truncate text-base font-semibold max-w-[60vw] sm:max-w-[70vw]">
@@ -1144,6 +1224,16 @@ export default function ConnectionsPage() {
                         ) : null}
                       </div>
                     </div>
+                    {activeFilter === "All" && (c.isContact || c.isPin) ? (
+                      <div className="flex gap-1 ml-2 shrink-0">
+                        {c.isContact && (
+                          <ContactRound className="h-4 w-4 text-muted-foreground" />
+                        )}
+                        {c.isPin && (
+                          <Pin className="h-4 w-4 text-muted-foreground fill-current" />
+                        )}
+                      </div>
+                    ) : null}
                   </div>
                 }
               />

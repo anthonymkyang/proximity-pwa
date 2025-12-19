@@ -87,7 +87,8 @@ export function GroupScrolling({ groups, avatarStacks }: GroupScrollingProps) {
   const router = useRouter();
 
   return (
-    <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]{display:none;}">
+    <div className="flex gap-3 overflow-x-auto pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]{display:none;}">
+      <div className="pl-2.5"></div>
       {groups.map((group) => {
         const groupName = group.title || group.name;
         const dateStr = group.nextDate;
@@ -181,6 +182,7 @@ export function GroupScrolling({ groups, avatarStacks }: GroupScrollingProps) {
           </div>
         );
       })}
+      <div className="pr-2.5"></div>
     </div>
   );
 }

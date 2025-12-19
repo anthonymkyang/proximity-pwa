@@ -25,7 +25,7 @@ export interface Button32Props
 }
 
 const baseClasses =
-  "inline-flex items-center justify-center rounded-full h-10 w-10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background";
+  "inline-flex items-center justify-center rounded-full size-9 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background";
 
 function variantClasses(variant: Button32Variant | undefined) {
   switch (variant) {

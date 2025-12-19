@@ -56,7 +56,7 @@ export default function MapGroup({
         <Users className="h-4 w-4" />
       </div>
       {when ? (
-        <span className="pointer-events-none absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full bg-red-600 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white shadow-[0_6px_16px_rgba(0,0,0,0.35)]">
+        <span className="pointer-events-none absolute -bottom-1 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-red-600 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white shadow-[0_6px_16px_rgba(0,0,0,0.35)]">
           {when}
         </span>
       ) : null}

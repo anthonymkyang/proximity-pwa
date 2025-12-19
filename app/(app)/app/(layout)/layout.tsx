@@ -18,20 +18,26 @@ export default function ShellLayout({
   const rootPaths = ["/app/activity", "/app/messages", "/app/connections"];
   const showBack = !rootPaths.includes(pathname);
   const hideTopBar = pathname?.startsWith("/app/messages/");
-  const containerClasses = hideTopBar
-    ? "flex h-svh w-full flex-col pb-[env(safe-area-inset-bottom,0px)] overflow-hidden"
+  const removePadding = hideTopBar || pathname?.startsWith("/app/connections") || pathname === "/app/messages" || pathname === "/app/activity" || pathname === "/app/activity/groups";
+  const removeMaxWidth = pathname?.startsWith("/app/connections") || pathname === "/app/messages" || pathname === "/app/activity";
+  const containerClasses = removePadding
+    ? removeMaxWidth
+      ? "flex h-svh w-full flex-col pb-[env(safe-area-inset-bottom,0px)] overflow-hidden"
+      : "mx-auto flex h-svh w-full max-w-xl flex-col pb-[env(safe-area-inset-bottom,0px)] overflow-hidden"
     : "mx-auto flex h-svh w-full max-w-xl flex-col px-4 pb-[env(safe-area-inset-bottom,0px)] overflow-hidden";
 
   return (
     <div className={containerClasses}>
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col">
         {!hideTopBar && (
-          <TopBar
-            leftContent={showBack ? <BackButton /> : <div />}
-            rightContent={
-              <Notifications open={notifOpen} onOpenChange={setNotifOpen} />
-            }
-          />
+          <div className={removePadding ? "px-4" : ""}>
+            <TopBar
+              leftContent={showBack ? <BackButton /> : <div />}
+              rightContent={
+                <Notifications open={notifOpen} onOpenChange={setNotifOpen} />
+              }
+            />
+          </div>
         )}
         <div className="flex-1 min-h-0">{children}</div>
       </div>
