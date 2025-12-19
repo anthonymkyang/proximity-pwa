@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -34,7 +34,13 @@ import {
   Hand,
   Droplet,
   Pin,
+  MessageCircle,
 } from "lucide-react";
+import maplibregl, {
+  type Map as MaplibreMap,
+  type StyleSpecification,
+} from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 
 import TopBar from "@/components/nav/TopBar";
 import BackButton from "@/components/ui/back-button";
@@ -340,6 +346,7 @@ export default function ProfilePage() {
   );
 
   const params = useParams();
+  const router = useRouter();
   const routeId = Array.isArray((params as any).id)
     ? (params as any).id[0]
     : (params as any).id ?? null;
@@ -405,6 +412,7 @@ export default function ProfilePage() {
   const [triggerAnimation, setTriggerAnimation] = useState(false);
   const [pinning, setPinning] = useState(false);
   const [pinConnectionId, setPinConnectionId] = useState<string | null>(null);
+  const [openingChat, setOpeningChat] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -441,6 +449,11 @@ export default function ProfilePage() {
     lng: number;
   } | null>(null);
   const [distanceKm, setDistanceKm] = useState<number | null>(null);
+  const [travelMinutes, setTravelMinutes] = useState<number | null>(null);
+  const [travelLoading, setTravelLoading] = useState(false);
+  const mapPreviewRef = useRef<HTMLDivElement | null>(null);
+  const mapPreviewInstanceRef = useRef<MaplibreMap | null>(null);
+  const [mapPreviewReady, setMapPreviewReady] = useState(false);
 
   // --- Current authenticated user id (to publish our own location) ---
   const [myUserId, setMyUserId] = useState<string | null>(null);
@@ -476,7 +489,7 @@ export default function ProfilePage() {
       setGeoState("error");
       setGeoError("Timed out getting location");
       setTimeout(() => setGeoState("idle"), 0);
-    }, 15000);
+    }, 30000);
 
     navigator.geolocation.getCurrentPosition(
       (pos) => {
@@ -507,7 +520,7 @@ export default function ProfilePage() {
         // Reflect permission if known
         if (err?.code === 1) setGeoPermission("denied");
       },
-      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 12000 }
+      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 30000 }
     );
   };
 
@@ -527,7 +540,7 @@ export default function ProfilePage() {
         setGeoError(err?.message || "Location watch failed");
         setTimeout(() => setGeoState("idle"), 0);
       },
-      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 15000 }
+      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 30000 }
     );
   };
   useEffect(() => {
@@ -744,6 +757,134 @@ export default function ProfilePage() {
       setDistanceKm(null);
     }
   }, [currentPos, targetPos]);
+
+  // Fetch walking time between users via TfL API
+  useEffect(() => {
+    if (!currentPos || !targetPos) {
+      setTravelMinutes(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    const run = async () => {
+      setTravelLoading(true);
+      try {
+        const params = new URLSearchParams({
+          fromLat: String(currentPos.lat),
+          fromLon: String(currentPos.lng),
+          toLat: String(targetPos.lat),
+          toLon: String(targetPos.lng),
+          mode: "walking",
+        });
+        const res = await fetch(`/api/tfl?${params.toString()}`, {
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`TfL request failed ${res.status}`);
+        const data = await res.json();
+        const minutes = data?.journeys?.[0]?.duration;
+        if (typeof minutes === "number" && Number.isFinite(minutes)) {
+          setTravelMinutes(minutes);
+        } else {
+          setTravelMinutes(null);
+        }
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        console.warn("[profile] TfL travel time error", err);
+        setTravelMinutes(null);
+      } finally {
+        if (!controller.signal.aborted) setTravelLoading(false);
+      }
+    };
+
+    void run();
+    return () => controller.abort();
+  }, [currentPos, targetPos]);
+
+  // Lightweight map preview behind the View on map section
+  useEffect(() => {
+    const container = mapPreviewRef.current;
+    if (!container) return;
+
+    const center = targetPos ?? currentPos ?? { lat: 51.5074, lng: -0.1276 };
+
+    let canceled = false;
+    setMapPreviewReady(false);
+
+    const init = async () => {
+      try {
+        // Re-center if map already exists
+        if (mapPreviewInstanceRef.current) {
+          mapPreviewInstanceRef.current.setCenter([center.lng, center.lat]);
+          setMapPreviewReady(true);
+          return;
+        }
+
+        // Load style (try local then fallback)
+        let style: string | StyleSpecification =
+          "https://tiles.openfreemap.org/styles/positron";
+        try {
+          const res = await fetch("/maps/proximity-dark.json", {
+            cache: "no-store",
+          });
+          if (res.ok) {
+            style = (await res.json()) as StyleSpecification;
+          }
+        } catch {
+          // fallback already set
+        }
+
+        if (canceled || !mapPreviewRef.current) return;
+
+        const map = new maplibregl.Map({
+          container: mapPreviewRef.current,
+          style,
+          center: [center.lng, center.lat],
+          zoom: 12.5,
+          pitch: 28,
+          attributionControl: false,
+          interactive: false,
+        });
+
+        // Disable all interactions just in case
+        map.dragPan.disable();
+        map.scrollZoom.disable();
+        map.doubleClickZoom.disable();
+        map.boxZoom.disable();
+        map.keyboard.disable();
+        map.touchZoomRotate.disable();
+        map.dragRotate.disable();
+
+        map.on("load", () => {
+          if (canceled) return;
+          // Ensure the map has correct dimensions once the canvas paints
+          map.resize();
+          setTimeout(() => {
+            if (!canceled) map.resize();
+          }, 150);
+          setMapPreviewReady(true);
+        });
+
+        mapPreviewInstanceRef.current = map;
+      } catch (err) {
+        console.error("[profile] map preview init error", err);
+      }
+    };
+
+    void init();
+
+    return () => {
+      canceled = true;
+    };
+  }, [targetPos, currentPos]);
+
+  useEffect(() => {
+    return () => {
+      if (mapPreviewInstanceRef.current) {
+        mapPreviewInstanceRef.current.remove();
+        mapPreviewInstanceRef.current = null;
+      }
+    };
+  }, []);
 
   // -- Fix mobile viewport height units on iOS/Android toolbars
   useEffect(() => {
@@ -979,6 +1120,76 @@ export default function ProfilePage() {
       setPinning(false);
     }
   }, [routeId, pinConnectionId, pinning, profile]);
+
+  // --------- Handle open or create chat ---------
+  const handleOpenChat = useCallback(async () => {
+    if (!routeId || openingChat) return;
+    setOpeningChat(true);
+
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        alert("You must be signed in to message");
+        return;
+      }
+
+      // Find existing conversation with this user
+      const { data: myMemberships } = await supabase
+        .from("conversation_members")
+        .select("conversation_id")
+        .eq("user_id", user.id);
+
+      if (myMemberships && myMemberships.length > 0) {
+        const conversationIds = myMemberships.map((m) => m.conversation_id);
+
+        // Check if any of these conversations have the target user
+        const { data: theirMemberships } = await supabase
+          .from("conversation_members")
+          .select("conversation_id")
+          .eq("user_id", routeId)
+          .in("conversation_id", conversationIds);
+
+        if (theirMemberships && theirMemberships.length > 0) {
+          // Found existing conversation
+          router.push(`/app/messages/${theirMemberships[0].conversation_id}`);
+          return;
+        }
+      }
+
+      // No existing conversation, create new one
+      const { data: newConvo, error: convoError } = await supabase
+        .from("conversations")
+        .insert({})
+        .select()
+        .single();
+
+      if (convoError || !newConvo) {
+        throw new Error("Failed to create conversation");
+      }
+
+      // Add both users as members
+      const { error: membersError } = await supabase
+        .from("conversation_members")
+        .insert([
+          { conversation_id: newConvo.id, user_id: user.id },
+          { conversation_id: newConvo.id, user_id: routeId },
+        ]);
+
+      if (membersError) {
+        throw new Error("Failed to add conversation members");
+      }
+
+      router.push(`/app/messages/${newConvo.id}`);
+    } catch (err) {
+      console.error("Open chat error:", err);
+      alert("Failed to open chat");
+    } finally {
+      setOpeningChat(false);
+    }
+  }, [routeId, openingChat, router]);
 
   // --------- Utility: Get age from date_of_birth ---------
   const getAgeFromISODate = (iso: string | null | undefined): number | null => {
@@ -1251,13 +1462,21 @@ export default function ProfilePage() {
     const km = distanceKm;
     const m = Math.round(km * 1000);
 
-    // Format: compact KM then meters with thousands separators
+    if (km < 1) {
+      const mStr = new Intl.NumberFormat().format(m);
+      return `${mStr} m`;
+    }
+
+    // Format compact KM for 1km and above
     const kmStr =
       km >= 100 ? km.toFixed(0) : km >= 10 ? km.toFixed(1) : km.toFixed(2);
-    const mStr = new Intl.NumberFormat().format(m);
-
-    return `${kmStr} km · ${mStr} m`;
+    return `${kmStr} km`;
   }, [distanceKm]);
+
+  const distanceTimeLoading = useMemo(
+    () => distanceKm == null || travelLoading,
+    [distanceKm, travelLoading]
+  );
 
   // --- Derived geo state flags for UI ---
   const isRequesting = geoState === "requesting";
@@ -1520,7 +1739,7 @@ export default function ProfilePage() {
             </div>
 
             {/* Avatar overlay + Reaction trigger (moved up) */}
-            <div className="absolute right-4 bottom-24 z-40 flex flex-col items-center gap-4">
+            <div className="absolute right-4 bottom-24 z-40 flex flex-col items-center gap-5">
               <button
                 type="button"
                 onClick={() => setProfileDrawerOpen(true)}
@@ -1624,9 +1843,23 @@ export default function ProfilePage() {
                 aria-label={pinConnectionId ? "Unpin profile" : "Pin profile"}
               >
                 <Pin
-                  className={`h-8 w-8 text-white drop-shadow-md transition-all ${
+                  className={`h-6 w-6 text-white drop-shadow-md transition-all ${
                     pinConnectionId ? "fill-white" : ""
                   }`}
+                  aria-hidden="true"
+                />
+              </button>
+
+              {/* Chat icon */}
+              <button
+                type="button"
+                onClick={handleOpenChat}
+                disabled={openingChat}
+                className="relative cursor-pointer disabled:opacity-50"
+                aria-label="Message"
+              >
+                <MessageCircle
+                  className="h-6 w-6 text-white drop-shadow-md fill-white"
                   aria-hidden="true"
                 />
               </button>
@@ -1665,73 +1898,48 @@ export default function ProfilePage() {
                 </section>
               ) : null}
 
-              {/* View on map pill */}
+              {/* View on map pill with map background */}
               <section>
-                <div className="rounded-full bg-card p-2 pl-2.5 pr-2.5 shadow-sm flex items-center justify-between">
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="rounded-full bg-foreground text-background hover:bg-foreground/90 px-4"
-                    onClick={() => {
-                      // TODO: navigate to map view with this user highlighted
-                    }}
-                  >
-                    View on map
-                  </Button>
-                  {distanceKm != null && targetPos ? (
-                    // NOTE: distance shows after both currentPos & targetPos are known; button re-enables after failures.
-                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 text-primary font-semibold">
-                      <span className="text-sm">{distanceDisplay}</span>
-                      <ChevronRight className="h-4 w-4" aria-hidden="true" />
-                    </div>
-                  ) : (
-                    <div className="inline-flex items-center gap-2">
-                      {isRequesting ? (
-                        <span className="text-sm text-muted-foreground">
-                          Fetching location…
+                <div className="relative overflow-hidden rounded-full border bg-card/80 shadow-sm min-h-[52px]">
+                  <div
+                    ref={mapPreviewRef}
+                    className="absolute inset-0 h-full w-full opacity-100 pointer-events-none z-0"
+                  />
+                  <div className="absolute inset-0 bg-linear-to-r from-background/35 via-background/25 to-background/35 z-0" />
+
+                  <div className="relative z-10 flex items-center justify-between gap-3 px-3 py-2 flex-wrap sm:flex-nowrap">
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="rounded-full bg-foreground text-background hover:bg-foreground/90 px-4"
+                      onClick={() => {
+                        // TODO: navigate to map view with this user highlighted
+                      }}
+                    >
+                      View on map
+                    </Button>
+
+                    {distanceTimeLoading ? (
+                      <Skeleton className="h-5 w-32 rounded-full" />
+                    ) : distanceKm != null && targetPos ? (
+                      // NOTE: distance shows after both currentPos & targetPos are known; button re-enables after failures.
+                      <div className="inline-flex items-center gap-1.5 text-foreground font-semibold">
+                        <span className="text-sm">
+                          {distanceDisplay}
+                          {travelMinutes != null
+                            ? ` · ${travelMinutes} min`
+                            : travelLoading
+                            ? " · …"
+                            : ""}
                         </span>
-                      ) : isWatching && !hasFix ? (
-                        <span className="text-sm text-muted-foreground">
-                          Waiting for GPS…
-                        </span>
-                      ) : isWatching && hasFix && !targetPos ? (
-                        <span className="text-sm text-muted-foreground">
-                          Waiting for their location…
-                        </span>
-                      ) : geoPermission === "denied" ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="rounded-full px-3"
-                          disabled
-                          title="Location permission is blocked in your browser settings"
-                        >
-                          Location blocked
-                        </Button>
-                      ) : (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="rounded-full px-3"
-                          onClick={requestLocationOnce}
-                        >
-                          Enable location
-                        </Button>
-                      )}
-                      {geoError ? (
-                        <span className="text-xs text-destructive">
-                          {geoError}
-                        </span>
-                      ) : null}
-                    </div>
-                  )}
+                        <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               </section>
               {/* Details — Variant A: Cards Grid */}
               <>
-                <Separator />
                 <section>
                   <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">
                     Stats
@@ -1918,7 +2126,6 @@ export default function ProfilePage() {
                     ) : null}
                   </div>
                 </section>
-                <Separator />
                 {saferSex ? (
                   <section>
                     <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">

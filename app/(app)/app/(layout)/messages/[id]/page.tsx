@@ -3204,8 +3204,8 @@ export default function ConversationPage() {
                 className="flex items-center gap-3"
                 aria-label={(displayName || "Contact") + " profile"}
               >
-                <div className="relative h-12 w-12">
-                  <Avatar className="h-12 w-12">
+                <div className="relative h-10 w-10">
+                  <Avatar className="h-10 w-10">
                     <AvatarImage
                       alt={participantName}
                       src={participantAvatar ?? undefined}
@@ -3234,8 +3234,8 @@ export default function ConversationPage() {
               </Link>
             ) : (
               <>
-                <div className="relative h-12 w-12">
-                  <Avatar className="h-12 w-12">
+                <div className="relative h-10 w-10">
+                  <Avatar className="h-10 w-10">
                     <AvatarImage
                       alt={participantName}
                       src={participantAvatar ?? undefined}
