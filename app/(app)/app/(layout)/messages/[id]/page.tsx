@@ -3134,7 +3134,7 @@ export default function ConversationPage() {
   }, [messages, translations]);
 
   return (
-    <div className="h-svh min-h-svh bg-background text-foreground flex flex-col">
+    <div className="h-full bg-background text-foreground flex flex-col">
       <style>{`
         @keyframes floatUp {
           0% {

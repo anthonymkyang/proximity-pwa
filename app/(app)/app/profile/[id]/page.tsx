@@ -1747,7 +1747,7 @@ export default function ProfilePage() {
                 aria-label="Open profile info"
               >
                 <div className="relative">
-                  <Avatar className="h-16 w-16 ring-2 ring-white shadow-2xl">
+                  <Avatar className="h-12 w-12 ring-2 ring-white shadow-2xl">
                     <AvatarImage
                       src={avatarUrl}
                       alt={

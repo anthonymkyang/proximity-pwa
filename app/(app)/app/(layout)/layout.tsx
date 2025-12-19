@@ -19,23 +19,21 @@ export default function ShellLayout({
   const showBack = !rootPaths.includes(pathname);
   const hideTopBar = pathname?.startsWith("/app/messages/");
   const containerClasses = hideTopBar
-    ? "flex min-h-svh w-full flex-col pb-[env(safe-area-inset-bottom,0px)]"
-    : "mx-auto flex min-h-svh w-full max-w-xl flex-col px-4 pb-[env(safe-area-inset-bottom,0px)]";
+    ? "flex h-svh w-full flex-col pb-[env(safe-area-inset-bottom,0px)] overflow-hidden"
+    : "mx-auto flex h-svh w-full max-w-xl flex-col px-4 pb-[env(safe-area-inset-bottom,0px)] overflow-hidden";
 
   return (
     <div className={containerClasses}>
-      {!hideTopBar && (
-        <TopBar
-          leftContent={showBack ? <BackButton /> : <div />}
-          rightContent={
-            <Notifications open={notifOpen} onOpenChange={setNotifOpen} />
-          }
-        />
-      )}
-      <div
-        className="flex-1 min-h-0"
-      >
-        {children}
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col">
+        {!hideTopBar && (
+          <TopBar
+            leftContent={showBack ? <BackButton /> : <div />}
+            rightContent={
+              <Notifications open={notifOpen} onOpenChange={setNotifOpen} />
+            }
+          />
+        )}
+        <div className="flex-1 min-h-0">{children}</div>
       </div>
     </div>
   );

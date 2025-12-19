@@ -333,7 +333,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   if (locationStatus !== "granted") {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background px-6 text-center text-foreground">
+      <div className="flex min-h-svh flex-col items-center justify-center gap-4 bg-background px-6 text-center text-foreground">
         <div className="space-y-2">
           <h1 className="text-xl font-semibold">Enable location to continue</h1>
           <p className="text-muted-foreground text-sm">
@@ -357,7 +357,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const appBarHeight = hideAppBar ? 0 : 72;
   return (
     <PresenceProvider>
-      <div className="relative min-h-screen">
+      <div className="relative h-svh">
         <div className="fixed inset-0 z-0">
           <MapCanvas />
         </div>
@@ -368,12 +368,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         />
 
         <main
-          className={`relative flex min-h-screen flex-col overflow-hidden ${
+          className={`relative flex h-full flex-col overflow-hidden ${
             isMapPage ? "bg-transparent pointer-events-none" : "bg-background"
           }`}
           style={{
-            paddingTop: "env(safe-area-inset-top, 0px)",
-            paddingBottom: "env(safe-area-inset-bottom, 0px)",
+            paddingTop: "0px",
+            paddingBottom: "0px",
           }}
         >
           <div
