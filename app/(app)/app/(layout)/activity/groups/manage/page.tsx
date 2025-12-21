@@ -5,6 +5,13 @@ import Link from "next/link";
 import { createClient } from "@/utils/supabase/client";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Item,
   ItemActions,
   ItemContent,
@@ -12,12 +19,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Card } from "@/components/ui/card";
-import {
-  CalendarClock,
-  Shield,
-  EllipsisVertical,
-  Plus,
-} from "lucide-react";
+import { CalendarClock, Shield, EllipsisVertical, Plus } from "lucide-react";
 import { toast } from "sonner";
 import {
   DropdownMenu,
@@ -116,7 +118,11 @@ async function fetchAttendeesPreview(
 }
 
 // --- helpers ---
-function fmtWhen(start?: string | null, end?: string | null, isArchive = false) {
+function fmtWhen(
+  start?: string | null,
+  end?: string | null,
+  isArchive = false
+) {
   if (!start) return "TBC";
   const s = new Date(start);
   const e = end ? new Date(end) : null;
@@ -128,14 +134,22 @@ function fmtWhen(start?: string | null, end?: string | null, isArchive = false) 
     const minutes = date.getMinutes();
     const ampm = hours >= 12 ? "pm" : "am";
     const displayHours = hours % 12 || 12;
-    return minutes === 0 ? `${displayHours}${ampm}` : `${displayHours}:${String(minutes).padStart(2, "0")}${ampm}`;
+    return minutes === 0
+      ? `${displayHours}${ampm}`
+      : `${displayHours}:${String(minutes).padStart(2, "0")}${ampm}`;
   };
 
   // Helper to get day difference
   const getDayDiff = (from: Date, to: Date) => {
-    const fromMidnight = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+    const fromMidnight = new Date(
+      from.getFullYear(),
+      from.getMonth(),
+      from.getDate()
+    );
     const toMidnight = new Date(to.getFullYear(), to.getMonth(), to.getDate());
-    return Math.floor((toMidnight.getTime() - fromMidnight.getTime()) / (1000 * 60 * 60 * 24));
+    return Math.floor(
+      (toMidnight.getTime() - fromMidnight.getTime()) / (1000 * 60 * 60 * 24)
+    );
   };
 
   const dayDiff = getDayDiff(now, s);
@@ -161,7 +175,10 @@ function fmtWhen(start?: string | null, end?: string | null, isArchive = false) 
       return s.toLocaleDateString(undefined, { weekday: "long" });
     } else {
       // Date for over a week
-      return s.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+      return s.toLocaleDateString(undefined, {
+        day: "numeric",
+        month: "short",
+      });
     }
   } else {
     // Active/Drafts tab: use future reference
@@ -176,7 +193,10 @@ function fmtWhen(start?: string | null, end?: string | null, isArchive = false) 
       datePrefix = s.toLocaleDateString(undefined, { weekday: "long" });
     } else {
       // Date for over a week
-      datePrefix = s.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+      datePrefix = s.toLocaleDateString(undefined, {
+        day: "numeric",
+        month: "short",
+      });
     }
 
     if (!e) {
@@ -185,8 +205,14 @@ function fmtWhen(start?: string | null, end?: string | null, isArchive = false) 
       return `${datePrefix}, ${st} to ${et}`;
     } else {
       // Different days
-      const eDatePrefix = s.toLocaleDateString(undefined, { day: "numeric", month: "short" });
-      const e2DatePrefix = e.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+      const eDatePrefix = s.toLocaleDateString(undefined, {
+        day: "numeric",
+        month: "short",
+      });
+      const e2DatePrefix = e.toLocaleDateString(undefined, {
+        day: "numeric",
+        month: "short",
+      });
       return `${eDatePrefix}, ${st} to ${e2DatePrefix}, ${et}`;
     }
   }
@@ -222,6 +248,10 @@ const tabs = ["Active", "Drafts", "Archive"] as const;
 
 export default function ManageGroupsPage() {
   const supabase = React.useMemo(() => createClient(), []);
+  const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = React.useState<string | null>(
+    null
+  );
   const [userId, setUserId] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [hostingGroups, setHostingGroups] = React.useState<ExtendedGroup[]>([]);
@@ -232,11 +262,32 @@ export default function ManageGroupsPage() {
     []
   );
   const [error, setError] = React.useState<string | null>(null);
-  const [activeTab, setActiveTab] = React.useState<(typeof tabs)[number]>("Active");
+  const [activeTab, setActiveTab] =
+    React.useState<(typeof tabs)[number]>("Active");
 
   const [notificationsOpen, setNotificationsOpen] = React.useState(false);
   const [notifications, setNotifications] = React.useState<any[] | null>(null);
   const [notificationsLoading, setNotificationsLoading] = React.useState(false);
+
+  const handleDelete = async (groupId: string) => {
+    if (!groupId) return;
+    setDeleteDialogOpen(false);
+    const { error } = await supabase.from("groups").delete().eq("id", groupId);
+    if (error) {
+      toast.error("Failed to delete group");
+    } else {
+      toast.success("Group deleted");
+      setHostingGroups((prev) => prev.filter((g) => g.id !== groupId));
+      setCohostingGroups((prev) => prev.filter((g) => g.id !== groupId));
+      setAttendingGroups((prev) => prev.filter((g) => g.id !== groupId));
+    }
+    setPendingDeleteId(null);
+  };
+
+  const openDeleteDialog = (groupId: string) => {
+    setPendingDeleteId(groupId);
+    setDeleteDialogOpen(true);
+  };
 
   // Helper to check if a group has ended (past end time or 12am next day)
   const isGroupEnded = React.useCallback((group: ExtendedGroup): boolean => {
@@ -262,39 +313,69 @@ export default function ManageGroupsPage() {
   // Filter groups based on active tab
   const filteredHostingGroups = React.useMemo(() => {
     if (activeTab === "Active") {
-      return hostingGroups.filter((g) => g.status === "active" && !isGroupEnded(g));
+      return hostingGroups.filter(
+        (g) => g.status === "active" && !isGroupEnded(g)
+      );
     } else if (activeTab === "Drafts") {
       return hostingGroups.filter((g) => g.status === "draft");
     } else if (activeTab === "Archive") {
-      return hostingGroups.filter((g) => g.status === "archived" || (g.status === "active" && isGroupEnded(g)));
+      return hostingGroups.filter(
+        (g) =>
+          g.status === "archived" || (g.status === "active" && isGroupEnded(g))
+      );
     }
     return hostingGroups;
   }, [hostingGroups, activeTab, isGroupEnded]);
 
   const filteredCohostingGroups = React.useMemo(() => {
     if (activeTab === "Active") {
-      return cohostingGroups.filter((g) => g.status === "active" && !isGroupEnded(g));
+      return cohostingGroups.filter(
+        (g) => g.status === "active" && !isGroupEnded(g)
+      );
     } else if (activeTab === "Drafts") {
       return cohostingGroups.filter((g) => g.status === "draft");
     } else if (activeTab === "Archive") {
-      return cohostingGroups.filter((g) => g.status === "archived" || (g.status === "active" && isGroupEnded(g)));
+      return cohostingGroups.filter(
+        (g) =>
+          g.status === "archived" || (g.status === "active" && isGroupEnded(g))
+      );
     }
     return cohostingGroups;
   }, [cohostingGroups, activeTab, isGroupEnded]);
 
   const filteredAttendingGroups = React.useMemo(() => {
     if (activeTab === "Active") {
-      return attendingGroups.filter((g) => g.status === "active" && !isGroupEnded(g));
+      return attendingGroups.filter(
+        (g) => g.status === "active" && !isGroupEnded(g)
+      );
     } else if (activeTab === "Drafts") {
       return attendingGroups.filter((g) => g.status === "draft");
     } else if (activeTab === "Archive") {
-      return attendingGroups.filter((g) => g.status === "archived" || (g.status === "active" && isGroupEnded(g)));
+      return attendingGroups.filter(
+        (g) =>
+          g.status === "archived" || (g.status === "active" && isGroupEnded(g))
+      );
     }
     return attendingGroups;
   }, [attendingGroups, activeTab, isGroupEnded]);
 
-  const hasYourGroups = filteredHostingGroups.length > 0 || filteredCohostingGroups.length > 0;
+  const cancelledGroups = React.useMemo(() => {
+    const byId = new Map<string, ExtendedGroup>();
+    const lists = [hostingGroups, cohostingGroups, attendingGroups];
+
+    lists.forEach((groups) => {
+      groups
+        .filter((g) => g.status === "cancelled")
+        .forEach((g) => byId.set(g.id, g));
+    });
+
+    return Array.from(byId.values());
+  }, [hostingGroups, cohostingGroups, attendingGroups]);
+
+  const hasYourGroups =
+    filteredHostingGroups.length > 0 || filteredCohostingGroups.length > 0;
   const hasAttending = filteredAttendingGroups.length > 0;
+  const hasCancelled = activeTab === "Archive" && cancelledGroups.length > 0;
 
   React.useEffect(() => {
     let cancelled = false;
@@ -563,803 +644,985 @@ export default function ManageGroupsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-xl pb-[calc(72px+env(safe-area-inset-bottom))] px-4">
-      <div className="pb-4">
-        <h1 className="px-1 text-4xl font-extrabold tracking-tight">
-          Manage groups
-        </h1>
-      </div>
+    <>
+      <div className="mx-auto w-full max-w-xl pb-[calc(72px+env(safe-area-inset-bottom))] px-4">
+        <div className="pb-4">
+          <h1 className="px-1 text-4xl font-extrabold tracking-tight">
+            Manage groups
+          </h1>
+        </div>
 
-      {/* Tabs */}
-      <div className="flex items-center justify-between gap-3 pb-4">
-        <div className="flex gap-2 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          {tabs.map((tab) => (
+        {/* Tabs */}
+        <div className="flex items-center justify-between gap-3 pb-4">
+          <div className="flex gap-2 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+            {tabs.map((tab) => (
+              <Button
+                key={tab}
+                size="sm"
+                variant={activeTab === tab ? "default" : "outline"}
+                className={cn(
+                  "rounded-full shrink-0",
+                  activeTab === tab && "border border-primary"
+                )}
+                onClick={() => setActiveTab(tab)}
+              >
+                {tab === "Archive" ? <Archive className="h-4 w-4" /> : tab}
+              </Button>
+            ))}
+          </div>
+          <Link href="/app/activity/groups/create">
             <Button
-              key={tab}
               size="sm"
-              variant={activeTab === tab ? "default" : "outline"}
-              className={cn(
-                "rounded-full shrink-0",
-                activeTab === tab && "border border-primary"
-              )}
-              onClick={() => setActiveTab(tab)}
+              className="rounded-full shrink-0"
+              variant="secondary"
             >
-              {tab === "Archive" ? (
-                <Archive className="h-4 w-4" />
-              ) : (
-                tab
-              )}
+              <Plus className="h-4 w-4" />
             </Button>
-          ))}
+          </Link>
         </div>
-        <Link href="/app/activity/groups/create">
-          <Button
-            size="sm"
-            className="rounded-full shrink-0"
-            variant="secondary"
-          >
-            <Plus className="h-4 w-4" />
-          </Button>
-        </Link>
-      </div>
 
-      {error ? (
-        <Card className="p-4 mb-3">
-          <p className="text-sm text-destructive">{error}</p>
-        </Card>
-      ) : null}
+        {error ? (
+          <Card className="p-4 mb-3">
+            <p className="text-sm text-destructive">{error}</p>
+          </Card>
+        ) : null}
 
-      {loading ? (
-        <div className="space-y-3">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div
-              key={i}
-              className="bg-card rounded-lg border p-3 flex items-center gap-3"
-            >
-              <Skeleton className="h-12 w-12 rounded-md shrink-0" />
-              <div className="flex-1 space-y-2">
-                <Skeleton className="h-4 w-2/3" />
-                <Skeleton className="h-3 w-1/2" />
-              </div>
-              <Skeleton className="h-8 w-8 rounded-full shrink-0" />
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="space-y-6">
-          {!error && !hasYourGroups ? (
-            <Empty className="bg-muted/30">
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <Shield className="h-5 w-5" />
-                </EmptyMedia>
-                <EmptyTitle>No groups yet</EmptyTitle>
-                <EmptyDescription>
-                  Create your first group and manage it here.
-                </EmptyDescription>
-              </EmptyHeader>
-              <EmptyContent>
-                <Button asChild variant="outline">
-                  <Link href="/app/activity/groups/create">Create a group</Link>
-                </Button>
-              </EmptyContent>
-            </Empty>
-          ) : null}
-
-          {hasYourGroups ? (
-            <div className="space-y-4">
-              {filteredHostingGroups.length > 0 && (
-                <div className="space-y-2">
-                  <h3 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {activeTab === "Archive" ? "Hosted" : "Hosting"}
-                  </h3>
-                  <div className="space-y-3">
-                    {filteredHostingGroups.map((g) => (
-                      <Item key={g.id} className="bg-card">
-                        <ItemMedia>
-                          {g.coverUrl && g.coverUrl.trim() !== "" ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={g.coverUrl}
-                              alt={`${g.title || "Group"} cover`}
-                              className="h-12 w-12 rounded-md object-cover"
-                              loading="lazy"
-                            />
-                          ) : (
-                            <div className="h-12 w-12 rounded-md bg-muted grid place-items-center">
-                              <Shield className="h-5 w-5 text-muted-foreground" />
-                            </div>
-                          )}
-                        </ItemMedia>
-                        <ItemContent>
-                          <ItemTitle className="flex items-center gap-2">
-                            <span className="truncate">
-                              {g.title || "Untitled"}
-                            </span>
-                          </ItemTitle>
-
-                          <div className="text-sm text-muted-foreground">
-                            <div className="flex flex-col gap-1">
-                              <div className="flex items-center gap-2">
-                                <CalendarClock className="h-4 w-4 text-muted-foreground" />
-                                <span>
-                                  {fmtWhen(
-                                    g.start_time as any,
-                                    g.end_time as any,
-                                    activeTab === "Archive"
-                                  )}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {g.attendeesPreview && g.attendeesPreview.length ? (
-                            <div className="mt-2 flex justify-end">
-                              <div className="flex -space-x-2">
-                                {g.attendeesPreview.map((a) => {
-                                  const raw = a.avatar_url;
-                                  const isUrl =
-                                    typeof raw === "string" &&
-                                    /^https?:\/\//i.test(raw);
-                                  const src = isUrl
-                                    ? raw
-                                    : raw
-                                    ? `/api/storage/public/${encodeURIComponent(
-                                        raw
-                                      )}`
-                                    : null;
-                                  const name = a.name || a.username || "User";
-                                  const fallback = initialsFrom(name);
-
-                                  return (
-                                    <Avatar
-                                      key={a.id}
-                                      className="ring-2 ring-background h-6 w-6"
-                                    >
-                                      {src ? (
-                                        <AvatarImage src={src} alt={name} />
-                                      ) : null}
-                                      <AvatarFallback className="text-[10px]">
-                                        {fallback}
-                                      </AvatarFallback>
-                                    </Avatar>
-                                  );
-                                })}
-                                {g.attendeesExtra > 0 ? (
-                                  <Avatar className="ring-2 ring-background h-6 w-6">
-                                    <AvatarFallback className="text-[10px]">
-                                      +{g.attendeesExtra}
-                                    </AvatarFallback>
-                                  </Avatar>
-                                ) : null}
-                              </div>
-                            </div>
-                          ) : null}
-                        </ItemContent>
-                        <ItemActions>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                size="icon"
-                                className="rounded-full h-8 w-8 p-0"
-                                variant="outline"
-                                aria-label="Open menu"
-                              >
-                                <EllipsisVertical className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent
-                              align="end"
-                              sideOffset={8}
-                              className="min-w-40"
-                            >
-                              {activeTab === "Archive" ? (
-                                <DropdownMenuItem asChild>
-                                  <Link href={`/app/activity/groups/${g.id}`}>
-                                    View
-                                  </Link>
-                                </DropdownMenuItem>
-                              ) : activeTab === "Drafts" ? (
-                                <>
-                                  <DropdownMenuItem asChild>
-                                    <Link href={`/app/activity/groups/${g.id}`}>
-                                      Preview
-                                    </Link>
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem asChild>
-                                    <Link href={`/app/activity/groups/create?id=${g.id}&step=0`}>
-                                      Edit
-                                    </Link>
-                                  </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem onClick={() => handlePublish(g.id)}>
-                                    Publish
-                                  </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem
-                                    className="text-destructive focus:text-destructive"
-                                  >
-                                    Delete
-                                  </DropdownMenuItem>
-                                </>
-                              ) : (
-                                <>
-                                  <DropdownMenuItem asChild>
-                                    <Link href={`/app/activity/groups/${g.id}`}>
-                                      View
-                                    </Link>
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem asChild>
-                                    <Link href={`/app/activity/groups/create?id=${g.id}&step=0`}>
-                                      Edit
-                                    </Link>
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem asChild>
-                                    <Link href={`/app/activity/groups/${g.id}/requests`}>
-                                      Requests
-                                    </Link>
-                                  </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem onClick={() => handleUnpublish(g.id)}>
-                                    Unpublish
-                                  </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem
-                                    asChild
-                                    className="text-destructive focus:text-destructive"
-                                  >
-                                    <Link href={`/app/activity/groups/manage`}>
-                                      Cancel
-                                    </Link>
-                                  </DropdownMenuItem>
-                                </>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </ItemActions>
-                      </Item>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {filteredCohostingGroups.length > 0 && (
-                <div className="space-y-2">
-                  <h3 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {activeTab === "Archive" ? "Co-hosted" : "Co-hosting"}
-                  </h3>
-                  <div className="space-y-3">
-                    {filteredCohostingGroups.map((g) => (
-                      <Item key={g.id} className="bg-card">
-                        <ItemMedia>
-                          {g.coverUrl && g.coverUrl.trim() !== "" ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={g.coverUrl}
-                              alt={`${g.title || "Group"} cover`}
-                              className="h-12 w-12 rounded-md object-cover"
-                              loading="lazy"
-                            />
-                          ) : (
-                            <div className="h-12 w-12 rounded-md bg-muted grid place-items-center">
-                              <Shield className="h-5 w-5 text-muted-foreground" />
-                            </div>
-                          )}
-                        </ItemMedia>
-                        <ItemContent>
-                          <ItemTitle className="flex items-center gap-2">
-                            <span className="truncate">
-                              {g.title || "Untitled"}
-                            </span>
-                          </ItemTitle>
-
-                          <div className="text-sm text-muted-foreground">
-                            <div className="flex flex-col gap-1">
-                              <div className="flex items-center gap-2">
-                                <CalendarClock className="h-4 w-4 text-muted-foreground" />
-                                <span>
-                                  {fmtWhen(
-                                    g.start_time as any,
-                                    g.end_time as any,
-                                    activeTab === "Archive"
-                                  )}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {g.attendeesPreview && g.attendeesPreview.length ? (
-                            <div className="mt-2 flex justify-end">
-                              <div className="flex -space-x-2">
-                                {g.attendeesPreview.map((a) => {
-                                  const raw = a.avatar_url;
-                                  const isUrl =
-                                    typeof raw === "string" &&
-                                    /^https?:\/\//i.test(raw);
-                                  const src = isUrl
-                                    ? raw
-                                    : raw
-                                    ? `/api/storage/public/${encodeURIComponent(
-                                        raw
-                                      )}`
-                                    : null;
-                                  const name = a.name || a.username || "User";
-                                  const fallback = initialsFrom(name);
-
-                                  return (
-                                    <Avatar
-                                      key={a.id}
-                                      className="ring-2 ring-background h-6 w-6"
-                                    >
-                                      {src ? (
-                                        <AvatarImage src={src} alt={name} />
-                                      ) : null}
-                                      <AvatarFallback className="text-[10px]">
-                                        {fallback}
-                                      </AvatarFallback>
-                                    </Avatar>
-                                  );
-                                })}
-                                {g.attendeesExtra > 0 ? (
-                                  <Avatar className="ring-2 ring-background h-6 w-6">
-                                    <AvatarFallback className="text-[10px]">
-                                      +{g.attendeesExtra}
-                                    </AvatarFallback>
-                                  </Avatar>
-                                ) : null}
-                              </div>
-                            </div>
-                          ) : null}
-                        </ItemContent>
-                        <ItemActions>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                size="icon"
-                                className="rounded-full h-8 w-8 p-0"
-                                variant="outline"
-                                aria-label="Open menu"
-                              >
-                                <EllipsisVertical className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent
-                              align="end"
-                              sideOffset={8}
-                              className="min-w-40"
-                            >
-                              {activeTab === "Archive" ? (
-                                <DropdownMenuItem asChild>
-                                  <Link href={`/app/activity/groups/${g.id}`}>
-                                    View
-                                  </Link>
-                                </DropdownMenuItem>
-                              ) : activeTab === "Drafts" ? (
-                                <>
-                                  <DropdownMenuItem asChild>
-                                    <Link href={`/app/activity/groups/${g.id}`}>
-                                      Preview
-                                    </Link>
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem asChild>
-                                    <Link href={`/app/activity/groups/create?id=${g.id}&step=0`}>
-                                      Edit
-                                    </Link>
-                                  </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem onClick={() => handlePublish(g.id)}>
-                                    Publish
-                                  </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem
-                                    className="text-destructive focus:text-destructive"
-                                  >
-                                    Delete
-                                  </DropdownMenuItem>
-                                </>
-                              ) : (
-                                <>
-                                  <DropdownMenuItem asChild>
-                                    <Link href={`/app/activity/groups/${g.id}`}>
-                                      View
-                                    </Link>
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem asChild>
-                                    <Link href={`/app/activity/groups/create?id=${g.id}&step=0`}>
-                                      Edit
-                                    </Link>
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem asChild>
-                                    <Link href={`/app/activity/groups/${g.id}/requests`}>
-                                      Requests
-                                    </Link>
-                                  </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem onClick={() => handleUnpublish(g.id)}>
-                                    Unpublish
-                                  </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem
-                                    asChild
-                                    className="text-destructive focus:text-destructive"
-                                  >
-                                    <Link href={`/app/activity/groups/manage`}>
-                                      Cancel
-                                    </Link>
-                                  </DropdownMenuItem>
-                                </>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </ItemActions>
-                      </Item>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : null}
-
-          {hasAttending && (
-            <div className="space-y-2">
-              <p className="px-1 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                {activeTab === "Archive" ? "Attended" : "Attending"}
-              </p>
-              <div className="space-y-3">
-                {filteredAttendingGroups.map((g) => (
-                  <Item key={g.id} className="bg-card">
-                    <ItemMedia>
-                      {g.coverUrl && g.coverUrl.trim() !== "" ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={g.coverUrl}
-                          alt={`${g.title || "Group"} cover`}
-                          className="h-12 w-12 rounded-md object-cover"
-                          loading="lazy"
-                        />
-                      ) : (
-                        <div className="h-12 w-12 rounded-md bg-muted grid place-items-center">
-                          <Shield className="h-5 w-5 text-muted-foreground" />
-                        </div>
-                      )}
-                    </ItemMedia>
-                    <ItemContent>
-                      <ItemTitle className="flex items-center gap-2">
-                        <span className="truncate">
-                          {g.title || "Untitled"}
-                        </span>
-                      </ItemTitle>
-
-                      <div className="text-sm text-muted-foreground">
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-center gap-2">
-                            <CalendarClock className="h-4 w-4 text-muted-foreground" />
-                            <span>
-                              {fmtWhen(g.start_time as any, g.end_time as any, activeTab === "Archive")}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {g.attendeesPreview && g.attendeesPreview.length ? (
-                        <div className="mt-2 flex justify-end">
-                          <div className="flex -space-x-2">
-                            {g.attendeesPreview.map((a) => {
-                              const raw = a.avatar_url;
-                              const isUrl =
-                                typeof raw === "string" &&
-                                /^https?:\/\//i.test(raw);
-                              const src = isUrl
-                                ? raw
-                                : raw
-                                ? `/api/storage/public/${encodeURIComponent(
-                                    raw
-                                  )}`
-                                : null;
-                              const name = a.name || a.username || "User";
-                              const fallback = initialsFrom(name);
-
-                              return (
-                                <Avatar
-                                  key={a.id}
-                                  className="ring-2 ring-background h-6 w-6"
-                                >
-                                  {src ? (
-                                    <AvatarImage src={src} alt={name} />
-                                  ) : null}
-                                  <AvatarFallback className="text-[10px]">
-                                    {fallback}
-                                  </AvatarFallback>
-                                </Avatar>
-                              );
-                            })}
-                            {g.attendeesExtra > 0 ? (
-                              <Avatar className="ring-2 ring-background h-6 w-6">
-                                <AvatarFallback className="text-[10px]">
-                                  +{g.attendeesExtra}
-                                </AvatarFallback>
-                              </Avatar>
-                            ) : null}
-                          </div>
-                        </div>
-                      ) : null}
-                    </ItemContent>
-                    <ItemActions>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            size="icon"
-                            className="rounded-full h-8 w-8 p-0"
-                            variant="outline"
-                            aria-label="Open menu"
-                          >
-                            <EllipsisVertical className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          align="end"
-                          sideOffset={8}
-                          className="min-w-40"
-                        >
-                          <DropdownMenuItem asChild>
-                            <Link href={`/app/activity/groups/${g.id}`}>
-                              View
-                            </Link>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={openNotifications}>
-                            Notifications
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </ItemActions>
-                  </Item>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      <Sheet01
-        open={notificationsOpen}
-        onOpenChange={(open) => {
-          if (!open) {
-            closeNotifications();
-          }
-        }}
-        title="Notifications"
-        description="Latest activity and messages for your groups."
-        content={
+        {loading ? (
           <div className="space-y-3">
-            {notificationsLoading ? (
-              <div className="space-y-2">
-                <Skeleton className="h-4 w-1/3" />
-                <Skeleton className="h-4 w-2/3" />
-                <Skeleton className="h-4 w-1/2" />
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div
+                key={i}
+                className="bg-card rounded-lg border p-3 flex items-center gap-3"
+              >
+                <Skeleton className="h-12 w-12 rounded-md shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-2/3" />
+                  <Skeleton className="h-3 w-1/2" />
+                </div>
+                <Skeleton className="h-8 w-8 rounded-full shrink-0" />
               </div>
-            ) : !notifications || notifications.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No notifications yet.
-              </p>
-            ) : (
-              notifications.map((n: any) => {
-                const created =
-                  typeof n.created_at === "string"
-                    ? new Date(n.created_at)
-                    : null;
-                const when = created
-                  ? created.toLocaleString(undefined, {
-                      day: "2-digit",
-                      month: "short",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })
-                  : "";
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {!error && !hasYourGroups ? (
+              <Empty className="bg-muted/30">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <Shield className="h-5 w-5" />
+                  </EmptyMedia>
+                  <EmptyTitle>No groups yet</EmptyTitle>
+                  <EmptyDescription>
+                    Create your first group and manage it here.
+                  </EmptyDescription>
+                </EmptyHeader>
+                <EmptyContent>
+                  <Button asChild variant="outline">
+                    <Link href="/app/activity/groups/create">
+                      Create a group
+                    </Link>
+                  </Button>
+                </EmptyContent>
+              </Empty>
+            ) : null}
 
-                const type = String(n.type || "").toLowerCase();
+            {hasYourGroups ? (
+              <div className="space-y-4">
+                {filteredHostingGroups.length > 0 && (
+                  <div className="space-y-2">
+                    <h3 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {activeTab === "Archive" ? "Hosted" : "Hosting"}
+                    </h3>
+                    <div className="space-y-3">
+                      {filteredHostingGroups.map((g) => (
+                        <Item key={g.id} className="bg-card">
+                          <ItemMedia>
+                            {g.coverUrl && g.coverUrl.trim() !== "" ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={g.coverUrl}
+                                alt={`${g.title || "Group"} cover`}
+                                className="h-12 w-12 rounded-md object-cover"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <div className="h-12 w-12 rounded-md bg-muted grid place-items-center">
+                                <Shield className="h-5 w-5 text-muted-foreground" />
+                              </div>
+                            )}
+                          </ItemMedia>
+                          <ItemContent>
+                            <ItemTitle className="flex items-center gap-2">
+                              <span className="truncate">
+                                {g.title || "Untitled"}
+                              </span>
+                            </ItemTitle>
 
-                const actor = n.actor_profile || n.profile || n.user || null;
-                const actorName =
-                  actor?.profile_title || actor?.name || "Someone";
+                            <div className="text-sm text-muted-foreground">
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-center gap-2">
+                                  <CalendarClock className="h-4 w-4 text-muted-foreground" />
+                                  <span>
+                                    {fmtWhen(
+                                      g.start_time as any,
+                                      g.end_time as any,
+                                      activeTab === "Archive"
+                                    )}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
 
-                const group = n.group ||
-                  n.group_summary ||
-                  n.group_info || {
-                    title:
-                      n.group_title ||
-                      n.payload?.group_title ||
-                      n.payload?.group_name ||
-                      null,
-                  };
+                            {g.attendeesPreview && g.attendeesPreview.length ? (
+                              <div className="mt-2 flex justify-end">
+                                <div className="flex -space-x-2">
+                                  {g.attendeesPreview.map((a) => {
+                                    const raw = a.avatar_url;
+                                    const isUrl =
+                                      typeof raw === "string" &&
+                                      /^https?:\/\//i.test(raw);
+                                    const src = isUrl
+                                      ? raw
+                                      : raw
+                                      ? `/api/storage/public/${encodeURIComponent(
+                                          raw
+                                        )}`
+                                      : null;
+                                    const name = a.name || a.username || "User";
+                                    const fallback = initialsFrom(name);
 
-                const groupTitleRaw = group?.title ?? null;
-                const groupTitle =
-                  typeof groupTitleRaw === "string" &&
-                  groupTitleRaw.trim().length > 0
-                    ? groupTitleRaw.trim()
-                    : "your group";
-                const groupTitleShort =
-                  groupTitle.length > 40
-                    ? groupTitle.slice(0, 37) + "..."
-                    : groupTitle;
-
-                const metaSource =
-                  n.actor_profile_meta ||
-                  n.actor_meta ||
-                  n.profile_meta ||
-                  n.payload?.actor_meta ||
-                  null;
-
-                const age = metaSource?.age ?? metaSource?.approx_age ?? null;
-                const sexuality =
-                  metaSource?.sexuality_short_label ||
-                  metaSource?.sexuality_label ||
-                  metaSource?.sexuality ||
-                  null;
-                const position =
-                  metaSource?.position_short_label ||
-                  metaSource?.position_label ||
-                  metaSource?.position ||
-                  null;
-
-                const metaParts: string[] = [];
-                if (typeof age === "number") metaParts.push(String(age));
-                if (typeof age === "string" && age.trim().length)
-                  metaParts.push(age);
-                if (sexuality && String(sexuality).trim().length)
-                  metaParts.push(String(sexuality).trim());
-                if (position && String(position).trim().length)
-                  metaParts.push(String(position).trim());
-
-                const profileMeta =
-                  metaParts.length > 0 ? metaParts.join(" · ") : null;
-
-                const payload = n.payload || {};
-                const messageField =
-                  payload.message ||
-                  payload.reason ||
-                  n.message ||
-                  n.summary ||
-                  null;
-
-                let titleText: string;
-                let subtitleText: string | null = null;
-
-                switch (type) {
-                  case "group_created":
-                  case "created":
-                    titleText = "Group created";
-                    subtitleText = groupTitle;
-                    break;
-
-                  case "cohost_invite_accepted":
-                  case "cohost_accepted":
-                    titleText = `Co-host accepted invite · ${groupTitleShort}`;
-                    subtitleText = actorName;
-                    break;
-
-                  case "join_request":
-                  case "join-request":
-                  case "request_to_join":
-                    titleText = `${actorName} sent a request to join ${groupTitleShort}`;
-                    subtitleText = profileMeta || messageField;
-                    break;
-
-                  case "group_updated":
-                  case "updated":
-                    {
-                      const newStart =
-                        payload.new_start_time ||
-                        payload.start_time ||
-                        payload.start ||
-                        null;
-                      const newEnd =
-                        payload.new_end_time ||
-                        payload.end_time ||
-                        payload.end ||
-                        null;
-                      const whenText =
-                        typeof newStart === "string" ||
-                        typeof newEnd === "string"
-                          ? fmtWhen(
-                              (newStart as string | null) ?? null,
-                              (newEnd as string | null) ?? null,
-                              false
-                            )
-                          : null;
-
-                      titleText = "Group updated";
-                      subtitleText = whenText
-                        ? `Time and date changed to ${whenText}`
-                        : "Details have changed";
-                    }
-                    break;
-
-                  case "group_cancelled":
-                  case "cancelled":
-                  case "canceled":
-                    titleText = "Group cancelled";
-                    subtitleText = `${actorName} cancelled ${groupTitleShort}`;
-                    break;
-
-                  case "invite_accepted":
-                  case "join_accepted":
-                  case "join-approved":
-                  case "join_approved":
-                    titleText = `${actorName} accepted an invite to join ${groupTitleShort}`;
-                    subtitleText = profileMeta || null;
-                    break;
-
-                  case "member_left":
-                  case "left":
-                    titleText = `${actorName} left ${groupTitleShort}`;
-                    subtitleText = profileMeta || null;
-                    break;
-
-                  default:
-                    titleText = groupTitleShort;
-                    subtitleText = messageField || profileMeta;
-                    break;
-                }
-
-                const cardTitle = titleText;
-                const cardSubtitle = subtitleText;
-
-                const avatarName = actorName;
-                const avatarInitials = initialsFrom(avatarName);
-                const avatarUrl =
-                  actor?.avatar_url || metaSource?.avatar_url || null;
-
-                return (
-                  <div
-                    key={n.id ?? when + Math.random().toString(36)}
-                    className="flex items-start gap-3 rounded-lg border bg-card px-3 py-2"
-                  >
-                    <Avatar className="h-8 w-8">
-                      {avatarUrl ? (
-                        <AvatarImage src={avatarUrl} alt={avatarName} />
-                      ) : null}
-                      <AvatarFallback className="text-xs">
-                        {avatarInitials}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="text-sm font-medium truncate">
-                          {cardTitle}
-                        </div>
-                        {when ? (
-                          <div className="text-[11px] text-muted-foreground shrink-0">
-                            {when}
-                          </div>
-                        ) : null}
-                      </div>
-                      {cardSubtitle ? (
-                        <div className="mt-0.5 text-xs text-muted-foreground truncate">
-                          {cardSubtitle}
-                        </div>
-                      ) : null}
-                      {messageField &&
-                      messageField !== cardSubtitle &&
-                      type !== "join-request" &&
-                      type !== "join_request" ? (
-                        <p className="mt-1 text-xs text-muted-foreground whitespace-pre-wrap">
-                          {messageField}
-                        </p>
-                      ) : null}
+                                    return (
+                                      <Avatar
+                                        key={a.id}
+                                        className="ring-2 ring-background h-6 w-6"
+                                      >
+                                        {src ? (
+                                          <AvatarImage src={src} alt={name} />
+                                        ) : null}
+                                        <AvatarFallback className="text-[10px]">
+                                          {fallback}
+                                        </AvatarFallback>
+                                      </Avatar>
+                                    );
+                                  })}
+                                  {g.attendeesExtra > 0 ? (
+                                    <Avatar className="ring-2 ring-background h-6 w-6">
+                                      <AvatarFallback className="text-[10px]">
+                                        +{g.attendeesExtra}
+                                      </AvatarFallback>
+                                    </Avatar>
+                                  ) : null}
+                                </div>
+                              </div>
+                            ) : null}
+                          </ItemContent>
+                          <ItemActions>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  size="icon"
+                                  className="rounded-full h-8 w-8 p-0"
+                                  variant="outline"
+                                  aria-label="Open menu"
+                                >
+                                  <EllipsisVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent
+                                align="end"
+                                sideOffset={8}
+                                className="min-w-40"
+                              >
+                                {activeTab === "Archive" ? (
+                                  <DropdownMenuItem asChild>
+                                    <Link href={`/app/activity/groups/${g.id}`}>
+                                      View
+                                    </Link>
+                                  </DropdownMenuItem>
+                                ) : activeTab === "Drafts" ? (
+                                  <>
+                                    <DropdownMenuItem asChild>
+                                      <Link
+                                        href={`/app/activity/groups/${g.id}`}
+                                      >
+                                        Preview
+                                      </Link>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem asChild>
+                                      <Link
+                                        href={`/app/activity/groups/create?id=${g.id}&step=0`}
+                                      >
+                                        Edit
+                                      </Link>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onClick={() => handlePublish(g.id)}
+                                    >
+                                      Publish
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      className="text-destructive focus:text-destructive"
+                                      onClick={() => openDeleteDialog(g.id)}
+                                    >
+                                      Delete
+                                    </DropdownMenuItem>
+                                  </>
+                                ) : (
+                                  <>
+                                    <DropdownMenuItem asChild>
+                                      <Link
+                                        href={`/app/activity/groups/${g.id}`}
+                                      >
+                                        View
+                                      </Link>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem asChild>
+                                      <Link
+                                        href={`/app/activity/groups/create?id=${g.id}&step=0`}
+                                      >
+                                        Edit
+                                      </Link>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem asChild>
+                                      <Link
+                                        href={`/app/activity/groups/${g.id}/requests`}
+                                      >
+                                        Requests
+                                      </Link>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onClick={() => handleUnpublish(g.id)}
+                                    >
+                                      Unpublish
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      asChild
+                                      className="text-destructive focus:text-destructive"
+                                    >
+                                      <Link
+                                        href={`/app/activity/groups/manage`}
+                                      >
+                                        Cancel
+                                      </Link>
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </ItemActions>
+                        </Item>
+                      ))}
                     </div>
                   </div>
-                );
-              })
+                )}
+
+                {filteredCohostingGroups.length > 0 && (
+                  <div className="space-y-2">
+                    <h3 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {activeTab === "Archive" ? "Co-hosted" : "Co-hosting"}
+                    </h3>
+                    <div className="space-y-3">
+                      {filteredCohostingGroups.map((g) => (
+                        <Item key={g.id} className="bg-card">
+                          <ItemMedia>
+                            {g.coverUrl && g.coverUrl.trim() !== "" ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={g.coverUrl}
+                                alt={`${g.title || "Group"} cover`}
+                                className="h-12 w-12 rounded-md object-cover"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <div className="h-12 w-12 rounded-md bg-muted grid place-items-center">
+                                <Shield className="h-5 w-5 text-muted-foreground" />
+                              </div>
+                            )}
+                          </ItemMedia>
+                          <ItemContent>
+                            <ItemTitle className="flex items-center gap-2">
+                              <span className="truncate">
+                                {g.title || "Untitled"}
+                              </span>
+                            </ItemTitle>
+
+                            <div className="text-sm text-muted-foreground">
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-center gap-2">
+                                  <CalendarClock className="h-4 w-4 text-muted-foreground" />
+                                  <span>
+                                    {fmtWhen(
+                                      g.start_time as any,
+                                      g.end_time as any,
+                                      activeTab === "Archive"
+                                    )}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {g.attendeesPreview && g.attendeesPreview.length ? (
+                              <div className="mt-2 flex justify-end">
+                                <div className="flex -space-x-2">
+                                  {g.attendeesPreview.map((a) => {
+                                    const raw = a.avatar_url;
+                                    const isUrl =
+                                      typeof raw === "string" &&
+                                      /^https?:\/\//i.test(raw);
+                                    const src = isUrl
+                                      ? raw
+                                      : raw
+                                      ? `/api/storage/public/${encodeURIComponent(
+                                          raw
+                                        )}`
+                                      : null;
+                                    const name = a.name || a.username || "User";
+                                    const fallback = initialsFrom(name);
+
+                                    return (
+                                      <Avatar
+                                        key={a.id}
+                                        className="ring-2 ring-background h-6 w-6"
+                                      >
+                                        {src ? (
+                                          <AvatarImage src={src} alt={name} />
+                                        ) : null}
+                                        <AvatarFallback className="text-[10px]">
+                                          {fallback}
+                                        </AvatarFallback>
+                                      </Avatar>
+                                    );
+                                  })}
+                                  {g.attendeesExtra > 0 ? (
+                                    <Avatar className="ring-2 ring-background h-6 w-6">
+                                      <AvatarFallback className="text-[10px]">
+                                        +{g.attendeesExtra}
+                                      </AvatarFallback>
+                                    </Avatar>
+                                  ) : null}
+                                </div>
+                              </div>
+                            ) : null}
+                          </ItemContent>
+                          <ItemActions>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  size="icon"
+                                  className="rounded-full h-8 w-8 p-0"
+                                  variant="outline"
+                                  aria-label="Open menu"
+                                >
+                                  <EllipsisVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent
+                                align="end"
+                                sideOffset={8}
+                                className="min-w-40"
+                              >
+                                {activeTab === "Archive" ? (
+                                  <DropdownMenuItem asChild>
+                                    <Link href={`/app/activity/groups/${g.id}`}>
+                                      View
+                                    </Link>
+                                  </DropdownMenuItem>
+                                ) : activeTab === "Drafts" ? (
+                                  <>
+                                    <DropdownMenuItem asChild>
+                                      <Link
+                                        href={`/app/activity/groups/${g.id}`}
+                                      >
+                                        Preview
+                                      </Link>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem asChild>
+                                      <Link
+                                        href={`/app/activity/groups/create?id=${g.id}&step=0`}
+                                      >
+                                        Edit
+                                      </Link>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onClick={() => handlePublish(g.id)}
+                                    >
+                                      Publish
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      className="text-destructive focus:text-destructive"
+                                      onClick={() => openDeleteDialog(g.id)}
+                                    >
+                                      Delete
+                                    </DropdownMenuItem>
+                                  </>
+                                ) : (
+                                  <>
+                                    <DropdownMenuItem asChild>
+                                      <Link
+                                        href={`/app/activity/groups/${g.id}`}
+                                      >
+                                        View
+                                      </Link>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem asChild>
+                                      <Link
+                                        href={`/app/activity/groups/create?id=${g.id}&step=0`}
+                                      >
+                                        Edit
+                                      </Link>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem asChild>
+                                      <Link
+                                        href={`/app/activity/groups/${g.id}/requests`}
+                                      >
+                                        Requests
+                                      </Link>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onClick={() => handleUnpublish(g.id)}
+                                    >
+                                      Unpublish
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      asChild
+                                      className="text-destructive focus:text-destructive"
+                                    >
+                                      <Link
+                                        href={`/app/activity/groups/manage`}
+                                      >
+                                        Cancel
+                                      </Link>
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </ItemActions>
+                        </Item>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {hasAttending && (
+              <div className="space-y-1">
+                <p className="px-1 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                  {activeTab === "Archive" ? "Attended" : "Attending"}
+                </p>
+                <div className="space-y-3">
+                  {filteredAttendingGroups.map((g) => (
+                    <Item key={g.id} className="bg-card">
+                      <ItemMedia>
+                        {g.coverUrl && g.coverUrl.trim() !== "" ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={g.coverUrl}
+                            alt={`${g.title || "Group"} cover`}
+                            className="h-12 w-12 rounded-md object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="h-12 w-12 rounded-md bg-muted grid place-items-center">
+                            <Shield className="h-5 w-5 text-muted-foreground" />
+                          </div>
+                        )}
+                      </ItemMedia>
+                      <ItemContent>
+                        <ItemTitle className="flex items-center gap-2">
+                          <span className="truncate">
+                            {g.title || "Untitled"}
+                          </span>
+                        </ItemTitle>
+
+                        <div className="text-sm text-muted-foreground">
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2">
+                              <CalendarClock className="h-4 w-4 text-muted-foreground" />
+                              <span>
+                                {fmtWhen(
+                                  g.start_time as any,
+                                  g.end_time as any,
+                                  activeTab === "Archive"
+                                )}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {g.attendeesPreview && g.attendeesPreview.length ? (
+                          <div className="mt-2 flex justify-end">
+                            <div className="flex -space-x-2">
+                              {g.attendeesPreview.map((a) => {
+                                const raw = a.avatar_url;
+                                const isUrl =
+                                  typeof raw === "string" &&
+                                  /^https?:\/\//i.test(raw);
+                                const src = isUrl
+                                  ? raw
+                                  : raw
+                                  ? `/api/storage/public/${encodeURIComponent(
+                                      raw
+                                    )}`
+                                  : null;
+                                const name = a.name || a.username || "User";
+                                const fallback = initialsFrom(name);
+
+                                return (
+                                  <Avatar
+                                    key={a.id}
+                                    className="ring-2 ring-background h-6 w-6"
+                                  >
+                                    {src ? (
+                                      <AvatarImage src={src} alt={name} />
+                                    ) : null}
+                                    <AvatarFallback className="text-[10px]">
+                                      {fallback}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                );
+                              })}
+                              {g.attendeesExtra > 0 ? (
+                                <Avatar className="ring-2 ring-background h-6 w-6">
+                                  <AvatarFallback className="text-[10px]">
+                                    +{g.attendeesExtra}
+                                  </AvatarFallback>
+                                </Avatar>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : null}
+                      </ItemContent>
+                      <ItemActions>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              size="icon"
+                              className="rounded-full h-8 w-8 p-0"
+                              variant="outline"
+                              aria-label="Open menu"
+                            >
+                              <EllipsisVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            align="end"
+                            sideOffset={8}
+                            className="min-w-40"
+                          >
+                            <DropdownMenuItem asChild>
+                              <Link href={`/app/activity/groups/${g.id}`}>
+                                View
+                              </Link>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={openNotifications}>
+                              Notifications
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </ItemActions>
+                    </Item>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {hasCancelled && (
+              <div className="space-y-2">
+                <h3 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Cancelled
+                </h3>
+                <div className="space-y-3">
+                  {cancelledGroups.map((g) => (
+                    <Item key={g.id} className="bg-card">
+                      <ItemMedia>
+                        {g.coverUrl && g.coverUrl.trim() !== "" ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={g.coverUrl}
+                            alt={`${g.title || "Group"} cover`}
+                            className="h-12 w-12 rounded-md object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="h-12 w-12 rounded-md bg-muted grid place-items-center">
+                            <Shield className="h-5 w-5 text-muted-foreground" />
+                          </div>
+                        )}
+                      </ItemMedia>
+                      <ItemContent>
+                        <ItemTitle className="flex items-center gap-2">
+                          <span className="truncate">
+                            {g.title || "Untitled"}
+                          </span>
+                        </ItemTitle>
+
+                        <div className="text-sm text-muted-foreground">
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2">
+                              <CalendarClock className="h-4 w-4 text-muted-foreground" />
+                            <span className="line-through">
+                              {fmtWhen(
+                                g.start_time as any,
+                                g.end_time as any,
+                                true
+                                )}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {g.attendeesPreview && g.attendeesPreview.length ? (
+                          <div className="mt-2 flex justify-end">
+                            <div className="flex -space-x-2">
+                              {g.attendeesPreview.map((a) => {
+                                const raw = a.avatar_url;
+                                const isUrl =
+                                  typeof raw === "string" &&
+                                  /^https?:\/\//i.test(raw);
+                                const src = isUrl
+                                  ? raw
+                                  : raw
+                                  ? `/api/storage/public/${encodeURIComponent(
+                                      raw
+                                    )}`
+                                  : null;
+                                const name = a.name || a.username || "User";
+                                const fallback = initialsFrom(name);
+
+                                return (
+                                  <Avatar
+                                    key={a.id}
+                                    className="ring-2 ring-background h-6 w-6"
+                                  >
+                                    {src ? (
+                                      <AvatarImage src={src} alt={name} />
+                                    ) : null}
+                                    <AvatarFallback className="text-[10px]">
+                                      {fallback}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                );
+                              })}
+                              {g.attendeesExtra > 0 ? (
+                                <Avatar className="ring-2 ring-background h-6 w-6">
+                                  <AvatarFallback className="text-[10px]">
+                                    +{g.attendeesExtra}
+                                  </AvatarFallback>
+                                </Avatar>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : null}
+                      </ItemContent>
+                      <ItemActions>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              size="icon"
+                              className="rounded-full h-8 w-8 p-0"
+                              variant="outline"
+                              aria-label="Open menu"
+                            >
+                              <EllipsisVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            align="end"
+                            sideOffset={8}
+                            className="min-w-40"
+                          >
+                            <DropdownMenuItem asChild>
+                              <Link href={`/app/activity/groups/${g.id}`}>
+                                View
+                              </Link>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </ItemActions>
+                    </Item>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
-        }
-        footer={
-          <Button className="w-full" onClick={closeNotifications}>
-            Done
-          </Button>
-        }
-      />
-    </div>
+        )}
+
+        <Sheet01
+          open={notificationsOpen}
+          onOpenChange={(open) => {
+            if (!open) {
+              closeNotifications();
+            }
+          }}
+          title="Notifications"
+          description="Latest activity and messages for your groups."
+          content={
+            <div className="space-y-3">
+              {notificationsLoading ? (
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-1/3" />
+                  <Skeleton className="h-4 w-2/3" />
+                  <Skeleton className="h-4 w-1/2" />
+                </div>
+              ) : !notifications || notifications.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No notifications yet.
+                </p>
+              ) : (
+                notifications.map((n: any) => {
+                  const created =
+                    typeof n.created_at === "string"
+                      ? new Date(n.created_at)
+                      : null;
+                  const when = created
+                    ? created.toLocaleString(undefined, {
+                        day: "2-digit",
+                        month: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    : "";
+
+                  const type = String(n.type || "").toLowerCase();
+
+                  const actor = n.actor_profile || n.profile || n.user || null;
+                  const actorName =
+                    actor?.profile_title || actor?.name || "Someone";
+
+                  const group = n.group ||
+                    n.group_summary ||
+                    n.group_info || {
+                      title:
+                        n.group_title ||
+                        n.payload?.group_title ||
+                        n.payload?.group_name ||
+                        null,
+                    };
+
+                  const groupTitleRaw = group?.title ?? null;
+                  const groupTitle =
+                    typeof groupTitleRaw === "string" &&
+                    groupTitleRaw.trim().length > 0
+                      ? groupTitleRaw.trim()
+                      : "your group";
+                  const groupTitleShort =
+                    groupTitle.length > 40
+                      ? groupTitle.slice(0, 37) + "..."
+                      : groupTitle;
+
+                  const metaSource =
+                    n.actor_profile_meta ||
+                    n.actor_meta ||
+                    n.profile_meta ||
+                    n.payload?.actor_meta ||
+                    null;
+
+                  const age = metaSource?.age ?? metaSource?.approx_age ?? null;
+                  const sexuality =
+                    metaSource?.sexuality_short_label ||
+                    metaSource?.sexuality_label ||
+                    metaSource?.sexuality ||
+                    null;
+                  const position =
+                    metaSource?.position_short_label ||
+                    metaSource?.position_label ||
+                    metaSource?.position ||
+                    null;
+
+                  const metaParts: string[] = [];
+                  if (typeof age === "number") metaParts.push(String(age));
+                  if (typeof age === "string" && age.trim().length)
+                    metaParts.push(age);
+                  if (sexuality && String(sexuality).trim().length)
+                    metaParts.push(String(sexuality).trim());
+                  if (position && String(position).trim().length)
+                    metaParts.push(String(position).trim());
+
+                  const profileMeta =
+                    metaParts.length > 0 ? metaParts.join(" · ") : null;
+
+                  const payload = n.payload || {};
+                  const messageField =
+                    payload.message ||
+                    payload.reason ||
+                    n.message ||
+                    n.summary ||
+                    null;
+
+                  let titleText: string;
+                  let subtitleText: string | null = null;
+
+                  switch (type) {
+                    case "group_created":
+                    case "created":
+                      titleText = "Group created";
+                      subtitleText = groupTitle;
+                      break;
+
+                    case "cohost_invite_accepted":
+                    case "cohost_accepted":
+                      titleText = `Co-host accepted invite · ${groupTitleShort}`;
+                      subtitleText = actorName;
+                      break;
+
+                    case "join_request":
+                    case "join-request":
+                    case "request_to_join":
+                      titleText = `${actorName} sent a request to join ${groupTitleShort}`;
+                      subtitleText = profileMeta || messageField;
+                      break;
+
+                    case "group_updated":
+                    case "updated":
+                      {
+                        const newStart =
+                          payload.new_start_time ||
+                          payload.start_time ||
+                          payload.start ||
+                          null;
+                        const newEnd =
+                          payload.new_end_time ||
+                          payload.end_time ||
+                          payload.end ||
+                          null;
+                        const whenText =
+                          typeof newStart === "string" ||
+                          typeof newEnd === "string"
+                            ? fmtWhen(
+                                (newStart as string | null) ?? null,
+                                (newEnd as string | null) ?? null,
+                                false
+                              )
+                            : null;
+
+                        titleText = "Group updated";
+                        subtitleText = whenText
+                          ? `Time and date changed to ${whenText}`
+                          : "Details have changed";
+                      }
+                      break;
+
+                    case "group_cancelled":
+                    case "cancelled":
+                    case "canceled":
+                      titleText = "Group cancelled";
+                      subtitleText = `${actorName} cancelled ${groupTitleShort}`;
+                      break;
+
+                    case "invite_accepted":
+                    case "join_accepted":
+                    case "join-approved":
+                    case "join_approved":
+                      titleText = `${actorName} accepted an invite to join ${groupTitleShort}`;
+                      subtitleText = profileMeta || null;
+                      break;
+
+                    case "member_left":
+                    case "left":
+                      titleText = `${actorName} left ${groupTitleShort}`;
+                      subtitleText = profileMeta || null;
+                      break;
+
+                    default:
+                      titleText = groupTitleShort;
+                      subtitleText = messageField || profileMeta;
+                      break;
+                  }
+
+                  const cardTitle = titleText;
+                  const cardSubtitle = subtitleText;
+
+                  const avatarName = actorName;
+                  const avatarInitials = initialsFrom(avatarName);
+                  const avatarUrl =
+                    actor?.avatar_url || metaSource?.avatar_url || null;
+
+                  return (
+                    <div
+                      key={n.id ?? when + Math.random().toString(36)}
+                      className="flex items-start gap-3 rounded-lg border bg-card px-3 py-2"
+                    >
+                      <Avatar className="h-8 w-8">
+                        {avatarUrl ? (
+                          <AvatarImage src={avatarUrl} alt={avatarName} />
+                        ) : null}
+                        <AvatarFallback className="text-xs">
+                          {avatarInitials}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-sm font-medium truncate">
+                            {cardTitle}
+                          </div>
+                          {when ? (
+                            <div className="text-[11px] text-muted-foreground shrink-0">
+                              {when}
+                            </div>
+                          ) : null}
+                        </div>
+                        {cardSubtitle ? (
+                          <div className="mt-0.5 text-xs text-muted-foreground truncate">
+                            {cardSubtitle}
+                          </div>
+                        ) : null}
+                        {messageField &&
+                        messageField !== cardSubtitle &&
+                        type !== "join-request" &&
+                        type !== "join_request" ? (
+                          <p className="mt-1 text-xs text-muted-foreground whitespace-pre-wrap">
+                            {messageField}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          }
+          footer={
+            <Button className="w-full" onClick={closeNotifications}>
+              Done
+            </Button>
+          }
+        />
+      </div>
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete group?</DialogTitle>
+          </DialogHeader>
+          <p>
+            Are you sure you want to delete this group? This action cannot be
+            undone.
+          </p>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => handleDelete(pendingDeleteId ?? "")}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

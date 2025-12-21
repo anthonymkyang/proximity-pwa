@@ -8,6 +8,7 @@ type ApiGroup = {
   id: string;
   name: string;
   nextDate: string | null;
+  end_time?: string | null;
   membershipStatus: MembershipStatus;
   lifecycleStatus: GroupLifecycleStatus;
   status?: string | null; // <-- Add this line to match API response
@@ -57,7 +58,7 @@ const COLOR_PALETTE = [
 ];
 
 const GROUP_SELECT =
-  "id, host_id, cohost_ids, title, start_time, cover_image_url, status, live, location_lat, location_lng, group_categories(name)";
+  "id, host_id, cohost_ids, title, start_time, end_time, cover_image_url, status, live, location_lat, location_lng, group_categories(name)";
 
 function initials(name?: string | null) {
   if (!name) return "";
@@ -147,6 +148,7 @@ export async function GET() {
           id: row.id,
           name: row.title || "Untitled group",
           nextDate: row.start_time || null,
+          end_time: row.end_time || null,
           membershipStatus,
           lifecycleStatus: normalizeLifecycle(row.status),
           status: row.status || null, // <-- Add status field for client filtering
@@ -322,12 +324,16 @@ export async function GET() {
 
     let listings: ListingGroup[] = [];
     try {
+      // Only include groups with start_time between now and 7 days ahead
+      const now = new Date();
+      const sevenDaysAhead = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
       const { data: listingRows, error: listingsErr } = await supabase
         .from("groups")
         .select(
-          "id, title, start_time, cover_image_url, is_public, status, live, host_id, cohost_ids, location_lat, location_lng, group_categories(name), profiles!groups_host_id_fkey(name, profile_title, avatar_url)"
+          "id, title, start_time, end_time, cover_image_url, is_public, status, live, host_id, cohost_ids, location_lat, location_lng, group_categories(name), profiles!groups_host_id_fkey(name, profile_title, avatar_url)"
         )
-        .eq("live", true)
+        .gte("start_time", now.toISOString())
+        .lte("start_time", sevenDaysAhead.toISOString())
         .limit(30);
 
       if (listingsErr) {
@@ -337,6 +343,7 @@ export async function GET() {
           id: row.id,
           name: row.title || "Untitled group",
           start_time: row.start_time || null,
+          end_time: row.end_time || null,
           cover_image_url: row.cover_image_url || null,
           categoryName: row.group_categories?.name ?? null,
           host_id: row.host_id || null,

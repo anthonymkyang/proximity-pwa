@@ -1,6 +1,17 @@
 "use client";
 
+// Make formatClock available for all usages in this file (true top-level scope)
+function formatClock(d: Date) {
+  const h = d.getHours();
+  const m = d.getMinutes();
+  const hour12 = ((h + 11) % 12) + 1;
+  const suffix = h >= 12 ? "pm" : "am";
+  if (m === 0) return `${hour12}${suffix}`;
+  return `${hour12}:${String(m).padStart(2, "0")}${suffix}`;
+}
+
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import maplibregl, {
   type GeoJSONSource,
   type Map as MaplibreMap,
@@ -22,6 +33,7 @@ import {
   TrainFrontTunnel,
   TrainFront,
   User as UserIcon,
+  UsersRound,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -1650,16 +1662,18 @@ export default function MapCanvas() {
       .then((data) => {
         if (!active) return;
 
-        const formatClock = (d: Date) => {
+        // Make formatClock available for all usages in this file (true top-level scope)
+        function formatClock(d: Date) {
           const h = d.getHours();
           const m = d.getMinutes();
           const hour12 = ((h + 11) % 12) + 1;
           const suffix = h >= 12 ? "pm" : "am";
           if (m === 0) return `${hour12}${suffix}`;
           return `${hour12}:${String(m).padStart(2, "0")}${suffix}`;
-        };
+        }
 
         // Returns label string, null for "no badge", or "__HIDE__" to omit marker (>4 days away).
+        // Compute label for when the group is happening
         const computeWhenLabel = (
           value: unknown
         ): string | null | "__HIDE__" => {
@@ -1676,8 +1690,8 @@ export default function MapCanvas() {
             (startOfDay(when) - startOfDay(now)) / 86_400_000
           );
 
-          // Spec: anything more than 4 days away => do not show on map.
-          if (dayDiff > 4) return "__HIDE__";
+          // Show groups only up to 7 days ahead (not before today)
+          if (dayDiff < 0 || dayDiff > 7) return "__HIDE__";
 
           if (dayDiff === 0) {
             const msUntil = ts - now.getTime();
@@ -1694,11 +1708,11 @@ export default function MapCanvas() {
           }
 
           if (dayDiff === 1) return "Tomorrow";
-          if (dayDiff >= 2 && dayDiff <= 4) {
+          if (dayDiff >= 2 && dayDiff <= 7) {
             return when.toLocaleDateString("en-US", { weekday: "long" });
           }
 
-          // Past dates (or anything else) => no badge.
+          // Past or out of range
           return null;
         };
 
@@ -1706,17 +1720,42 @@ export default function MapCanvas() {
           data && typeof data === "object" && data.peopleCounts
             ? (data.peopleCounts as Record<string, number>)
             : {};
+        // Helper to determine if a group should be visible (not expired)
+        const isGroupVisible = (group: any) => {
+          const now = new Date();
+          // Remove group at end_time or 12am next day, whichever comes first
+          let endTime = group?.end_time ? new Date(group.end_time) : null;
+          if (!endTime || isNaN(endTime.getTime())) return true; // If no end_time, fallback to visible
+          // Compute 12am the day after start_time
+          let nextMidnight = null;
+          if (group?.start_time || group?.nextDate) {
+            const start = new Date(group.start_time || group.nextDate);
+            if (!isNaN(start.getTime())) {
+              nextMidnight = new Date(start);
+              nextMidnight.setHours(24, 0, 0, 0);
+            }
+          }
+          const cutoff =
+            nextMidnight && endTime > nextMidnight ? nextMidnight : endTime;
+          return now < cutoff;
+        };
+
         const groups = (data.groups ?? [])
-          .filter((g: any) => g?.membershipStatus === "hosting")
+          .filter(
+            (g: any) =>
+              g?.membershipStatus === "hosting" && g?.status === "active"
+          )
           .map((g: any) => {
             const lat = Number(g?.location_lat);
             const lng = Number(g?.location_lng);
             const whenLabel = computeWhenLabel(g?.nextDate);
             if (whenLabel === "__HIDE__") return null;
+            if (!isGroupVisible(g)) return null;
             return {
               id: String(g.id),
               title: g.title || g.name || "Unnamed Group",
               nextDate: g.nextDate || null,
+              end_time: g.end_time || null,
               categoryName: g.categoryName ?? null,
               location_lat: Number.isFinite(lat) ? lat : null,
               location_lng: Number.isFinite(lng) ? lng : null,
@@ -1735,15 +1774,18 @@ export default function MapCanvas() {
         setUserGroups(groups);
 
         const listings = (data.listings ?? [])
+          .filter((g: any) => g?.status === "active")
           .map((g: any) => {
             const lat = Number(g?.location_lat);
             const lng = Number(g?.location_lng);
             const whenLabel = computeWhenLabel(g?.start_time);
             if (whenLabel === "__HIDE__") return null;
+            if (!isGroupVisible(g)) return null;
             return {
               id: String(g.id),
               title: g.name || g.title || "Untitled group",
               start_time: g.start_time || null,
+              end_time: g.end_time || null,
               categoryName: g.categoryName ?? null,
               location_lat: Number.isFinite(lat) ? lat : null,
               location_lng: Number.isFinite(lng) ? lng : null,
@@ -1765,6 +1807,126 @@ export default function MapCanvas() {
     return () => {
       active = false;
     };
+    // Poll every minute for real-time removal of expired groups
+    const interval = setInterval(() => {
+      fetch("/api/groups/activity")
+        .then((res) => res.json())
+        .then((data) => {
+          // (Repeat the same logic as above for filtering)
+          const peopleCounts: Record<string, number> =
+            data && typeof data === "object" && data.peopleCounts
+              ? (data.peopleCounts as Record<string, number>)
+              : {};
+          const isGroupVisible = (group: any) => {
+            const now = new Date();
+            let endTime = group?.end_time ? new Date(group.end_time) : null;
+            if (!endTime || isNaN(endTime.getTime())) return true;
+            let nextMidnight = null;
+            if (group?.start_time || group?.nextDate) {
+              const start = new Date(group.start_time || group.nextDate);
+              if (!isNaN(start.getTime())) {
+                nextMidnight = new Date(start);
+                nextMidnight.setHours(24, 0, 0, 0);
+              }
+            }
+            const cutoff =
+              nextMidnight && endTime > nextMidnight ? nextMidnight : endTime;
+            return now < cutoff;
+          };
+          const computeWhenLabel = (
+            value: unknown
+          ): string | null | "__HIDE__" => {
+            if (!value) return null;
+            const ts =
+              typeof value === "string" ? Date.parse(value) : Number.NaN;
+            if (!Number.isFinite(ts)) return null;
+            const when = new Date(ts);
+            const now = new Date();
+            const startOfDay = (d: Date) =>
+              new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+            const dayDiff = Math.round(
+              (startOfDay(when) - startOfDay(now)) / 86_400_000
+            );
+            if (dayDiff < 0 || dayDiff > 7) return "__HIDE__";
+            if (dayDiff === 0) {
+              const msUntil = ts - now.getTime();
+              if (msUntil <= 0) return "Today";
+              if (msUntil <= 4 * 60 * 60 * 1000) {
+                if (msUntil < 60 * 60 * 1000) {
+                  const mins = Math.max(1, Math.ceil(msUntil / 60_000));
+                  return `In ${mins} min${mins === 1 ? "" : "s"}`;
+                }
+                const hrs = Math.max(1, Math.ceil(msUntil / 3_600_000));
+                return `In ${hrs} hour${hrs === 1 ? "" : "s"}`;
+              }
+              return `At ${formatClock(when)}`;
+            }
+            if (dayDiff === 1) return "Tomorrow";
+            if (dayDiff >= 2 && dayDiff <= 7) {
+              return when.toLocaleDateString("en-US", { weekday: "long" });
+            }
+            return null;
+          };
+          const groups = (data.groups ?? [])
+            .filter((g: any) => g?.membershipStatus === "hosting")
+            .map((g: any) => {
+              const lat = Number(g?.location_lat);
+              const lng = Number(g?.location_lng);
+              const whenLabel = computeWhenLabel(g?.nextDate);
+              if (whenLabel === "__HIDE__") return null;
+              if (!isGroupVisible(g)) return null;
+              return {
+                id: String(g.id),
+                title: g.title || g.name || "Unnamed Group",
+                nextDate: g.nextDate || null,
+                end_time: g.end_time || null,
+                categoryName: g.categoryName ?? null,
+                location_lat: Number.isFinite(lat) ? lat : null,
+                location_lng: Number.isFinite(lng) ? lng : null,
+                peopleCount: Number(peopleCounts?.[String(g.id)] ?? 0),
+                whenLabel: typeof whenLabel === "string" ? whenLabel : null,
+              };
+            })
+            .filter(Boolean)
+            .filter(
+              (g: any) =>
+                g.location_lat != null &&
+                g.location_lng != null &&
+                Number.isFinite(g.location_lat) &&
+                Number.isFinite(g.location_lng)
+            );
+          setUserGroups(groups);
+          const listings = (data.listings ?? [])
+            .map((g: any) => {
+              const lat = Number(g?.location_lat);
+              const lng = Number(g?.location_lng);
+              const whenLabel = computeWhenLabel(g?.start_time);
+              if (whenLabel === "__HIDE__") return null;
+              if (!isGroupVisible(g)) return null;
+              return {
+                id: String(g.id),
+                title: g.name || g.title || "Untitled group",
+                start_time: g.start_time || null,
+                end_time: g.end_time || null,
+                categoryName: g.categoryName ?? null,
+                location_lat: Number.isFinite(lat) ? lat : null,
+                location_lng: Number.isFinite(lng) ? lng : null,
+                peopleCount: Number(peopleCounts?.[String(g.id)] ?? 0),
+                whenLabel: typeof whenLabel === "string" ? whenLabel : null,
+              };
+            })
+            .filter(Boolean)
+            .filter(
+              (g: any) =>
+                g.location_lat != null &&
+                g.location_lng != null &&
+                Number.isFinite(g.location_lat) &&
+                Number.isFinite(g.location_lng)
+            );
+          setActiveGroupListings(listings);
+        });
+    }, 60 * 1000); // 1 minute
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -2997,38 +3159,64 @@ export default function MapCanvas() {
             ) : null}
           </DrawerHeader>
           <div className="grid grid-cols-3 gap-3 px-4 pb-2">
-            <div className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground">
-              <UserIcon className="h-5 w-5 text-foreground" />
-              <span>Details</span>
-            </div>
-            <div className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground">
-              <MessageCircle className="h-5 w-5 text-foreground" />
-              <span>Host</span>
-            </div>
-            <div
-              className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground"
-              onClick={() => {
-                const coords = groupCoords ?? [
-                  FALLBACK_VIEW.lng,
-                  FALLBACK_VIEW.lat,
-                ];
-                const nearest = findNearestStation(coords as [number, number]);
-                setSelectedStation(
-                  nearest ?? {
-                    name: "Group",
-                    displayName: "Group",
-                    lines: [],
-                    modes: [],
-                    coordinates: coords as [number, number],
-                  }
-                );
-                setDirectionsTitle("Directions to group");
-                setShowDirectionsDrawer(true);
-              }}
-            >
-              <Navigation className="h-5 w-5 text-foreground" />
-              <span>Directions</span>
-            </div>
+            <>
+              <Link
+                href={
+                  selectedGroup?.id
+                    ? `/app/activity/groups/${selectedGroup.id}`
+                    : "#"
+                }
+                className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground"
+                prefetch={false}
+                onClick={() => {
+                  setShowGroupDrawer(false);
+                }}
+              >
+                <UsersRound className="h-5 w-5 text-foreground" />
+                <span>View</span>
+              </Link>
+              <Link
+                href={
+                  selectedGroup?.id
+                    ? `/app/activity/groups/${selectedGroup.id}/chat`
+                    : "#"
+                }
+                className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground"
+                prefetch={false}
+                onClick={() => {
+                  setShowGroupDrawer(false);
+                }}
+              >
+                <MessageCircle className="h-5 w-5 text-foreground" />
+                <span>Chat</span>
+              </Link>
+              <div
+                className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground"
+                onClick={() => {
+                  const coords = groupCoords ?? [
+                    FALLBACK_VIEW.lng,
+                    FALLBACK_VIEW.lat,
+                  ];
+                  const nearest = findNearestStation(
+                    coords as [number, number]
+                  );
+                  setSelectedStation(
+                    nearest ?? {
+                      name: "Group",
+                      displayName: "Group",
+                      lines: [],
+                      modes: [],
+                      coordinates: coords as [number, number],
+                    }
+                  );
+                  setDirectionsTitle("Directions to group");
+                  setShowDirectionsDrawer(true);
+                }}
+              >
+                <Navigation className="h-5 w-5 text-foreground" />
+                <span>Directions</span>
+              </div>
+            </>
           </div>
         </DrawerContent>
       </Drawer>

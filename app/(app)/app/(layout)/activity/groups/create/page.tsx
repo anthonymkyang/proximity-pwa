@@ -217,6 +217,7 @@ export default function CreateGroupPage() {
   const mapRef = React.useRef<MaplibreMap | null>(null);
   const markerRef = React.useRef<maplibregl.Marker | null>(null);
   const [mapReady, setMapReady] = React.useState(false);
+  const isNavigatingAwayRef = React.useRef(false);
 
   const today = React.useMemo(() => {
     const d = new Date();
@@ -672,6 +673,38 @@ export default function CreateGroupPage() {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [formData]);
 
+  // Intercept browser back/forward navigation
+  React.useEffect(() => {
+    const handlePopState = () => {
+      if (isNavigatingAwayRef.current) {
+        // Allow navigation - don't reset the ref or push state
+        return;
+      }
+
+      if (formData.title || formData.description || formData.category_id) {
+        // Prevent navigation by pushing current state back
+        window.history.pushState(null, "", window.location.href);
+
+        // Show dialog
+        setPendingNavigation(() => () => {
+          isNavigatingAwayRef.current = true;
+          window.history.back();
+        });
+        setShowLeaveDialog(true);
+      }
+    };
+
+    // Push initial state
+    window.history.pushState(null, "", window.location.href);
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+      // Reset ref on unmount
+      isNavigatingAwayRef.current = false;
+    };
+  }, [formData]);
+
   // Persist progress to localStorage when state changes (after hydration)
   React.useEffect(() => {
     if (!hasHydratedRef.current) return;
@@ -900,8 +933,32 @@ export default function CreateGroupPage() {
 
   const handleDiscardAndLeave = () => {
     setShowLeaveDialog(false);
+
+    // If creating a new group (no groupId) and user chooses to discard, clear localStorage
+    if (!groupId) {
+      localStorage.removeItem(STORAGE_KEY);
+    }
+
+    // Execute the pending navigation immediately
     if (pendingNavigation) {
       pendingNavigation();
+      setPendingNavigation(null);
+    }
+  };
+
+  const handleSaveAsDraft = async () => {
+    setShowLeaveDialog(false);
+    try {
+      await saveDraft();
+      localStorage.removeItem(STORAGE_KEY);
+
+      // Execute the pending navigation after saving
+      if (pendingNavigation) {
+        pendingNavigation();
+        setPendingNavigation(null);
+      }
+    } catch (error) {
+      console.error("Failed to save draft", error);
     }
   };
 
@@ -978,6 +1035,13 @@ export default function CreateGroupPage() {
         cover_image_url: formData.cover_image_url || null,
         location_lat: formData.location_lat,
         location_lng: formData.location_lng,
+        start_time: formData.start_time || null,
+        end_time: formData.end_time || null,
+        postcode: formData.postcode || null,
+        max_attendees: formData.max_attendees ? parseInt(formData.max_attendees) : null,
+        house_rules: formData.house_rules.filter((r) => r.trim().length > 0),
+        provided_items: formData.provided_items.filter((p) => p.trim().length > 0),
+        is_public: formData.is_public,
         status: "draft",
         cohost_ids: formData.cohost_ids || [],
       };
@@ -999,7 +1063,11 @@ export default function CreateGroupPage() {
           .single();
 
         if (error) throw error;
-        if (data) setGroupId(data.id);
+        if (data?.id) {
+          setGroupId(data.id);
+          // Update URL to include the new group ID so the URL param effect doesn't clear it
+          router.replace(`/app/activity/groups/create?id=${data.id}&step=${step}`);
+        }
       }
     } catch (error) {
       console.error("Failed to save draft", error);
@@ -1198,7 +1266,7 @@ export default function CreateGroupPage() {
                   variant="outline"
                   size="icon"
                   className="rounded-full w-9 h-9"
-                  onClick={() => handleNavigation(() => window.history.back())}
+                  onClick={() => handleNavigation(() => router.back())}
                 >
                   <ArrowLeft className="w-4 h-4" />
                 </Button>
@@ -1206,7 +1274,13 @@ export default function CreateGroupPage() {
                   size="sm"
                   onClick={async () => {
                     await saveDraft();
-                    setStep(step + 1);
+                    const nextStep = step + 1;
+                    setStep(nextStep);
+                    // Update URL with new step to prevent flicker
+                    const idParam = searchParams.get("id") || groupId;
+                    if (idParam) {
+                      router.replace(`/app/activity/groups/create?id=${idParam}&step=${nextStep}`);
+                    }
                   }}
                   disabled={!canProceed()}
                   className="rounded-full"
@@ -1359,7 +1433,15 @@ export default function CreateGroupPage() {
                   variant="outline"
                   size="icon"
                   className="rounded-full w-9 h-9"
-                  onClick={() => handleNavigation(() => setStep(step - 1))}
+                  onClick={async () => {
+                    await saveDraft();
+                    const prevStep = step - 1;
+                    setStep(prevStep);
+                    const idParam = searchParams.get("id") || groupId;
+                    if (idParam) {
+                      router.replace(`/app/activity/groups/create?id=${idParam}&step=${prevStep}`);
+                    }
+                  }}
                 >
                   <ArrowLeft className="w-4 h-4" />
                 </Button>
@@ -1367,7 +1449,12 @@ export default function CreateGroupPage() {
                   size="sm"
                   onClick={async () => {
                     await saveDraft();
-                    setStep(step + 1);
+                    const nextStep = step + 1;
+                    setStep(nextStep);
+                    const idParam = searchParams.get("id") || groupId;
+                    if (idParam) {
+                      router.replace(`/app/activity/groups/create?id=${idParam}&step=${nextStep}`);
+                    }
                   }}
                   disabled={!canProceed()}
                   className="rounded-full"
@@ -1565,13 +1652,29 @@ export default function CreateGroupPage() {
                   variant="outline"
                   size="icon"
                   className="rounded-full w-9 h-9"
-                  onClick={() => setStep(step - 1)}
+                  onClick={async () => {
+                    await saveDraft();
+                    const prevStep = step - 1;
+                    setStep(prevStep);
+                    const idParam = searchParams.get("id") || groupId;
+                    if (idParam) {
+                      router.replace(`/app/activity/groups/create?id=${idParam}&step=${prevStep}`);
+                    }
+                  }}
                 >
                   <ArrowLeft className="w-4 h-4" />
                 </Button>
                 <Button
                   size="sm"
-                  onClick={() => setStep(step + 1)}
+                  onClick={async () => {
+                    await saveDraft();
+                    const nextStep = step + 1;
+                    setStep(nextStep);
+                    const idParam = searchParams.get("id") || groupId;
+                    if (idParam) {
+                      router.replace(`/app/activity/groups/create?id=${idParam}&step=${nextStep}`);
+                    }
+                  }}
                   className="rounded-full"
                 >
                   Next
@@ -1849,13 +1952,29 @@ export default function CreateGroupPage() {
                   variant="outline"
                   size="icon"
                   className="rounded-full w-9 h-9"
-                  onClick={() => setStep(step - 1)}
+                  onClick={async () => {
+                    await saveDraft();
+                    const prevStep = step - 1;
+                    setStep(prevStep);
+                    const idParam = searchParams.get("id") || groupId;
+                    if (idParam) {
+                      router.replace(`/app/activity/groups/create?id=${idParam}&step=${prevStep}`);
+                    }
+                  }}
                 >
                   <ArrowLeft className="w-4 h-4" />
                 </Button>
                 <Button
                   size="sm"
-                  onClick={() => setStep(step + 1)}
+                  onClick={async () => {
+                    await saveDraft();
+                    const nextStep = step + 1;
+                    setStep(nextStep);
+                    const idParam = searchParams.get("id") || groupId;
+                    if (idParam) {
+                      router.replace(`/app/activity/groups/create?id=${idParam}&step=${nextStep}`);
+                    }
+                  }}
                   className="rounded-full"
                 >
                   Next
@@ -1957,7 +2076,14 @@ export default function CreateGroupPage() {
                   variant="outline"
                   size="icon"
                   className="rounded-full w-9 h-9"
-                  onClick={() => setStep(step - 1)}
+                  onClick={() => {
+                    const prevStep = step - 1;
+                    setStep(prevStep);
+                    const idParam = searchParams.get("id") || groupId;
+                    if (idParam) {
+                      router.replace(`/app/activity/groups/create?id=${idParam}&step=${prevStep}`);
+                    }
+                  }}
                 >
                   <ArrowLeft className="w-4 h-4" />
                 </Button>
@@ -2003,17 +2129,34 @@ export default function CreateGroupPage() {
       <Dialog open={showLeaveDialog} onOpenChange={setShowLeaveDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Discard Changes?</DialogTitle>
+            <DialogTitle>
+              {groupId ? "Discard Changes?" : "Save Your Group?"}
+            </DialogTitle>
             <DialogDescription>
-              You have unsaved changes. Are you sure you want to leave without
-              saving?
+              {groupId
+                ? "You have unsaved changes. Are you sure you want to leave without saving?"
+                : "Would you like to save this group as a draft or discard it?"}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={handleContinueEditing}>
               Continue Editing
             </Button>
-            <Button onClick={handleDiscardAndLeave}>Discard Changes</Button>
+            {groupId ? (
+              <Button onClick={handleDiscardAndLeave}>Discard Changes</Button>
+            ) : (
+              <>
+                <Button
+                  variant="destructive"
+                  onClick={handleDiscardAndLeave}
+                >
+                  Delete
+                </Button>
+                <Button onClick={handleSaveAsDraft}>
+                  Save as Draft
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
