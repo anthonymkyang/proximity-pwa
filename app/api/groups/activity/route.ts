@@ -10,6 +10,8 @@ type ApiGroup = {
   nextDate: string | null;
   membershipStatus: MembershipStatus;
   lifecycleStatus: GroupLifecycleStatus;
+  status?: string | null; // <-- Add this line to match API response
+  live: boolean;
   colorClass: string;
   cover_image_url: string | null;
   categoryName: string | null;
@@ -38,6 +40,11 @@ type ListingGroup = {
   location_lng: number | null;
   distanceKm: number | null;
   lifecycleStatus: GroupLifecycleStatus;
+  live: boolean;
+  hostProfile?: {
+    name: string | null;
+    avatar_url: string | null;
+  } | null;
 };
 
 const COLOR_PALETTE = [
@@ -50,7 +57,7 @@ const COLOR_PALETTE = [
 ];
 
 const GROUP_SELECT =
-  "id, host_id, cohost_ids, title, start_time, cover_image_url, status, location_lat, location_lng, group_categories(name)";
+  "id, host_id, cohost_ids, title, start_time, cover_image_url, status, live, location_lat, location_lng, group_categories(name)";
 
 function initials(name?: string | null) {
   if (!name) return "";
@@ -87,26 +94,23 @@ export async function GET() {
 
     const byId = new Map<string, ApiGroup>();
 
+    // Note: Do not add public discovery groups to `groups`.
+    // Discovery is provided via `listings` below to avoid mixing with user memberships.
+
     if (userId) {
       const [hostRes, cohostRes, attendeeRes] = await Promise.all([
+        supabase.from("groups").select(GROUP_SELECT).eq("host_id", userId),
         supabase
           .from("groups")
           .select(GROUP_SELECT)
-          .in("status", ["active", "in_progress"])
-          .eq("host_id", userId),
-        supabase
-          .from("groups")
-          .select(GROUP_SELECT)
-          .in("status", ["active", "in_progress"])
           .contains("cohost_ids", [userId]),
         supabase
           .from("group_attendees")
           .select(
-            "group_id, status, groups:groups!inner(id, host_id, cohost_ids, title, start_time, cover_image_url, status, location_lat, location_lng, group_categories(name))"
+            "group_id, status, groups:groups!inner(id, host_id, cohost_ids, title, start_time, cover_image_url, status, live, location_lat, location_lng, group_categories(name))"
           )
           .eq("user_id", userId)
-          .eq("status", "accepted")
-          .in("groups.status", ["active", "in_progress"]),
+          .in("status", ["accepted", "approved"]),
       ]);
 
       if (hostRes.error) {
@@ -145,6 +149,8 @@ export async function GET() {
           nextDate: row.start_time || null,
           membershipStatus,
           lifecycleStatus: normalizeLifecycle(row.status),
+          status: row.status || null, // <-- Add status field for client filtering
+          live: row.live === true,
           colorClass,
           cover_image_url: row.cover_image_url || null,
           categoryName: row.group_categories?.name ?? null,
@@ -204,10 +210,10 @@ export async function GET() {
         const attendeesPromise = supabase
           .from("group_attendees")
           .select(
-            "group_id, user_id, profiles:profiles!inner(id, avatar_url, profile_title, name)"
+            "group_id, user_id, profiles:profiles(id, avatar_url, profile_title, name)"
           )
           .in("group_id", groupIds)
-          .eq("status", "accepted");
+          .in("status", ["accepted", "approved"]);
 
         const profilesPromise = hostAndCohostIds.length
           ? supabase
@@ -227,6 +233,26 @@ export async function GET() {
         const hostProfileMap = new Map(
           (profiles || []).map((p: any) => [p.id, p])
         );
+
+        // Fetch attendee profiles separately to avoid losing rows due to joins/RLS
+        const attendeeUserIds = Array.from(
+          new Set(
+            (attendees || [])
+              .map((row: any) => String(row.user_id || ""))
+              .filter(Boolean)
+          )
+        );
+
+        let attendeeProfileMap = new Map<string, any>();
+        if (attendeeUserIds.length) {
+          const { data: attendeeProfiles } = await supabase
+            .from("profiles")
+            .select("id, avatar_url, profile_title, name")
+            .in("id", attendeeUserIds);
+          attendeeProfileMap = new Map(
+            (attendeeProfiles || []).map((p: any) => [p.id, p])
+          );
+        }
         const attendeesByGroup = new Map<string, any[]>();
         (attendees || []).forEach((row: any) => {
           const gid = row.group_id as string;
@@ -250,14 +276,8 @@ export async function GET() {
           const items: AvatarStackItem[] = [];
           const seen = new Set<string>();
 
+          // Skip host but include co-hosts
           if (group.host_id) {
-            const hp = hostProfileMap.get(group.host_id);
-            const name = hp?.profile_title || hp?.name || "";
-            items.push({
-              src: resolveAvatarUrl(hp?.avatar_url),
-              name,
-              fallback: initials(name),
-            });
             seen.add(group.host_id);
           }
 
@@ -279,9 +299,9 @@ export async function GET() {
 
           const accepted = attendeesByGroup.get(group.id) || [];
           for (const row of accepted) {
-            const profile = row?.profiles;
-            const pid = profile?.id as string | undefined;
+            const pid = String(row?.user_id || "");
             if (!pid || seen.has(pid)) continue;
+            const profile = attendeeProfileMap.get(pid);
             const name = profile?.profile_title || profile?.name || "";
             items.push({
               src: resolveAvatarUrl(profile?.avatar_url),
@@ -305,12 +325,9 @@ export async function GET() {
       const { data: listingRows, error: listingsErr } = await supabase
         .from("groups")
         .select(
-          "id, title, start_time, cover_image_url, is_public, status, host_id, cohost_ids, location_lat, location_lng, group_categories(name)"
+          "id, title, start_time, cover_image_url, is_public, status, live, host_id, cohost_ids, location_lat, location_lng, group_categories(name), profiles!groups_host_id_fkey(name, profile_title, avatar_url)"
         )
-        .in("status", ["active", "in_progress"])
-        .eq("is_public", true)
-        .not("location_lat", "is", null)
-        .not("location_lng", "is", null)
+        .eq("live", true)
         .limit(30);
 
       if (listingsErr) {
@@ -332,6 +349,13 @@ export async function GET() {
             typeof row.location_lng === "number" ? row.location_lng : null,
           distanceKm: null,
           lifecycleStatus: normalizeLifecycle(row.status),
+          live: row.live === true,
+          hostProfile: row.profiles
+            ? {
+                name: row.profiles.profile_title || row.profiles.name || null,
+                avatar_url: row.profiles.avatar_url || null,
+              }
+            : null,
         }));
       }
     } catch (e) {
@@ -371,7 +395,7 @@ export async function GET() {
           .from("group_attendees")
           .select("group_id, user_id")
           .in("group_id", allIds)
-          .eq("status", "accepted");
+          .in("status", ["accepted", "approved"]);
 
         if (attendeeErr) {
           console.warn(

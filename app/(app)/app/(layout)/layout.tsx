@@ -17,9 +17,26 @@ export default function ShellLayout({
 
   const rootPaths = ["/app/activity", "/app/messages", "/app/connections"];
   const showBack = !rootPaths.includes(pathname);
-  const hideTopBar = pathname?.startsWith("/app/messages/");
-  const removePadding = hideTopBar || pathname?.startsWith("/app/connections") || pathname === "/app/messages" || pathname === "/app/activity" || pathname === "/app/activity/groups";
-  const removeMaxWidth = pathname?.startsWith("/app/connections") || pathname === "/app/messages" || pathname === "/app/activity";
+  const hideTopBar =
+    pathname?.startsWith("/app/messages/") ||
+    (pathname?.startsWith("/app/activity/groups/") &&
+      !pathname?.includes("/manage") &&
+      !pathname?.includes("/create") &&
+      !pathname?.includes("/requests"));
+  const removePadding =
+    hideTopBar ||
+    pathname?.startsWith("/app/connections") ||
+    pathname === "/app/messages" ||
+    pathname === "/app/activity" ||
+    pathname === "/app/activity/groups" ||
+    pathname?.startsWith("/app/activity/groups/manage") ||
+    pathname?.startsWith("/app/activity/groups/create") ||
+    (pathname?.startsWith("/app/activity/groups/") &&
+      pathname?.includes("/requests"));
+  const removeMaxWidth =
+    pathname?.startsWith("/app/connections") ||
+    pathname === "/app/messages" ||
+    pathname === "/app/activity";
   const containerClasses = removePadding
     ? removeMaxWidth
       ? "flex h-svh w-full flex-col pb-[env(safe-area-inset-bottom,0px)] overflow-hidden"

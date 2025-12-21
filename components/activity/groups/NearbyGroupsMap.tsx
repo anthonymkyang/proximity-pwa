@@ -76,35 +76,15 @@ export function NearbyGroupsMap({ groups }: NearbyGroupsMapProps) {
         if (canceled || !mapRef.current) return;
 
         // Center on user location
-        let center: [number, number] = [userLocation.lng, userLocation.lat];
-        let zoom = 12;
+        const center: [number, number] = [userLocation.lng, userLocation.lat];
+        const zoom = 13;
 
-        // Calculate bounds from groups if any have location data
+        // Get valid groups for markers
         const validGroups = groups.filter(
           (g) =>
             typeof g.location_lat === "number" &&
             typeof g.location_lng === "number"
         );
-
-        if (validGroups.length > 0) {
-          // If only one group, use its location
-          if (validGroups.length === 1) {
-            center = [
-              validGroups[0].location_lng!,
-              validGroups[0].location_lat!,
-            ];
-            zoom = 15;
-          } else {
-            // Calculate bounding box center
-            const lats = validGroups.map((g) => g.location_lat!);
-            const lngs = validGroups.map((g) => g.location_lng!);
-            const minLat = Math.min(...lats);
-            const maxLat = Math.max(...lats);
-            const minLng = Math.min(...lngs);
-            const maxLng = Math.max(...lngs);
-            center = [(minLng + maxLng) / 2, (minLat + maxLat) / 2];
-          }
-        }
 
         const map = new maplibregl.Map({
           container: mapRef.current,
@@ -122,6 +102,20 @@ export function NearbyGroupsMap({ groups }: NearbyGroupsMapProps) {
             map.remove();
             return;
           }
+
+          // Hide road numbers (A52, B357, etc.)
+          const layers = map.getStyle()?.layers || [];
+          layers.forEach((layer) => {
+            if (
+              layer.type === "symbol" &&
+              layer.id.includes("road") &&
+              (layer.id.includes("shield") ||
+                layer.id.includes("ref") ||
+                layer.id.includes("number"))
+            ) {
+              map.setLayoutProperty(layer.id, "visibility", "none");
+            }
+          });
 
           // Add marker for user location
           const userEl = document.createElement("div");

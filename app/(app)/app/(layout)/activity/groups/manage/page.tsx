@@ -17,11 +17,6 @@ import {
   Shield,
   EllipsisVertical,
   Plus,
-  Edit,
-  Eye,
-  X,
-  Send,
-  BellRing,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -29,6 +24,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import Sheet01 from "@/components/shadcn-studio/sheet/sheet-01";
@@ -41,6 +37,8 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { cn } from "@/lib/utils";
+import { Archive } from "lucide-react";
 
 type GroupRow = {
   id: string;
@@ -118,35 +116,80 @@ async function fetchAttendeesPreview(
 }
 
 // --- helpers ---
-function fmtWhen(start?: string | null, end?: string | null) {
+function fmtWhen(start?: string | null, end?: string | null, isArchive = false) {
   if (!start) return "TBC";
   const s = new Date(start);
   const e = end ? new Date(end) : null;
+  const now = new Date();
 
+  // Helper to format time (e.g., "7pm", "11am")
+  const formatTime = (date: Date) => {
+    const hours = date.getHours();
+    const minutes = date.getMinutes();
+    const ampm = hours >= 12 ? "pm" : "am";
+    const displayHours = hours % 12 || 12;
+    return minutes === 0 ? `${displayHours}${ampm}` : `${displayHours}:${String(minutes).padStart(2, "0")}${ampm}`;
+  };
+
+  // Helper to get day difference
+  const getDayDiff = (from: Date, to: Date) => {
+    const fromMidnight = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+    const toMidnight = new Date(to.getFullYear(), to.getMonth(), to.getDate());
+    return Math.floor((toMidnight.getTime() - fromMidnight.getTime()) / (1000 * 60 * 60 * 24));
+  };
+
+  const dayDiff = getDayDiff(now, s);
   const sameDay = e
     ? s.getFullYear() === e.getFullYear() &&
       s.getMonth() === e.getMonth() &&
       s.getDate() === e.getDate()
     : true;
 
-  const d = s.toLocaleDateString(undefined, {
-    day: "2-digit",
-    month: "short",
-  });
-  const st = s
-    .toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
-    .replace(":00", "");
+  const st = formatTime(s);
+  const et = e ? formatTime(e) : null;
 
-  if (!e) return `${d}, ${st} onwards`;
-  const et = e
-    .toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
-    .replace(":00", "");
-  if (sameDay) return `${d}, ${st} to ${et}`;
-  const d2 = e.toLocaleDateString(undefined, {
-    day: "2-digit",
-    month: "short",
-  });
-  return `${d}, ${st} - ${d2} ${et}`;
+  if (isArchive) {
+    // Archive tab: use past reference
+    const daysSince = -dayDiff;
+
+    if (daysSince === 0) {
+      return "Today";
+    } else if (daysSince === 1) {
+      return "Yesterday";
+    } else if (daysSince < 7) {
+      // Weekday name for under a week
+      return s.toLocaleDateString(undefined, { weekday: "long" });
+    } else {
+      // Date for over a week
+      return s.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+    }
+  } else {
+    // Active/Drafts tab: use future reference
+    let datePrefix: string;
+
+    if (dayDiff === 0) {
+      datePrefix = "Today";
+    } else if (dayDiff === 1) {
+      datePrefix = "Tomorrow";
+    } else if (dayDiff < 7) {
+      // Weekday name for under a week ahead
+      datePrefix = s.toLocaleDateString(undefined, { weekday: "long" });
+    } else {
+      // Date for over a week
+      datePrefix = s.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+    }
+
+    if (!e) {
+      return `${datePrefix}, ${st} onwards`;
+    } else if (sameDay) {
+      return `${datePrefix}, ${st} to ${et}`;
+    } else {
+      // Different days
+      const eDatePrefix = s.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+      const e2DatePrefix = e.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+      return `${eDatePrefix}, ${st} to ${e2DatePrefix}, ${et}`;
+    }
+  }
 }
 
 function resolveCoverUrl(raw: string | null): string | null {
@@ -175,6 +218,8 @@ function resolveCoverUrl(raw: string | null): string | null {
     : `/api/groups/storage?bucket=group-media&path=${encodeURIComponent(path)}`;
 }
 
+const tabs = ["Active", "Drafts", "Archive"] as const;
+
 export default function ManageGroupsPage() {
   const supabase = React.useMemo(() => createClient(), []);
   const [userId, setUserId] = React.useState<string | null>(null);
@@ -187,13 +232,69 @@ export default function ManageGroupsPage() {
     []
   );
   const [error, setError] = React.useState<string | null>(null);
+  const [activeTab, setActiveTab] = React.useState<(typeof tabs)[number]>("Active");
 
   const [notificationsOpen, setNotificationsOpen] = React.useState(false);
   const [notifications, setNotifications] = React.useState<any[] | null>(null);
   const [notificationsLoading, setNotificationsLoading] = React.useState(false);
 
-  const hasYourGroups = hostingGroups.length > 0 || cohostingGroups.length > 0;
-  const hasAttending = attendingGroups.length > 0;
+  // Helper to check if a group has ended (past end time or 12am next day)
+  const isGroupEnded = React.useCallback((group: ExtendedGroup): boolean => {
+    const now = Date.now();
+
+    if (group.end_time) {
+      const endTime = new Date(group.end_time).getTime();
+      return now > endTime;
+    }
+
+    if (group.start_time) {
+      const startTime = new Date(group.start_time);
+      // Set to 12am (midnight) the following day
+      const nextDayMidnight = new Date(startTime);
+      nextDayMidnight.setDate(nextDayMidnight.getDate() + 1);
+      nextDayMidnight.setHours(0, 0, 0, 0);
+      return now > nextDayMidnight.getTime();
+    }
+
+    return false;
+  }, []);
+
+  // Filter groups based on active tab
+  const filteredHostingGroups = React.useMemo(() => {
+    if (activeTab === "Active") {
+      return hostingGroups.filter((g) => g.status === "active" && !isGroupEnded(g));
+    } else if (activeTab === "Drafts") {
+      return hostingGroups.filter((g) => g.status === "draft");
+    } else if (activeTab === "Archive") {
+      return hostingGroups.filter((g) => g.status === "archived" || (g.status === "active" && isGroupEnded(g)));
+    }
+    return hostingGroups;
+  }, [hostingGroups, activeTab, isGroupEnded]);
+
+  const filteredCohostingGroups = React.useMemo(() => {
+    if (activeTab === "Active") {
+      return cohostingGroups.filter((g) => g.status === "active" && !isGroupEnded(g));
+    } else if (activeTab === "Drafts") {
+      return cohostingGroups.filter((g) => g.status === "draft");
+    } else if (activeTab === "Archive") {
+      return cohostingGroups.filter((g) => g.status === "archived" || (g.status === "active" && isGroupEnded(g)));
+    }
+    return cohostingGroups;
+  }, [cohostingGroups, activeTab, isGroupEnded]);
+
+  const filteredAttendingGroups = React.useMemo(() => {
+    if (activeTab === "Active") {
+      return attendingGroups.filter((g) => g.status === "active" && !isGroupEnded(g));
+    } else if (activeTab === "Drafts") {
+      return attendingGroups.filter((g) => g.status === "draft");
+    } else if (activeTab === "Archive") {
+      return attendingGroups.filter((g) => g.status === "archived" || (g.status === "active" && isGroupEnded(g)));
+    }
+    return attendingGroups;
+  }, [attendingGroups, activeTab, isGroupEnded]);
+
+  const hasYourGroups = filteredHostingGroups.length > 0 || filteredCohostingGroups.length > 0;
+  const hasAttending = filteredAttendingGroups.length > 0;
 
   React.useEffect(() => {
     let cancelled = false;
@@ -448,7 +549,7 @@ export default function ManageGroupsPage() {
 
   if (!loading && !userId) {
     return (
-      <div className="mx-auto w-full max-w-xl pb-[calc(72px+env(safe-area-inset-bottom))]">
+      <div className="mx-auto w-full max-w-xl pb-[calc(72px+env(safe-area-inset-bottom))] px-4">
         <h1 className="px-1 pb-2 text-4xl font-extrabold tracking-tight">
           Manage groups
         </h1>
@@ -462,17 +563,44 @@ export default function ManageGroupsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-xl pb-[calc(72px+env(safe-area-inset-bottom))]">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="px-1 pb-1 text-4xl font-extrabold tracking-tight">
+    <div className="mx-auto w-full max-w-xl pb-[calc(72px+env(safe-area-inset-bottom))] px-4">
+      <div className="pb-4">
+        <h1 className="px-1 text-4xl font-extrabold tracking-tight">
           Manage groups
         </h1>
-        {/* Actions moved to TopBar; placeholder removed */}
       </div>
-      <div className="mt-2 px-1 pb-1">
-        <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-          Your groups
-        </p>
+
+      {/* Tabs */}
+      <div className="flex items-center justify-between gap-3 pb-4">
+        <div className="flex gap-2 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          {tabs.map((tab) => (
+            <Button
+              key={tab}
+              size="sm"
+              variant={activeTab === tab ? "default" : "outline"}
+              className={cn(
+                "rounded-full shrink-0",
+                activeTab === tab && "border border-primary"
+              )}
+              onClick={() => setActiveTab(tab)}
+            >
+              {tab === "Archive" ? (
+                <Archive className="h-4 w-4" />
+              ) : (
+                tab
+              )}
+            </Button>
+          ))}
+        </div>
+        <Link href="/app/activity/groups/create">
+          <Button
+            size="sm"
+            className="rounded-full shrink-0"
+            variant="secondary"
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
+        </Link>
       </div>
 
       {error ? (
@@ -482,25 +610,18 @@ export default function ManageGroupsPage() {
       ) : null}
 
       {loading ? (
-        <div className="space-y-6 mt-2">
-          {["Hosting", "Co-hosting", "Attending"].map((label) => (
-            <div key={label} className="space-y-3">
-              <Skeleton className="h-3 w-24 rounded-full" />
-              <div className="space-y-3">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <Card
-                    key={`${label}-${i}`}
-                    className="p-3 flex items-center gap-3"
-                  >
-                    <Skeleton className="h-12 w-12 rounded-md" />
-                    <div className="flex-1 space-y-2">
-                      <Skeleton className="h-4 w-2/3" />
-                      <Skeleton className="h-3 w-1/2" />
-                    </div>
-                    <Skeleton className="h-8 w-8 rounded-full" />
-                  </Card>
-                ))}
+        <div className="space-y-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div
+              key={i}
+              className="bg-card rounded-lg border p-3 flex items-center gap-3"
+            >
+              <Skeleton className="h-12 w-12 rounded-md shrink-0" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-4 w-2/3" />
+                <Skeleton className="h-3 w-1/2" />
               </div>
+              <Skeleton className="h-8 w-8 rounded-full shrink-0" />
             </div>
           ))}
         </div>
@@ -527,13 +648,13 @@ export default function ManageGroupsPage() {
 
           {hasYourGroups ? (
             <div className="space-y-4">
-              {hostingGroups.length > 0 && (
+              {filteredHostingGroups.length > 0 && (
                 <div className="space-y-2">
                   <h3 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Hosting
+                    {activeTab === "Archive" ? "Hosted" : "Hosting"}
                   </h3>
                   <div className="space-y-3">
-                    {hostingGroups.map((g) => (
+                    {filteredHostingGroups.map((g) => (
                       <Item key={g.id} className="bg-card">
                         <ItemMedia>
                           {g.coverUrl && g.coverUrl.trim() !== "" ? (
@@ -564,7 +685,8 @@ export default function ManageGroupsPage() {
                                 <span>
                                   {fmtWhen(
                                     g.start_time as any,
-                                    g.end_time as any
+                                    g.end_time as any,
+                                    activeTab === "Archive"
                                   )}
                                 </span>
                               </div>
@@ -631,53 +753,67 @@ export default function ManageGroupsPage() {
                               sideOffset={8}
                               className="min-w-40"
                             >
-                              <DropdownMenuItem asChild>
-                                <Link
-                                  href={`/app/activity/groups/create?id=${g.id}&step=0`}
-                                  className="flex items-center gap-2"
-                                >
-                                  <Edit className="h-4 w-4" />
-                                  Edit
-                                </Link>
-                              </DropdownMenuItem>
-                              {g.status !== "active" ? (
-                                <DropdownMenuItem
-                                  onClick={() => handlePublish(g.id)}
-                                  className="flex items-center gap-2"
-                                >
-                                  <Send className="h-4 w-4" />
-                                  Publish
+                              {activeTab === "Archive" ? (
+                                <DropdownMenuItem asChild>
+                                  <Link href={`/app/activity/groups/${g.id}`}>
+                                    View
+                                  </Link>
                                 </DropdownMenuItem>
+                              ) : activeTab === "Drafts" ? (
+                                <>
+                                  <DropdownMenuItem asChild>
+                                    <Link href={`/app/activity/groups/${g.id}`}>
+                                      Preview
+                                    </Link>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem asChild>
+                                    <Link href={`/app/activity/groups/create?id=${g.id}&step=0`}>
+                                      Edit
+                                    </Link>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem onClick={() => handlePublish(g.id)}>
+                                    Publish
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    className="text-destructive focus:text-destructive"
+                                  >
+                                    Delete
+                                  </DropdownMenuItem>
+                                </>
                               ) : (
-                                <DropdownMenuItem
-                                  onClick={() => handleUnpublish(g.id)}
-                                  className="flex items-center gap-2"
-                                >
-                                  <Send className="h-4 w-4" />
-                                  Unpublish
-                                </DropdownMenuItem>
+                                <>
+                                  <DropdownMenuItem asChild>
+                                    <Link href={`/app/activity/groups/${g.id}`}>
+                                      View
+                                    </Link>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem asChild>
+                                    <Link href={`/app/activity/groups/create?id=${g.id}&step=0`}>
+                                      Edit
+                                    </Link>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem asChild>
+                                    <Link href={`/app/activity/groups/${g.id}/requests`}>
+                                      Requests
+                                    </Link>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem onClick={() => handleUnpublish(g.id)}>
+                                    Unpublish
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    asChild
+                                    className="text-destructive focus:text-destructive"
+                                  >
+                                    <Link href={`/app/activity/groups/manage`}>
+                                      Cancel
+                                    </Link>
+                                  </DropdownMenuItem>
+                                </>
                               )}
-                              <DropdownMenuItem asChild>
-                                <Link
-                                  href={`/app/activity/group/${g.id}`}
-                                  className="flex items-center gap-2"
-                                >
-                                  <Eye className="h-4 w-4" />
-                                  View
-                                </Link>
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                asChild
-                                className="text-destructive focus:text-destructive"
-                              >
-                                <Link
-                                  href={`/app/activity/groups/manage`}
-                                  className="flex items-center gap-2"
-                                >
-                                  <X className="h-4 w-4" />
-                                  Cancel
-                                </Link>
-                              </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </ItemActions>
@@ -687,13 +823,13 @@ export default function ManageGroupsPage() {
                 </div>
               )}
 
-              {cohostingGroups.length > 0 && (
+              {filteredCohostingGroups.length > 0 && (
                 <div className="space-y-2">
                   <h3 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Co-hosting
+                    {activeTab === "Archive" ? "Co-hosted" : "Co-hosting"}
                   </h3>
                   <div className="space-y-3">
-                    {cohostingGroups.map((g) => (
+                    {filteredCohostingGroups.map((g) => (
                       <Item key={g.id} className="bg-card">
                         <ItemMedia>
                           {g.coverUrl && g.coverUrl.trim() !== "" ? (
@@ -724,7 +860,8 @@ export default function ManageGroupsPage() {
                                 <span>
                                   {fmtWhen(
                                     g.start_time as any,
-                                    g.end_time as any
+                                    g.end_time as any,
+                                    activeTab === "Archive"
                                   )}
                                 </span>
                               </div>
@@ -791,53 +928,67 @@ export default function ManageGroupsPage() {
                               sideOffset={8}
                               className="min-w-40"
                             >
-                              <DropdownMenuItem asChild>
-                                <Link
-                                  href={`/app/activity/groups/create?id=${g.id}&step=0`}
-                                  className="flex items-center gap-2"
-                                >
-                                  <Edit className="h-4 w-4" />
-                                  Edit
-                                </Link>
-                              </DropdownMenuItem>
-                              {g.status !== "active" ? (
-                                <DropdownMenuItem
-                                  onClick={() => handlePublish(g.id)}
-                                  className="flex items-center gap-2"
-                                >
-                                  <Send className="h-4 w-4" />
-                                  Publish
+                              {activeTab === "Archive" ? (
+                                <DropdownMenuItem asChild>
+                                  <Link href={`/app/activity/groups/${g.id}`}>
+                                    View
+                                  </Link>
                                 </DropdownMenuItem>
+                              ) : activeTab === "Drafts" ? (
+                                <>
+                                  <DropdownMenuItem asChild>
+                                    <Link href={`/app/activity/groups/${g.id}`}>
+                                      Preview
+                                    </Link>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem asChild>
+                                    <Link href={`/app/activity/groups/create?id=${g.id}&step=0`}>
+                                      Edit
+                                    </Link>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem onClick={() => handlePublish(g.id)}>
+                                    Publish
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    className="text-destructive focus:text-destructive"
+                                  >
+                                    Delete
+                                  </DropdownMenuItem>
+                                </>
                               ) : (
-                                <DropdownMenuItem
-                                  onClick={() => handleUnpublish(g.id)}
-                                  className="flex items-center gap-2"
-                                >
-                                  <Send className="h-4 w-4" />
-                                  Unpublish
-                                </DropdownMenuItem>
+                                <>
+                                  <DropdownMenuItem asChild>
+                                    <Link href={`/app/activity/groups/${g.id}`}>
+                                      View
+                                    </Link>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem asChild>
+                                    <Link href={`/app/activity/groups/create?id=${g.id}&step=0`}>
+                                      Edit
+                                    </Link>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem asChild>
+                                    <Link href={`/app/activity/groups/${g.id}/requests`}>
+                                      Requests
+                                    </Link>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem onClick={() => handleUnpublish(g.id)}>
+                                    Unpublish
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    asChild
+                                    className="text-destructive focus:text-destructive"
+                                  >
+                                    <Link href={`/app/activity/groups/manage`}>
+                                      Cancel
+                                    </Link>
+                                  </DropdownMenuItem>
+                                </>
                               )}
-                              <DropdownMenuItem asChild>
-                                <Link
-                                  href={`/app/activity/group/${g.id}`}
-                                  className="flex items-center gap-2"
-                                >
-                                  <Eye className="h-4 w-4" />
-                                  View
-                                </Link>
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                asChild
-                                className="text-destructive focus:text-destructive"
-                              >
-                                <Link
-                                  href={`/app/activity/groups/manage`}
-                                  className="flex items-center gap-2"
-                                >
-                                  <X className="h-4 w-4" />
-                                  Cancel
-                                </Link>
-                              </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </ItemActions>
@@ -849,13 +1000,13 @@ export default function ManageGroupsPage() {
             </div>
           ) : null}
 
-          <div className="space-y-2">
-            <p className="px-1 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-              Attending
-            </p>
-            {hasAttending ? (
+          {hasAttending && (
+            <div className="space-y-2">
+              <p className="px-1 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                {activeTab === "Archive" ? "Attended" : "Attending"}
+              </p>
               <div className="space-y-3">
-                {attendingGroups.map((g) => (
+                {filteredAttendingGroups.map((g) => (
                   <Item key={g.id} className="bg-card">
                     <ItemMedia>
                       {g.coverUrl && g.coverUrl.trim() !== "" ? (
@@ -884,7 +1035,7 @@ export default function ManageGroupsPage() {
                           <div className="flex items-center gap-2">
                             <CalendarClock className="h-4 w-4 text-muted-foreground" />
                             <span>
-                              {fmtWhen(g.start_time as any, g.end_time as any)}
+                              {fmtWhen(g.start_time as any, g.end_time as any, activeTab === "Archive")}
                             </span>
                           </div>
                         </div>
@@ -951,19 +1102,11 @@ export default function ManageGroupsPage() {
                           className="min-w-40"
                         >
                           <DropdownMenuItem asChild>
-                            <Link
-                              href={`/app/activity/group/${g.id}`}
-                              className="flex items-center gap-2"
-                            >
-                              <Eye className="h-4 w-4" />
+                            <Link href={`/app/activity/groups/${g.id}`}>
                               View
                             </Link>
                           </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={openNotifications}
-                            className="flex items-center gap-2"
-                          >
-                            <BellRing className="h-4 w-4" />
+                          <DropdownMenuItem onClick={openNotifications}>
                             Notifications
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -972,25 +1115,8 @@ export default function ManageGroupsPage() {
                   </Item>
                 ))}
               </div>
-            ) : (
-              <Empty className="bg-muted/20">
-                <EmptyHeader>
-                  <EmptyMedia variant="icon">
-                    <CalendarClock className="h-5 w-5" />
-                  </EmptyMedia>
-                  <EmptyTitle>No upcoming attendance</EmptyTitle>
-                  <EmptyDescription>
-                    When you join a group, it will appear here.
-                  </EmptyDescription>
-                </EmptyHeader>
-                <EmptyContent>
-                  <Button asChild variant="outline">
-                    <Link href="/app/activity/groups">Browse groups</Link>
-                  </Button>
-                </EmptyContent>
-              </Empty>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1137,7 +1263,8 @@ export default function ManageGroupsPage() {
                         typeof newEnd === "string"
                           ? fmtWhen(
                               (newStart as string | null) ?? null,
-                              (newEnd as string | null) ?? null
+                              (newEnd as string | null) ?? null,
+                              false
                             )
                           : null;
 

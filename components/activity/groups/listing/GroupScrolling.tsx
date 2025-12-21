@@ -1,6 +1,5 @@
 "use client";
 
-import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -17,10 +16,13 @@ type MyGroupCard = {
     avatar_url: string | null;
   } | null;
   categoryName?: string | null;
+  lifecycleStatus?: "active" | "in_progress" | null;
+  live?: boolean; // Added to support live status
 };
 
 interface GroupScrollingProps {
   groups: MyGroupCard[];
+  loading?: boolean;
   avatarStacks?: Record<
     string,
     {
@@ -48,6 +50,21 @@ function formatDateShort(dateStr?: string | null): string {
   if (!dateStr) return "Date TBC";
   const d = new Date(dateStr);
   if (isNaN(d.getTime())) return "Date TBC";
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const eventDate = new Date(d);
+  eventDate.setHours(0, 0, 0, 0);
+
+  const diffTime = eventDate.getTime() - today.getTime();
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Tomorrow";
+  if (diffDays > 1 && diffDays < 7) {
+    return d.toLocaleDateString(undefined, { weekday: "long" });
+  }
+
   return d.toLocaleDateString(undefined, {
     weekday: "short",
     day: "numeric",
@@ -83,106 +100,131 @@ function getCategoryBadgeClass(name?: string | null) {
   return CATEGORY_BADGE_COLORS[key] || "bg-muted text-muted-foreground";
 }
 
-export function GroupScrolling({ groups, avatarStacks }: GroupScrollingProps) {
+export function GroupScrolling({
+  groups,
+  loading,
+  avatarStacks,
+}: GroupScrollingProps) {
   const router = useRouter();
 
   return (
     <div className="flex gap-3 overflow-x-auto pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]{display:none;}">
-      <div className="pl-2.5"></div>
-      {groups.map((group) => {
-        const groupName = group.title || group.name;
-        const dateStr = group.nextDate;
-        const coverUrl = resolveGroupUrl(group.cover_image_url);
-
-        return (
-          <div
-            key={group.id}
-            className="min-w-[60vw] max-w-[520px] rounded-xl sm:min-w-[380px] cursor-pointer"
-            onClick={() => router.push(`/app/groups/${group.id}`)}
-          >
-            <div className="relative mb-3 aspect-14/9 w-full overflow-hidden rounded-xl bg-card/60">
-              {coverUrl && (
-                <img
-                  src={coverUrl}
-                  alt={groupName}
-                  className="h-full w-full object-cover"
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).style.display =
-                      "none";
-                  }}
-                />
-              )}
-              <div className="absolute left-3 bottom-3">
-                <Avatar className="size-12 border-2 border-background shadow-lg drop-shadow-lg">
-                  {group.hostProfile?.avatar_url && (
-                    <AvatarImage
-                      src={resolveAvatarUrl(group.hostProfile.avatar_url)}
-                      alt={group.hostProfile.name || groupName}
-                    />
-                  )}
-                  <AvatarFallback className="text-[12px] font-semibold">
-                    {(group.hostProfile?.name || groupName)
-                      ?.slice(0, 2)
-                      .toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-              </div>
+      <div className="pl-1.5"></div>
+      {loading ? (
+        <div className="flex gap-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="w-[60vw] rounded-xl sm:w-[380px] space-y-2">
+              <div className="aspect-14/9 w-full rounded-xl bg-muted animate-pulse" />
+              <div className="h-4 bg-muted rounded animate-pulse" />
+              <div className="h-3 bg-muted rounded w-2/3 animate-pulse" />
             </div>
-            <div className="relative px-1">
-              <div className="text-sm font-semibold text-foreground pr-14 truncate">
-                {groupName}
-              </div>
-              {group.categoryName && (
-                <div className="mt-0.5 pr-14">
+          ))}
+        </div>
+      ) : groups.length > 0 ? (
+        groups.map((group) => {
+          const groupName = group.title || group.name || "Unnamed Group";
+          const dateStr = group.nextDate;
+          const coverUrl = resolveGroupUrl(group.cover_image_url);
+
+          return (
+            <div
+              key={group.id}
+              className="w-[60vw] rounded-xl sm:w-[380px] cursor-pointer"
+              onClick={() => router.push(`/app/activity/groups/${group.id}`)}
+            >
+              <div className="relative mb-3 aspect-14/9 w-full overflow-hidden rounded-xl bg-card/60">
+                {coverUrl && (
+                  <img
+                    src={coverUrl}
+                    alt={groupName}
+                    className="h-full w-full object-cover"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).style.display =
+                        "none";
+                    }}
+                  />
+                )}
+                {group.lifecycleStatus === "in_progress" ||
+                (group as any).live === true ? (
+                  <Badge className="absolute top-2 right-2 px-2 py-0.5 text-[10px] rounded-full bg-red-500 text-white">
+                    In progress
+                  </Badge>
+                ) : group.categoryName ? (
                   <Badge
-                    className={`px-2 py-0.5 text-[10px] rounded-full ${getCategoryBadgeClass(
+                    className={`absolute top-2 right-2 px-2 py-0.5 text-[10px] rounded-full ${getCategoryBadgeClass(
                       group.categoryName
                     )}`}
                   >
                     {group.categoryName}
                   </Badge>
+                ) : null}
+                <div className="absolute left-3 bottom-3">
+                  <Avatar className="size-12 border-2 border-background shadow-lg drop-shadow-lg">
+                    {group.hostProfile?.avatar_url && (
+                      <AvatarImage
+                        src={resolveAvatarUrl(group.hostProfile.avatar_url)}
+                        alt={group.hostProfile.name || groupName}
+                      />
+                    )}
+                    <AvatarFallback className="text-[12px] font-semibold">
+                      {(group.hostProfile?.name || groupName)
+                        ?.slice(0, 2)
+                        .toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
                 </div>
-              )}
-              <div className="mt-1 text-xs text-muted-foreground pr-14">
-                {formatDateShort(dateStr)} · {formatTime(dateStr)}
               </div>
-              {avatarStacks &&
-              avatarStacks[group.id] &&
-              avatarStacks[group.id].avatars.length > 0 ? (
-                <div className="absolute right-1 top-1/2 -translate-y-1/2 flex -space-x-2">
-                  {avatarStacks[group.id].avatars.map((a, idx) => (
-                    <Avatar
-                      key={`${group.id}-av-${idx}`}
-                      className="h-7 w-7 ring-2 ring-background"
-                    >
-                      {a.src ? (
-                        <img
-                          src={a.src}
-                          alt={a.name || "User"}
-                          className="h-full w-full object-cover rounded-full"
-                        />
-                      ) : null}
-                      {!a.src ? (
-                        <AvatarFallback className="text-[10px]">
-                          {a.fallback || ""}
-                        </AvatarFallback>
-                      ) : null}
-                    </Avatar>
-                  ))}
-                  {avatarStacks[group.id].extra > 0 && (
-                    <Avatar className="h-7 w-7 ring-2 ring-background">
-                      <AvatarFallback className="text-[10px]">
-                        +{avatarStacks[group.id].extra}
-                      </AvatarFallback>
-                    </Avatar>
-                  )}
+              <div className="relative px-1">
+                <div className="text-sm font-semibold text-foreground pr-14 truncate">
+                  {groupName}
                 </div>
-              ) : null}
+                {dateStr && (
+                  <div className="mt-1 text-xs text-muted-foreground pr-14">
+                    {formatDateShort(dateStr)} · {formatTime(dateStr)}
+                  </div>
+                )}
+                {avatarStacks &&
+                avatarStacks[group.id] &&
+                avatarStacks[group.id].avatars.length > 0 ? (
+                  <div className="absolute right-1 top-1/2 -translate-y-1/2 flex -space-x-2">
+                    {avatarStacks[group.id].avatars.map((a, idx) => (
+                      <Avatar
+                        key={`${group.id}-av-${idx}`}
+                        className="h-7 w-7 ring-2 ring-background"
+                      >
+                        {a.src ? (
+                          <img
+                            src={a.src}
+                            alt={a.name || "User"}
+                            className="h-full w-full object-cover rounded-full"
+                          />
+                        ) : null}
+                        {!a.src ? (
+                          <AvatarFallback className="text-[10px]">
+                            {a.fallback || ""}
+                          </AvatarFallback>
+                        ) : null}
+                      </Avatar>
+                    ))}
+                    {avatarStacks[group.id].extra > 0 && (
+                      <Avatar className="h-7 w-7 ring-2 ring-background">
+                        <AvatarFallback className="text-[10px]">
+                          +{avatarStacks[group.id].extra}
+                        </AvatarFallback>
+                      </Avatar>
+                    )}
+                  </div>
+                ) : null}
+              </div>
             </div>
-          </div>
-        );
-      })}
-      <div className="pr-2.5"></div>
+          );
+        })
+      ) : (
+        <div className="w-full py-8 text-center text-sm text-muted-foreground px-4">
+          No upcoming groups
+        </div>
+      )}
+      <div className="pr-1.5"></div>
     </div>
   );
 }

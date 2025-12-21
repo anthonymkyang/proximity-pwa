@@ -60,7 +60,7 @@ import maplibregl, {
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { createClient } from "@/utils/supabase/client";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import TextareaAutosize from "react-textarea-autosize";
 import ImageEditor from "@/components/images/ImageEditor";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -89,6 +89,15 @@ const resolveAvatarUrl = (raw?: string | null): string | null => {
   return `/api/storage/public/${encodeURIComponent(raw)}`;
 };
 
+const resolveCoverUrl = (raw?: string | null): string | null => {
+  if (!raw) return null;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const normalized = raw.replace(/^\/+/g, "").replace(/^group-media\//i, "");
+  return `/api/groups/storage?bucket=group-media&path=${encodeURIComponent(
+    normalized
+  )}`;
+};
+
 const initialsFrom = (text?: string | null) => {
   if (!text) return "U";
   const trimmed = String(text).trim();
@@ -112,8 +121,12 @@ type GroupCategory = {
 type Person = {
   id: string;
   username: string;
+  profile_title?: string | null;
   avatar_url?: string | null;
 };
+
+const truncatedLabel = (value: string, max = 24) =>
+  value.length > max ? `${value.slice(0, max - 3)}...` : value;
 
 type GroupFormData = {
   title: string;
@@ -135,6 +148,7 @@ type GroupFormData = {
 
 export default function CreateGroupPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const supabase = React.useMemo(() => createClient(), []);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
 
@@ -195,6 +209,10 @@ export default function CreateGroupPage() {
   const [openStartDate, setOpenStartDate] = React.useState(false);
   const [openEndDate, setOpenEndDate] = React.useState(false);
   const [noEndTime, setNoEndTime] = React.useState(false);
+  const [startTimeError, setStartTimeError] = React.useState<string | null>(
+    null
+  );
+  const [endTimeError, setEndTimeError] = React.useState<string | null>(null);
   const mapContainerRef = React.useRef<HTMLDivElement | null>(null);
   const mapRef = React.useRef<MaplibreMap | null>(null);
   const markerRef = React.useRef<maplibregl.Marker | null>(null);
@@ -223,6 +241,43 @@ export default function CreateGroupPage() {
       : "Pick a date";
 
   const pad = (value: number) => String(value).padStart(2, "0");
+
+  const isSameLocalDay = (a?: Date, b?: Date) =>
+    !!a &&
+    !!b &&
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  const getCurrentTime = () => {
+    const now = new Date();
+    const hours = String(now.getHours()).padStart(2, "0");
+    const minutes = String(now.getMinutes()).padStart(2, "0");
+    return `${hours}:${minutes}`;
+  };
+
+  const getMinTimeForStartDate = () => {
+    if (!startDate) return undefined;
+    const now = new Date();
+    const todayAtMidnight = new Date();
+    todayAtMidnight.setHours(0, 0, 0, 0);
+    // If start date is today, return current time, otherwise no minimum
+    if (startDate.getTime() === todayAtMidnight.getTime()) {
+      return getCurrentTime();
+    }
+    return undefined;
+  };
+
+  const getMinTimeForEndDate = () => {
+    if (!endDate || !startDate) return undefined;
+    const todayAtMidnight = new Date();
+    todayAtMidnight.setHours(0, 0, 0, 0);
+    // If end date is same as start date, minimum end time is start time
+    if (endDate.getTime() === startDate.getTime()) {
+      return startTime;
+    }
+    return undefined;
+  };
 
   const toLocalDateTimeString = (date?: Date, time?: string) => {
     if (!date) return "";
@@ -257,8 +312,20 @@ export default function CreateGroupPage() {
   const handleEndDateChange = (date?: Date) => {
     if (noEndTime) return;
     setEndDate(date || undefined);
-    const newValue = toLocalDateTimeString(date, endTime);
-    updateField("end_time", newValue);
+    // If end date is same as start date but end time is before start time, reset it
+    if (
+      date &&
+      startDate &&
+      date.getTime() === startDate.getTime() &&
+      endTime < startTime
+    ) {
+      setEndTime(startTime);
+      const newValue = toLocalDateTimeString(date, startTime);
+      updateField("end_time", newValue);
+    } else {
+      const newValue = toLocalDateTimeString(date, endTime);
+      updateField("end_time", newValue);
+    }
   };
 
   const handleStartTimeChange = (value: string) => {
@@ -328,6 +395,42 @@ export default function CreateGroupPage() {
     }
   };
 
+  // If URL contains an id or step, initialize edit mode and step
+  React.useEffect(() => {
+    const idParam = searchParams.get("id");
+    const stepParam = searchParams.get("step");
+
+    // If no id param exists, clear any stored groupId
+    if (!idParam) {
+      setGroupId(null);
+      // Also clear localStorage if it has a groupId but we're creating a new group
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed.groupId) {
+            const cleaned = { ...parsed };
+            delete cleaned.groupId;
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
+          }
+        }
+      } catch (error) {
+        console.warn("Failed to clean localStorage", error);
+      }
+    } else if (idParam !== groupId) {
+      setGroupId(idParam);
+    }
+
+    if (stepParam) {
+      const n = parseInt(stepParam);
+      if (!isNaN(n)) {
+        const clamped = Math.min(5, Math.max(1, n));
+        setStep(clamped);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   React.useEffect(() => {
     async function loadCategories() {
       try {
@@ -376,7 +479,7 @@ export default function CreateGroupPage() {
 
       const otherIds = Array.from(
         new Set((others || []).map((m: any) => m.user_id))
-      );
+      ).filter((id) => id && id !== me);
       if (!otherIds.length) {
         setCohostSuggestions([]);
         return;
@@ -384,13 +487,14 @@ export default function CreateGroupPage() {
 
       const { data: profiles } = await supabase
         .from("profiles")
-        .select("id, username, avatar_url")
+        .select("id, username, profile_title, avatar_url")
         .in("id", otherIds)
         .limit(60);
 
       const people: Person[] = (profiles || []).map((p: any) => ({
         id: p.id,
         username: p.username || "user",
+        profile_title: p.profile_title || null,
         avatar_url: p.avatar_url || null,
       }));
 
@@ -425,7 +529,7 @@ export default function CreateGroupPage() {
       try {
         const { data } = await supabase
           .from("profiles")
-          .select("id, username, avatar_url")
+          .select("id, username, profile_title, avatar_url")
           .in("id", missing);
         if (cancelled || !data) return;
         setCohostProfiles((prev) => {
@@ -434,6 +538,7 @@ export default function CreateGroupPage() {
             next[p.id] = {
               id: p.id,
               username: p.username || "user",
+              profile_title: p.profile_title || null,
               avatar_url: p.avatar_url || null,
             };
           }
@@ -453,12 +558,15 @@ export default function CreateGroupPage() {
   React.useEffect(() => {
     if (hasHydratedRef.current) return;
 
+    const idParam = searchParams.get("id");
+
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (parsed.step) setStep(parsed.step);
-        if (parsed.formData) {
+        if (parsed.step && idParam) setStep(parsed.step);
+        // Only restore formData if we have an id in the URL params (edit mode)
+        if (parsed.formData && idParam) {
           setFormData((prev) => ({
             ...prev,
             ...parsed.formData,
@@ -473,10 +581,11 @@ export default function CreateGroupPage() {
               : [],
           }));
         }
-        if (parsed.coverImagePreview) {
+        if (parsed.coverImagePreview && idParam) {
           setCoverImagePreview(parsed.coverImagePreview);
         }
-        if (parsed.groupId) {
+        // Only restore groupId if we have an id in the URL params
+        if (parsed.groupId && idParam) {
           setGroupId(parsed.groupId);
         }
       }
@@ -485,7 +594,7 @@ export default function CreateGroupPage() {
     } finally {
       hasHydratedRef.current = true;
     }
-  }, []);
+  }, [searchParams]);
 
   // If we have a saved groupId, hydrate from Supabase
   React.useEffect(() => {
@@ -529,9 +638,8 @@ export default function CreateGroupPage() {
           cohost_ids: Array.isArray(data.cohost_ids) ? data.cohost_ids : [],
         }));
 
-        if (data.cover_image_url && data.cover_image_url.startsWith("http")) {
-          setCoverImagePreview(data.cover_image_url);
-        }
+        const coverUrl = resolveCoverUrl(data.cover_image_url);
+        if (coverUrl) setCoverImagePreview(coverUrl);
       } catch (error) {
         console.warn("Failed to hydrate draft from Supabase", error);
       }
@@ -967,7 +1075,7 @@ export default function CreateGroupPage() {
       // Clear localStorage after successful creation
       localStorage.removeItem(STORAGE_KEY);
 
-      router.push(`/app/activity/groups/manage`);
+      router.push(`/app/activity/groups/manage?tab=Drafts`);
     } catch (error) {
       console.error("Failed to create group", error);
       alert(
@@ -979,12 +1087,74 @@ export default function CreateGroupPage() {
     }
   };
 
+  const validateStep2 = () => {
+    // Validate start time
+    if (!formData.start_time || !startDate) return { valid: false };
+
+    // Check if start time is in the past (when date is today)
+    const now = new Date();
+    if (isSameLocalDay(startDate, now)) {
+      const currentTime = `${String(now.getHours()).padStart(2, "0")}:${String(
+        now.getMinutes()
+      ).padStart(2, "0")}`;
+      if (startTime < currentTime) {
+        return {
+          valid: false,
+          startTimeError: "Event start cannot be in the past",
+        };
+      }
+    }
+
+    // If no end time, we're good
+    if (noEndTime) return { valid: true };
+
+    // Validate end time
+    if (!formData.end_time || !endDate) return { valid: false };
+
+    // Check if end date is before start date
+    if (endDate < startDate) {
+      return {
+        valid: false,
+        endTimeError: "End of session cannot be before it starts",
+      };
+    }
+
+    // Check if end time is before start time (when same day)
+    if (isSameLocalDay(endDate, startDate) && endTime < startTime) {
+      return {
+        valid: false,
+        endTimeError: "End of session cannot be before it starts",
+      };
+    }
+
+    return { valid: true };
+  };
+
+  // Validate step 2 when relevant state changes
+  React.useEffect(() => {
+    if (step !== 2) return;
+    const validation = validateStep2();
+    setStartTimeError(validation.startTimeError || null);
+    setEndTimeError(validation.endTimeError || null);
+  }, [
+    startDate,
+    startTime,
+    endDate,
+    endTime,
+    noEndTime,
+    formData.start_time,
+    formData.end_time,
+    step,
+  ]);
+
   const canProceed = () => {
     switch (step) {
       case 1:
         return formData.title.trim().length >= 3 && formData.category_id;
-      case 2:
-        return formData.start_time;
+      case 2: {
+        const validation = validateStep2();
+        return validation.valid;
+      }
       case 3:
         return true;
       case 4:
@@ -997,13 +1167,15 @@ export default function CreateGroupPage() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-2xl min-h-screen pb-[calc(72px+env(safe-area-inset-bottom))] overflow-hidden">
-      <div className="flex items-center justify-between pb-6">
-        <h1 className="text-3xl font-bold tracking-tight">Create Group</h1>
+    <div className="flex flex-col gap-6 px-4 pb-[calc(72px+env(safe-area-inset-bottom))] overflow-hidden">
+      <div className="flex items-center justify-between">
+        <h1 className="text-4xl font-extrabold tracking-tight">
+          {groupId || searchParams.get("id") ? "Edit Group" : "Create Group"}
+        </h1>
       </div>
 
       {/* Step Indicator */}
-      <div className="mb-6 flex gap-2">
+      <div className="mb-3 flex gap-2">
         {[1, 2, 3, 4, 5].map((s) => (
           <div
             key={s}
@@ -1025,7 +1197,7 @@ export default function CreateGroupPage() {
                 <Button
                   variant="outline"
                   size="icon"
-                  className="rounded-full w-10 h-10"
+                  className="rounded-full w-9 h-9"
                   onClick={() => handleNavigation(() => window.history.back())}
                 >
                   <ArrowLeft className="w-4 h-4" />
@@ -1186,7 +1358,7 @@ export default function CreateGroupPage() {
                 <Button
                   variant="outline"
                   size="icon"
-                  className="rounded-full w-10 h-10"
+                  className="rounded-full w-9 h-9"
                   onClick={() => handleNavigation(() => setStep(step - 1))}
                 >
                   <ArrowLeft className="w-4 h-4" />
@@ -1247,12 +1419,20 @@ export default function CreateGroupPage() {
                       id="start-time"
                       type="time"
                       step="60"
+                      min={getMinTimeForStartDate()}
                       value={startTime}
                       onChange={(e) => handleStartTimeChange(e.target.value)}
-                      className="bg-background appearance-none [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+                      className={`bg-background appearance-none [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none ${
+                        startTimeError ? "border-destructive" : ""
+                      }`}
                     />
                   </div>
                 </div>
+                {startTimeError && (
+                  <p className="text-xs text-destructive px-1">
+                    {startTimeError}
+                  </p>
+                )}
               </div>
 
               <div className="rounded-lg bg-secondary/30 p-4 space-y-3">
@@ -1305,13 +1485,21 @@ export default function CreateGroupPage() {
                       id="end-time"
                       type="time"
                       step="60"
+                      min={getMinTimeForEndDate()}
                       value={endTime}
                       onChange={(e) => handleEndTimeChange(e.target.value)}
-                      className="bg-background appearance-none [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+                      className={`bg-background appearance-none [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none ${
+                        endTimeError ? "border-destructive" : ""
+                      }`}
                       disabled={noEndTime}
                     />
                   </div>
                 </div>
+                {endTimeError && (
+                  <p className="text-xs text-destructive px-1">
+                    {endTimeError}
+                  </p>
+                )}
                 <div className="flex items-center gap-2 pt-1">
                   <Switch
                     id="no-end-time"
@@ -1376,7 +1564,7 @@ export default function CreateGroupPage() {
                 <Button
                   variant="outline"
                   size="icon"
-                  className="rounded-full w-10 h-10"
+                  className="rounded-full w-9 h-9"
                   onClick={() => setStep(step - 1)}
                 >
                   <ArrowLeft className="w-4 h-4" />
@@ -1421,6 +1609,9 @@ export default function CreateGroupPage() {
                   {selectedCohosts.length ? (
                     selectedCohosts.map((person) => {
                       const avatar = resolveAvatarUrl(person.avatar_url);
+                      const rawName =
+                        person.profile_title?.trim() || person.username;
+                      const displayName = truncatedLabel(rawName);
                       return (
                         <button
                           key={person.id}
@@ -1430,15 +1621,13 @@ export default function CreateGroupPage() {
                         >
                           <Avatar className="h-7 w-7">
                             {avatar ? (
-                              <AvatarImage src={avatar} alt={person.username} />
+                              <AvatarImage src={avatar} alt={rawName} />
                             ) : null}
                             <AvatarFallback className="text-[10px]">
-                              {initialsFrom(person.username)}
+                              {initialsFrom(rawName)}
                             </AvatarFallback>
                           </Avatar>
-                          <span className="font-medium">
-                            @{person.username}
-                          </span>
+                          <span className="font-medium">{displayName}</span>
                           <X className="h-3 w-3 text-muted-foreground transition group-hover:text-destructive" />
                         </button>
                       );
@@ -1463,6 +1652,9 @@ export default function CreateGroupPage() {
                     {cohostSuggestions.length ? (
                       cohostSuggestions.slice(0, 14).map((person) => {
                         const avatar = resolveAvatarUrl(person.avatar_url);
+                        const rawName =
+                          person.profile_title?.trim() || person.username;
+                        const displayName = truncatedLabel(rawName);
                         const disabled =
                           (formData.cohost_ids || []).includes(person.id) ||
                           (formData.cohost_ids || []).length >= 3;
@@ -1480,25 +1672,20 @@ export default function CreateGroupPage() {
                           >
                             <Avatar className="h-7 w-7">
                               {avatar ? (
-                                <AvatarImage
-                                  src={avatar}
-                                  alt={person.username}
-                                />
+                                <AvatarImage src={avatar} alt={rawName} />
                               ) : null}
                               <AvatarFallback className="text-[10px]">
-                                {initialsFrom(person.username)}
+                                {initialsFrom(rawName)}
                               </AvatarFallback>
                             </Avatar>
-                            <span className="font-medium">
-                              @{person.username}
-                            </span>
+                            <span className="font-medium">{displayName}</span>
                           </button>
                         );
                       })
                     ) : (
-                      <span className="text-xs text-muted-foreground">
-                        No suggestions available yet.
-                      </span>
+                      <div className="shrink-0 rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                        No suggestions available.
+                      </div>
                     )}
                     <div className="w-0 shrink-0" />
                   </div>
@@ -1661,7 +1848,7 @@ export default function CreateGroupPage() {
                 <Button
                   variant="outline"
                   size="icon"
-                  className="rounded-full w-10 h-10"
+                  className="rounded-full w-9 h-9"
                   onClick={() => setStep(step - 1)}
                 >
                   <ArrowLeft className="w-4 h-4" />
@@ -1769,7 +1956,7 @@ export default function CreateGroupPage() {
                 <Button
                   variant="outline"
                   size="icon"
-                  className="rounded-full w-10 h-10"
+                  className="rounded-full w-9 h-9"
                   onClick={() => setStep(step - 1)}
                 >
                   <ArrowLeft className="w-4 h-4" />

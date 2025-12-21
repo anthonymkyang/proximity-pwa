@@ -8,7 +8,9 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@/components/ui/drawer";
-import Conversation, { type ConversationMessage } from "@/components/messages/Conversation";
+import Conversation, {
+  type ConversationMessage,
+} from "@/components/messages/Conversation";
 import MessageBar from "@/components/messages/MessageBar";
 import { createClient } from "@/utils/supabase/client";
 import { cn } from "@/lib/utils";
@@ -86,7 +88,9 @@ export default function DrawerWalls({
 
   useEffect(() => {
     if (!open || !ownerType || !ownerId) {
-      setMessages(initialMessages && initialMessages.length ? initialMessages : []);
+      setMessages(
+        initialMessages && initialMessages.length ? initialMessages : []
+      );
       setWallId(null);
       setError(null);
       setLoading(false);
@@ -180,7 +184,12 @@ export default function DrawerWalls({
       .channel(`wall-messages-${wallId}`)
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "wall_messages", filter: `wall_id=eq.${wallId}` },
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "wall_messages",
+          filter: `wall_id=eq.${wallId}`,
+        },
         (payload) => {
           const next = mapRowToMessage(payload.new);
           setMessages((prev) => {
@@ -208,7 +217,9 @@ export default function DrawerWalls({
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent className="pb-4">
         <DrawerHeader className="sr-only">
-          <DrawerTitle className="text-lg font-semibold">{headerTitle}</DrawerTitle>
+          <DrawerTitle className="text-lg font-semibold">
+            {headerTitle}
+          </DrawerTitle>
           {subtitle ? (
             <DrawerDescription className="text-sm text-muted-foreground">
               {subtitle}
@@ -253,24 +264,32 @@ export default function DrawerWalls({
                   }
                   setSending(true);
                   setError(null);
-                  supabase
-                    .from("wall_messages")
-                    .insert({
-                      wall_id: wallId,
-                      author_id: currentUserId,
-                      body: input.trim(),
-                    })
-                    .select("id,body,created_at,author_id")
-                    .maybeSingle()
-                    .then(({ data, error: insertError }) => {
+                  (async () => {
+                    try {
+                      const { data, error: insertError } = await supabase
+                        .from("wall_messages")
+                        .insert({
+                          wall_id: wallId,
+                          author_id: currentUserId,
+                          body: input.trim(),
+                        })
+                        .select("id,body,created_at,author_id")
+                        .maybeSingle();
+
                       if (insertError || !data) {
-                        setError(insertError?.message || "Unable to post right now.");
+                        setError(
+                          insertError?.message || "Unable to post right now."
+                        );
                         return;
                       }
                       setMessages((prev) => [...prev, mapRowToMessage(data)]);
                       setInput("");
-                    })
-                    .finally(() => setSending(false));
+                    } catch (err: any) {
+                      setError(err?.message || "Unable to post right now.");
+                    } finally {
+                      setSending(false);
+                    }
+                  })();
                 }}
                 placeholder="Post to this wall…"
                 showShareButton={false}

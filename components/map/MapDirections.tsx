@@ -9,7 +9,12 @@ import {
   DrawerTitle,
 } from "@/components/ui/drawer";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Footprints, BusFront, TrainFront, TrainFrontTunnel } from "lucide-react";
+import {
+  Footprints,
+  BusFront,
+  TrainFront,
+  TrainFrontTunnel,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getLineColor, getContrastingText } from "./MapInstructions";
 
@@ -63,7 +68,7 @@ const formatTime = (iso?: string) => {
 };
 
 const formatFare = (pence?: number) => {
-  if (!Number.isFinite(pence)) return undefined;
+  if (pence === undefined || !Number.isFinite(pence)) return undefined;
   return `£${(pence / 100).toFixed(2)}`;
 };
 
@@ -102,7 +107,9 @@ function JourneyLegChips({ legs }: { legs: Journey["legs"] }) {
         {legs.map((leg, legIdx) => {
           const isBus = leg.mode === "bus";
           const isTubeLike =
-            leg.mode === "tube" || leg.mode === "dlr" || leg.mode === "overground";
+            leg.mode === "tube" ||
+            leg.mode === "dlr" ||
+            leg.mode === "overground";
           const isWalking = leg.mode === "walking" || leg.mode === "walk";
 
           const chip = (() => {
@@ -124,7 +131,9 @@ function JourneyLegChips({ legs }: { legs: Journey["legs"] }) {
 
             if (isWalking) {
               const minsRaw = Number(leg.duration);
-              const mins = Number.isFinite(minsRaw) ? Math.max(1, Math.round(minsRaw)) : null;
+              const mins = Number.isFinite(minsRaw)
+                ? Math.max(1, Math.round(minsRaw))
+                : null;
               return (
                 <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-xs font-semibold text-foreground">
                   {modeIcon(leg.mode)}
@@ -133,39 +142,33 @@ function JourneyLegChips({ legs }: { legs: Journey["legs"] }) {
               );
             }
 
-            return (
-              isBus && leg.route ? (
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">
-                  <span className="inline-flex h-4 w-4 items-center justify-center">
-                    {modeIcon(leg.mode)}
-                  </span>
-                  {leg.route}
-                </span>
-              ) : (
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-background/60 px-2 py-1">
+            return isBus && leg.route ? (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">
+                <span className="inline-flex h-4 w-4 items-center justify-center">
                   {modeIcon(leg.mode)}
-                  {leg.route ? <span>{leg.route}</span> : null}
                 </span>
-              )
+                {leg.route}
+              </span>
+            ) : (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-background/60 px-2 py-1">
+                {modeIcon(leg.mode)}
+                {leg.route ? <span>{leg.route}</span> : null}
+              </span>
             );
           })();
 
-          return (
-            <React.Fragment key={`leg-${legIdx}`}>
-              {chip}
-            </React.Fragment>
-          );
+          return <React.Fragment key={`leg-${legIdx}`}>{chip}</React.Fragment>;
         })}
       </div>
       <div
         className={cn(
-          "pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-background via-background/80 to-transparent transition-opacity",
+          "pointer-events-none absolute inset-y-0 left-0 w-6 bg-linear-to-r from-background via-background/80 to-transparent transition-opacity",
           leftFade ? "opacity-100" : "opacity-0"
         )}
       />
       <div
         className={cn(
-          "pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-background via-background/80 to-transparent transition-opacity",
+          "pointer-events-none absolute inset-y-0 right-0 w-6 bg-linear-to-l from-background via-background/80 to-transparent transition-opacity",
           rightFade ? "opacity-100" : "opacity-0"
         )}
       />
@@ -178,11 +181,7 @@ const modeIcon = (mode: string) => {
   if (mode === "tube" || mode === "dlr" || mode === "overground")
     return (
       <span className="inline-flex h-4 w-4 items-center justify-center">
-        <img
-          src="/icons/tube.svg"
-          alt="Underground"
-          className="h-4 w-4"
-        />
+        <img src="/icons/tube.svg" alt="Underground" className="h-4 w-4" />
       </span>
     );
   if (mode === "national-rail" || mode === "rail")
@@ -267,13 +266,11 @@ export default function MapDirections({
             legs:
               j.legs?.map((leg) => {
                 let legMins: number | undefined;
-                if (typeof leg.duration === "number" && Number.isFinite(leg.duration)) {
+                if (
+                  typeof leg.duration === "number" &&
+                  Number.isFinite(leg.duration)
+                ) {
                   legMins = leg.duration;
-                } else if (leg.departureTime && leg.arrivalTime) {
-                  const dep = new Date(leg.departureTime).getTime();
-                  const arr = new Date(leg.arrivalTime).getTime();
-                  const diff = (arr - dep) / 60000;
-                  if (Number.isFinite(diff)) legMins = diff;
                 }
                 return {
                   mode: leg.mode?.id ?? "walk",
@@ -286,7 +283,10 @@ export default function MapDirections({
         setStatus("idle");
       } catch (err: any) {
         setStatus("error");
-        setError(err?.message ?? "Unable to fetch directions right now. Please try again.");
+        setError(
+          err?.message ??
+            "Unable to fetch directions right now. Please try again."
+        );
       }
     };
 
@@ -306,10 +306,7 @@ export default function MapDirections({
       return (
         <div className="space-y-3 px-4 pb-4">
           {[1, 2, 3].map((i) => (
-            <div
-              key={i}
-              className="rounded-2xl bg-muted/20 p-3 shadow-inner"
-            >
+            <div key={i} className="rounded-2xl bg-muted/20 p-3 shadow-inner">
               <div className="flex items-center gap-3">
                 <Skeleton className="h-6 w-10" />
                 <div className="flex-1 space-y-2">
