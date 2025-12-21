@@ -219,6 +219,7 @@ export default function GroupPage() {
 
   const [requesting, setRequesting] = React.useState(false);
   const [requested, setRequested] = React.useState(false);
+  const [requestStatus, setRequestStatus] = React.useState<string | null>(null);
   const [mounted, setMounted] = React.useState(false);
   React.useEffect(() => setMounted(true), []);
   const [requestOpen, setRequestOpen] = React.useState(false);
@@ -428,11 +429,21 @@ export default function GroupPage() {
 
         if (!cancelled && attendeeRows) {
           setAttendees(attendeeRows as any);
-          if (currentUserId) {
-            const mine = (attendeeRows as any[]).find(
-              (r) => r.user_id === currentUserId
-            );
-            const st = String(mine?.status || "").toLowerCase();
+        }
+
+        if (currentUserId && !cancelled) {
+          const { data: myStatusRow, error: myStatusErr } = await supabase
+            .from("group_attendees")
+            .select("status")
+            .eq("group_id", groupId as string)
+            .eq("user_id", currentUserId)
+            .maybeSingle();
+
+          if (myStatusErr) {
+            console.error("[group page] status query error", myStatusErr);
+          } else {
+            const st = String(myStatusRow?.status || "").toLowerCase() || null;
+            setRequestStatus(st);
             setAccepted(st === "approved" || st === "accepted");
             setRequested(
               st === "approved" || st === "accepted" || st === "pending"
@@ -476,6 +487,7 @@ export default function GroupPage() {
           ? ((data as any).status as string).toLowerCase()
           : null;
 
+      setRequestStatus(status);
       setRequested(true);
       if (status === "accepted" || status === "approved") {
         setAccepted(true);
@@ -514,6 +526,7 @@ export default function GroupPage() {
       setHosts((prev) => prev.filter((h) => h.user_id !== currentUserId));
       setAccepted(false);
       setRequested(false);
+      setRequestStatus(null);
       setLeaveOpen(false);
       setLeaveMsg("");
     } catch (e: any) {
@@ -846,15 +859,36 @@ export default function GroupPage() {
                         Cancelled
                       </Badge>
                     ) : (
-                      <Button
-                        variant={requested ? "secondary" : "outline"}
-                        size="sm"
-                        className="shrink-0 text-xs h-8"
-                        onClick={() => setRequestOpen(true)}
-                        disabled={requested}
-                      >
-                        {requested ? "Requested invite" : "Ask to join"}
-                      </Button>
+                      <>
+                        {requestStatus === "approved" ||
+                        requestStatus === "accepted" ? (
+                          <Badge
+                            variant="secondary"
+                            className="text-xs whitespace-nowrap shrink-0 h-8 grid place-items-center px-2"
+                          >
+                            Attending
+                          </Badge>
+                        ) : requestStatus === "declined" ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="shrink-0 text-xs h-8"
+                            onClick={() => setRequestOpen(true)}
+                          >
+                            Re-request
+                          </Button>
+                        ) : (
+                          <Button
+                            variant={requested ? "secondary" : "outline"}
+                            size="sm"
+                            className="shrink-0 text-xs h-8"
+                            onClick={() => setRequestOpen(true)}
+                            disabled={requested}
+                          >
+                            {requested ? "Requested invite" : "Ask to join"}
+                          </Button>
+                        )}
+                      </>
                     )
                   ) : isHost ? (
                     <Button

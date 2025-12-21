@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-// One-time migration endpoint to add 'link' message type
+// One-time migration endpoint to add 'link' and 'group' message types
 // Access via: POST /api/admin/migrate-link-type
 
 export async function POST(req: NextRequest) {
@@ -31,9 +31,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Add new constraint with 'link' type
+    // Add new constraint with 'link' + 'group' types
     const { error: addError } = await supabase.rpc("exec_sql", {
-      sql: "ALTER TABLE messages ADD CONSTRAINT messages_message_type_check CHECK (message_type IN ('text', 'location', 'link'));",
+      sql: "ALTER TABLE messages ADD CONSTRAINT messages_message_type_check CHECK (message_type IN ('text', 'location', 'link', 'group'));",
     });
 
     if (addError) {

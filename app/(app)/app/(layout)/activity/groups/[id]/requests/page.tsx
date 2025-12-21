@@ -32,6 +32,7 @@ import {
   ItemContent,
   ItemTitle,
   ItemDescription,
+  ItemActions,
 } from "@/components/ui/item";
 import { CheckCircle2, UserX2, Clock, CalendarClock } from "lucide-react";
 
@@ -329,7 +330,11 @@ export default function GroupRequestsPage() {
     };
   }, [groupId, supabase]);
 
-  async function handleDecision(userId: string, action: "accept" | "decline") {
+  async function handleDecision(
+    userId: string,
+    action: "accept" | "decline",
+    notifyAction?: "approved" | "declined" | "removed"
+  ) {
     if (!groupId || !currentUserId) return;
     setBusyUserId(userId);
     try {
@@ -348,7 +353,7 @@ export default function GroupRequestsPage() {
           .eq("group_id", groupId)
           .eq("user_id", userId);
 
-        if (error) throw error;
+      if (error) throw error;
       }
       // Update local state to reflect new status and move between tabs
       setRows((prev) =>
@@ -361,6 +366,18 @@ export default function GroupRequestsPage() {
             : r
         )
       );
+      try {
+        await fetch(`/api/groups/${groupId}/attendees/notify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId,
+            action:
+              notifyAction ??
+              (action === "accept" ? "approved" : "declined"),
+          }),
+        });
+      } catch {}
     } catch (e) {
       console.error("handleDecision error", e);
     } finally {
@@ -543,15 +560,14 @@ export default function GroupRequestsPage() {
                     row.profile?.profile_title || row.profile?.name || "Guest";
                   const avatarSrc = row.profile?.avatar_url ?? null;
                   const created = formatTime(row.created_at);
+                  const canRespond = activeTab === "Requests";
+                  const canReview = activeTab === "Declined";
+                  const canRemove = activeTab === "Approved";
 
                   return (
                     <Item
                       key={row.user_id}
-                      className="items-start cursor-pointer bg-secondary/60"
-                      onClick={() => {
-                        setSelectedRequest(row);
-                        setDrawerOpen(true);
-                      }}
+                      className="items-start bg-secondary/60"
                     >
                       <ItemMedia>
                         <Avatar className="h-10 w-10">
@@ -566,8 +582,8 @@ export default function GroupRequestsPage() {
                           </AvatarFallback>
                         </Avatar>
                       </ItemMedia>
-                      <ItemContent>
-                        <ItemTitle>{name}</ItemTitle>
+                      <ItemContent className="min-w-0">
+                        <ItemTitle className="truncate">{name}</ItemTitle>
                         <ItemDescription className="text-xs text-muted-foreground mt-1">
                           {[
                             calculateAge(row.profile?.date_of_birth || null) &&
@@ -581,6 +597,24 @@ export default function GroupRequestsPage() {
                             .join(" · ") || "No stats for this profile."}
                         </ItemDescription>
                       </ItemContent>
+                      {canRespond || canReview || canRemove ? (
+                        <ItemActions>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => {
+                              setSelectedRequest(row);
+                              setDrawerOpen(true);
+                            }}
+                          >
+                            {canRemove
+                              ? "Remove"
+                              : canReview
+                              ? "Review"
+                              : "Respond"}
+                          </Button>
+                        </ItemActions>
+                      ) : null}
                     </Item>
                   );
                 })}
@@ -657,7 +691,11 @@ export default function GroupRequestsPage() {
                 className="flex-1"
                 disabled={busyUserId === selectedRequest.user_id}
                 onClick={async () => {
-                  await handleDecision(selectedRequest.user_id, "decline");
+                  await handleDecision(
+                    selectedRequest.user_id,
+                    "decline",
+                    "removed"
+                  );
                   setDrawerOpen(false);
                 }}
               >

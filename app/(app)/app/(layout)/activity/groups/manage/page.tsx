@@ -12,6 +12,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
+} from "@/components/ui/drawer";
+import {
   Item,
   ItemActions,
   ItemContent,
@@ -39,6 +47,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { Archive } from "lucide-react";
 
@@ -73,6 +82,7 @@ type ExtendedGroup = GroupRow & {
   coverUrl: string | null;
   attendeesPreview: Attendee[];
   attendeesExtra: number;
+  pendingRequests: number;
 };
 
 type SupaClient = ReturnType<typeof createClient>;
@@ -268,6 +278,71 @@ export default function ManageGroupsPage() {
   const [notificationsOpen, setNotificationsOpen] = React.useState(false);
   const [notifications, setNotifications] = React.useState<any[] | null>(null);
   const [notificationsLoading, setNotificationsLoading] = React.useState(false);
+  const [leaveDrawerOpen, setLeaveDrawerOpen] = React.useState(false);
+  const [leaveTarget, setLeaveTarget] = React.useState<ExtendedGroup | null>(
+    null
+  );
+  const [leaveMessage, setLeaveMessage] = React.useState("");
+  const [leaving, setLeaving] = React.useState(false);
+
+  const managedGroupIds = React.useMemo(() => {
+    const ids = [...hostingGroups, ...cohostingGroups]
+      .map((g) => g.id)
+      .filter(Boolean);
+    return Array.from(new Set(ids));
+  }, [hostingGroups, cohostingGroups]);
+
+  const applyPendingCounts = React.useCallback(
+    (counts: Record<string, number>) => {
+      setHostingGroups((prev) =>
+        prev.map((g) => ({
+          ...g,
+          pendingRequests: counts[g.id] ?? 0,
+        }))
+      );
+      setCohostingGroups((prev) =>
+        prev.map((g) => ({
+          ...g,
+          pendingRequests: counts[g.id] ?? 0,
+        }))
+      );
+    },
+    []
+  );
+
+  const getGroupTitle = React.useCallback(
+    (groupId: string) => {
+      const group =
+        hostingGroups.find((g) => g.id === groupId) ||
+        cohostingGroups.find((g) => g.id === groupId);
+      return group?.title || "a group";
+    },
+    [hostingGroups, cohostingGroups]
+  );
+
+  const bumpPendingCount = React.useCallback((groupId: string, delta: number) => {
+    if (!groupId || !Number.isFinite(delta) || delta === 0) return;
+    setHostingGroups((prev) =>
+      prev.map((g) =>
+        g.id === groupId
+          ? {
+              ...g,
+              pendingRequests: Math.max(0, (g.pendingRequests ?? 0) + delta),
+            }
+          : g
+      )
+    );
+    setCohostingGroups((prev) =>
+      prev.map((g) =>
+        g.id === groupId
+          ? {
+              ...g,
+              pendingRequests: Math.max(0, (g.pendingRequests ?? 0) + delta),
+            }
+          : g
+      )
+    );
+  }, []);
 
   const handleDelete = async (groupId: string) => {
     if (!groupId) return;
@@ -282,6 +357,65 @@ export default function ManageGroupsPage() {
       setAttendingGroups((prev) => prev.filter((g) => g.id !== groupId));
     }
     setPendingDeleteId(null);
+  };
+
+  const buildLeaveMessage = React.useCallback(
+    (group: ExtendedGroup) => {
+      const title = group.title || "this group";
+      const when = fmtWhen(
+        group.start_time as any,
+        group.end_time as any,
+        false
+      );
+      if (!when || when === "TBC") {
+        return `Sorry, I can no longer make it to ${title}.`;
+      }
+      const needsOn =
+        typeof when === "string" &&
+        !when.startsWith("Today") &&
+        !when.startsWith("Tomorrow");
+      return `Sorry, I can no longer make it to ${title}${
+        needsOn ? " on" : ""
+      } ${when}.`;
+    },
+    []
+  );
+
+  const openLeaveDrawer = React.useCallback(
+    (group: ExtendedGroup) => {
+      setLeaveTarget(group);
+      setLeaveMessage(buildLeaveMessage(group));
+      setLeaveDrawerOpen(true);
+    },
+    [buildLeaveMessage]
+  );
+
+  const handleLeaveGroup = async () => {
+    if (!leaveTarget?.id || leaving) return;
+    const message = leaveMessage.trim();
+    setLeaving(true);
+    try {
+      const res = await fetch(`/api/groups/${leaveTarget.id}/attendees/leave`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: message.length ? message : null }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to leave group");
+      }
+      toast.success("Left group");
+      setAttendingGroups((prev) =>
+        prev.filter((g) => g.id !== leaveTarget.id)
+      );
+      setLeaveDrawerOpen(false);
+      setLeaveTarget(null);
+      setLeaveMessage("");
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to leave group");
+    } finally {
+      setLeaving(false);
+    }
   };
 
   const openDeleteDialog = (groupId: string) => {
@@ -414,6 +548,63 @@ export default function ManageGroupsPage() {
           (categories ?? []).map((c: CategoryRow) => [c.id, c.name])
         );
 
+        // 1) Groups you are hosting
+        const { data: hostRows, error: hostErr } = await supabase
+          .from("groups")
+          .select(
+            "id, title, category_id, start_time, end_time, location_text, postcode, cover_image_url, is_public, attendee_count, status"
+          )
+          .eq("host_id", user.id)
+          .is("deleted_at", null)
+          .order("updated_at", { ascending: false });
+
+        if (hostErr) {
+          console.error("[groups/manage] load host groups error", hostErr);
+        }
+
+        // 2) Groups you are co-hosting
+        const { data: cohostRows, error: cohostErr } = await supabase
+          .from("groups")
+          .select(
+            "id, title, category_id, start_time, end_time, location_text, postcode, cover_image_url, is_public, attendee_count, status, cohost_ids"
+          )
+          .contains("cohost_ids", [user.id])
+          .is("deleted_at", null)
+          .order("updated_at", { ascending: false });
+
+        if (cohostErr) {
+          console.error("[groups/manage] load cohost groups error", cohostErr);
+        }
+
+        const pendingCounts: Record<string, number> = {};
+        const pendingGroupIds = Array.from(
+          new Set([
+            ...(hostRows ?? []).map((g: any) => g.id),
+            ...(cohostRows ?? []).map((g: any) => g.id),
+          ])
+        ).filter(Boolean);
+
+        if (pendingGroupIds.length) {
+          const { data: pendingRows, error: pendingErr } = await supabase
+            .from("group_attendees")
+            .select("group_id")
+            .in("group_id", pendingGroupIds)
+            .eq("status", "pending");
+
+          if (pendingErr) {
+            console.error(
+              "[groups/manage] load pending requests error",
+              pendingErr
+            );
+          } else {
+            (pendingRows ?? []).forEach((row: any) => {
+              const id = row?.group_id ? String(row.group_id) : null;
+              if (!id) return;
+              pendingCounts[id] = (pendingCounts[id] ?? 0) + 1;
+            });
+          }
+        }
+
         // Helper to enrich a raw group row into ExtendedGroup
         const enrichGroup = async (g: GroupRow): Promise<ExtendedGroup> => {
           console.log("[cover debug]", g.id, g.cover_image_url);
@@ -430,40 +621,13 @@ export default function ManageGroupsPage() {
             coverUrl,
             attendeesPreview: attendees,
             attendeesExtra: extra,
+            pendingRequests: pendingCounts[String(g.id)] ?? 0,
           };
         };
-
-        // 1) Groups you are hosting
-        const { data: hostRows, error: hostErr } = await supabase
-          .from("groups")
-          .select(
-            "id, title, category_id, start_time, end_time, location_text, postcode, cover_image_url, is_public, attendee_count, status"
-          )
-          .eq("host_id", user.id)
-          .is("deleted_at", null)
-          .order("updated_at", { ascending: false });
-
-        if (hostErr) {
-          console.error("[groups/manage] load host groups error", hostErr);
-        }
 
         const hostingEnriched: ExtendedGroup[] = await Promise.all(
           (hostRows ?? []).map((g: GroupRow) => enrichGroup(g))
         );
-
-        // 2) Groups you are co-hosting
-        const { data: cohostRows, error: cohostErr } = await supabase
-          .from("groups")
-          .select(
-            "id, title, category_id, start_time, end_time, location_text, postcode, cover_image_url, is_public, attendee_count, status, cohost_ids"
-          )
-          .contains("cohost_ids", [user.id])
-          .is("deleted_at", null)
-          .order("updated_at", { ascending: false });
-
-        if (cohostErr) {
-          console.error("[groups/manage] load cohost groups error", cohostErr);
-        }
 
         const cohostingEnriched: ExtendedGroup[] = await Promise.all(
           (cohostRows ?? []).map((g: any) =>
@@ -558,6 +722,88 @@ export default function ManageGroupsPage() {
       cancelled = true;
     };
   }, [supabase]);
+
+  React.useEffect(() => {
+    if (!userId || managedGroupIds.length === 0) return;
+
+    const refreshPendingCounts = async () => {
+      const { data, error } = await supabase
+        .from("group_attendees")
+        .select("group_id")
+        .in("group_id", managedGroupIds)
+        .eq("status", "pending");
+
+      if (error) {
+        console.error("[groups/manage] refresh pending requests error", error);
+        return;
+      }
+
+      const counts: Record<string, number> = {};
+      (data ?? []).forEach((row: any) => {
+        const id = row?.group_id ? String(row.group_id) : null;
+        if (!id) return;
+        counts[id] = (counts[id] ?? 0) + 1;
+      });
+      applyPendingCounts(counts);
+    };
+
+    const channel = supabase
+      .channel(`group-attendees-pending-${userId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "group_attendees",
+          filter: `group_id=in.(${managedGroupIds.join(",")})`,
+        },
+        (payload) => {
+          const eventType = payload.eventType;
+          if (eventType === "INSERT") {
+            const row = payload.new as any;
+            if (row?.status === "pending" && row?.group_id) {
+              bumpPendingCount(String(row.group_id), 1);
+              toast.success(
+                `New join request for ${getGroupTitle(String(row.group_id))}`
+              );
+              return;
+            }
+          } else if (eventType === "DELETE") {
+            const row = payload.old as any;
+            if (row?.status === "pending" && row?.group_id) {
+              bumpPendingCount(String(row.group_id), -1);
+              return;
+            }
+          } else if (eventType === "UPDATE") {
+            const next = payload.new as any;
+            const prev = payload.old as any;
+            const nextPending = next?.status === "pending";
+            const prevPending = prev?.status === "pending";
+            if (prev?.group_id && prevPending && !nextPending) {
+              bumpPendingCount(String(prev.group_id), -1);
+              return;
+            }
+            if (next?.group_id && nextPending && !prevPending) {
+              bumpPendingCount(String(next.group_id), 1);
+              return;
+            }
+          }
+
+          void refreshPendingCounts();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [
+    supabase,
+    userId,
+    managedGroupIds,
+    applyPendingCounts,
+    bumpPendingCount,
+  ]);
 
   const handlePublish = async (id: string) => {
     try {
@@ -888,8 +1134,14 @@ export default function ManageGroupsPage() {
                                     <DropdownMenuItem asChild>
                                       <Link
                                         href={`/app/activity/groups/${g.id}/requests`}
+                                        className="flex items-center gap-2"
                                       >
-                                        Requests
+                                        <span>Requests</span>
+                                        {g.pendingRequests > 0 ? (
+                                          <span className="ml-auto inline-flex min-w-[18px] items-center justify-center rounded-full bg-foreground px-1.5 py-0.5 text-[10px] font-semibold leading-none text-background">
+                                            {g.pendingRequests}
+                                          </span>
+                                        ) : null}
                                       </Link>
                                     </DropdownMenuItem>
                                     <DropdownMenuSeparator />
@@ -1080,8 +1332,14 @@ export default function ManageGroupsPage() {
                                     <DropdownMenuItem asChild>
                                       <Link
                                         href={`/app/activity/groups/${g.id}/requests`}
+                                        className="flex items-center gap-2"
                                       >
-                                        Requests
+                                        <span>Requests</span>
+                                        {g.pendingRequests > 0 ? (
+                                          <span className="ml-auto inline-flex min-w-[18px] items-center justify-center rounded-full bg-foreground px-1.5 py-0.5 text-[10px] font-semibold leading-none text-background">
+                                            {g.pendingRequests}
+                                          </span>
+                                        ) : null}
                                       </Link>
                                     </DropdownMenuItem>
                                     <DropdownMenuSeparator />
@@ -1137,8 +1395,8 @@ export default function ManageGroupsPage() {
                           </div>
                         )}
                       </ItemMedia>
-                      <ItemContent>
-                        <ItemTitle className="flex items-center gap-2">
+                      <ItemContent className="min-w-0">
+                        <ItemTitle className="flex items-center gap-2 min-w-0">
                           <span className="truncate">
                             {g.title || "Untitled"}
                           </span>
@@ -1224,9 +1482,14 @@ export default function ManageGroupsPage() {
                                 View
                               </Link>
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={openNotifications}>
-                              Notifications
-                            </DropdownMenuItem>
+                            {activeTab === "Active" ? (
+                              <DropdownMenuItem
+                                onClick={() => openLeaveDrawer(g)}
+                                className="text-destructive focus:text-destructive"
+                              >
+                                Leave group
+                              </DropdownMenuItem>
+                            ) : null}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </ItemActions>
@@ -1623,6 +1886,44 @@ export default function ManageGroupsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <Drawer
+        open={leaveDrawerOpen}
+        onOpenChange={(open) => {
+          setLeaveDrawerOpen(open);
+          if (!open) {
+            setLeaveTarget(null);
+            setLeaveMessage("");
+          }
+        }}
+      >
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>Leave group</DrawerTitle>
+            <DrawerDescription>
+              Send a message to the host and co-hosts.
+            </DrawerDescription>
+          </DrawerHeader>
+          <div className="px-4">
+            <div className="rounded-lg bg-card/60 shadow-none p-3">
+              <Textarea
+                value={leaveMessage}
+                onChange={(e) => setLeaveMessage(e.target.value)}
+                placeholder="Write a short message…"
+                rows={4}
+              />
+            </div>
+          </div>
+          <DrawerFooter className="px-4 pb-4">
+            <Button
+              variant="destructive"
+              onClick={handleLeaveGroup}
+              disabled={leaving}
+            >
+              {leaving ? "Leaving…" : "Leave group"}
+            </Button>
+          </DrawerFooter>
+        </DrawerContent>
+      </Drawer>
     </>
   );
 }

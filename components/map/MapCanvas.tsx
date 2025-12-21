@@ -104,6 +104,153 @@ const formatTime = (timeStr: string | null | undefined) => {
   const paddedMinutes = minutes.toString().padStart(2, "0");
   return `${hour12}:${paddedMinutes}${suffix}`;
 };
+
+const formatGroupDateTime = (
+  start?: string | null,
+  end?: string | null
+) => {
+  if (!start) return null;
+  const startDate = new Date(start);
+  if (isNaN(startDate.getTime())) return null;
+  const now = new Date();
+  const startOfDay = (d: Date) =>
+    new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const dayDiff = Math.round(
+    (startOfDay(startDate).getTime() - startOfDay(now).getTime()) / 86_400_000
+  );
+  let dateLabel: string;
+  if (dayDiff === 0) {
+    dateLabel = "Today";
+  } else if (dayDiff === 1) {
+    dateLabel = "Tomorrow";
+  } else if (dayDiff > 1 && dayDiff <= 7) {
+    dateLabel = startDate.toLocaleDateString("en-US", { weekday: "long" });
+  } else {
+    dateLabel = startDate.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    });
+  }
+  const timeLabel = formatClock(startDate);
+  let label = `${dateLabel} · ${timeLabel}`;
+
+  if (end) {
+    const endDate = new Date(end);
+    if (!isNaN(endDate.getTime())) {
+      const endTimeLabel = formatClock(endDate);
+      const sameDay =
+        startDate.getFullYear() === endDate.getFullYear() &&
+        startDate.getMonth() === endDate.getMonth() &&
+        startDate.getDate() === endDate.getDate();
+      if (sameDay) {
+        label = `${label} - ${endTimeLabel}`;
+      } else {
+        const endDateLabel = endDate.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+        });
+        label = `${label} - ${endDateLabel} ${endTimeLabel}`;
+      }
+    }
+  }
+
+  return label;
+};
+
+const getGroupTimingBadge = (start?: string | null, end?: string | null) => {
+  if (!start) return null;
+  const startDate = new Date(start);
+  if (isNaN(startDate.getTime())) return null;
+  const now = new Date();
+  const cutoff = getCutoffTime(startDate, end);
+  const msUntilEnd = cutoff.getTime() - now.getTime();
+  if (msUntilEnd <= 0) return null;
+
+  const msUntilStart = startDate.getTime() - now.getTime();
+  if (msUntilStart > 0 && msUntilStart <= 60 * 60 * 1000) {
+    return "Starting soon";
+  }
+  if (msUntilStart <= 0 && msUntilEnd <= 30 * 60 * 1000) {
+    return "Ending soon";
+  }
+  return null;
+};
+
+const TEN_MINUTES_MS = 10 * 60 * 1000;
+const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
+const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+
+const getCutoffTime = (start: Date, endValue?: unknown) => {
+  const endTs =
+    typeof endValue === "string" ? Date.parse(endValue) : Number.NaN;
+  const nextMidnight = new Date(start);
+  nextMidnight.setHours(24, 0, 0, 0);
+  if (Number.isFinite(endTs) && endTs > start.getTime()) {
+    const end = new Date(endTs);
+    return end < nextMidnight ? end : nextMidnight;
+  }
+  return nextMidnight;
+};
+
+const computeGroupLabel = (
+  startValue: unknown,
+  endValue?: unknown
+): string | null | "__HIDE__" => {
+  if (!startValue) return null;
+  const startTs =
+    typeof startValue === "string" ? Date.parse(startValue) : Number.NaN;
+  if (!Number.isFinite(startTs)) return null;
+
+  const start = new Date(startTs);
+  const now = new Date();
+  const cutoff = getCutoffTime(start, endValue);
+  const msUntilEnd = cutoff.getTime() - now.getTime();
+
+  if (msUntilEnd <= 0) return "__HIDE__";
+  if (now.getTime() >= startTs) {
+    if (msUntilEnd <= FIFTEEN_MINUTES_MS) return "Ending soon";
+    return "Now";
+  }
+
+  const msUntilStart = startTs - now.getTime();
+  if (msUntilStart <= TEN_MINUTES_MS) return "Starting soon";
+  if (msUntilStart < 60 * 60 * 1000) {
+    const mins = Math.ceil(msUntilStart / 60_000);
+    const rounded = Math.max(15, Math.floor(mins / 15) * 15);
+    return `${rounded} mins`;
+  }
+  if (msUntilStart <= FOUR_HOURS_MS) {
+    const hours = Math.max(1, Math.round(msUntilStart / 3_600_000));
+    return `${hours} hour${hours === 1 ? "" : "s"}`;
+  }
+
+  const startOfDay = (d: Date) =>
+    new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+
+  const dayDiff = Math.round(
+    (startOfDay(start) - startOfDay(now)) / 86_400_000
+  );
+
+  if (dayDiff < 0 || dayDiff > 7) return "__HIDE__";
+  if (dayDiff === 0) return `At ${formatClock(start)}`;
+  if (dayDiff === 1) return "Tomorrow";
+  if (dayDiff >= 2 && dayDiff <= 7) {
+    return start.toLocaleDateString("en-US", { weekday: "long" });
+  }
+
+  return null;
+};
+
+const isGroupVisible = (group: any) => {
+  const now = new Date();
+  const startValue = group?.start_time || group?.nextDate;
+  if (!startValue) return true;
+  const start =
+    typeof startValue === "string" ? new Date(startValue) : new Date(Number.NaN);
+  if (isNaN(start.getTime())) return true;
+  const cutoff = getCutoffTime(start, group?.end_time);
+  return now < cutoff;
+};
 const sanitizeFeatures = (
   fc: GeoJSON.FeatureCollection
 ): GeoJSON.FeatureCollection => {
@@ -856,6 +1003,7 @@ export default function MapCanvas() {
       id: string;
       title: string;
       nextDate: string | null;
+      end_time?: string | null;
       categoryName?: string | null;
       location_lat: number | null;
       location_lng: number | null;
@@ -868,6 +1016,7 @@ export default function MapCanvas() {
       id: string;
       title: string;
       start_time: string | null;
+      end_time?: string | null;
       categoryName?: string | null;
       location_lat: number | null;
       location_lng: number | null;
@@ -1016,12 +1165,15 @@ export default function MapCanvas() {
   const [showCruisingDrawer, setShowCruisingDrawer] = useState(false);
   const [showWallDrawer, setShowWallDrawer] = useState(false);
   const [groupCoords, setGroupCoords] = useState<[number, number] | null>(null);
+  const [groupChatAllowed, setGroupChatAllowed] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<{
     id: string;
     title: string;
     categoryName: string | null;
     whenLabel: string | null;
     peopleCount: number | null;
+    start_time: string | null;
+    end_time: string | null;
     coords: [number, number] | null;
   } | null>(null);
   const [selectedCruising, setSelectedCruising] = useState<{
@@ -1557,6 +1709,61 @@ export default function MapCanvas() {
   }, [currentUserId]);
 
   useEffect(() => {
+    if (!selectedGroup?.id || !currentUserId) {
+      setGroupChatAllowed(false);
+      return;
+    }
+
+    let active = true;
+    const supabase = createClient();
+
+    const checkAccess = async () => {
+      const { data: groupRow, error: groupErr } = await supabase
+        .from("groups")
+        .select("host_id, cohost_ids")
+        .eq("id", selectedGroup.id)
+        .maybeSingle();
+
+      if (!active) return;
+
+      if (!groupErr && groupRow) {
+        const cohosts = Array.isArray(groupRow.cohost_ids)
+          ? groupRow.cohost_ids.map((id: any) => String(id))
+          : [];
+        if (
+          groupRow.host_id === currentUserId ||
+          cohosts.includes(currentUserId)
+        ) {
+          setGroupChatAllowed(true);
+          return;
+        }
+      }
+
+      const { data: attendeeRow, error: attendeeErr } = await supabase
+        .from("group_attendees")
+        .select("status")
+        .eq("group_id", selectedGroup.id)
+        .eq("user_id", currentUserId)
+        .in("status", ["accepted", "approved"])
+        .maybeSingle();
+
+      if (!active) return;
+      if (attendeeErr) {
+        setGroupChatAllowed(false);
+        return;
+      }
+
+      const st = String(attendeeRow?.status || "").toLowerCase();
+      setGroupChatAllowed(st === "accepted" || st === "approved");
+    };
+
+    void checkAccess();
+    return () => {
+      active = false;
+    };
+  }, [selectedGroup?.id, currentUserId]);
+
+  useEffect(() => {
     selfIdRef.current = currentUserId ?? null;
   }, [currentUserId]);
 
@@ -1657,279 +1864,149 @@ export default function MapCanvas() {
 
   useEffect(() => {
     let active = true;
-    fetch("/api/groups/activity")
-      .then((res) => res.json())
-      .then((data) => {
+
+    const applyGroupData = (data: any) => {
+      const peopleCounts: Record<string, number> =
+        data && typeof data === "object" && data.peopleCounts
+          ? (data.peopleCounts as Record<string, number>)
+          : {};
+
+      const groups = (data.groups ?? [])
+        .filter(
+          (g: any) =>
+            g?.membershipStatus === "hosting" && g?.status === "active"
+        )
+        .map((g: any) => {
+          const lat = Number(g?.location_lat);
+          const lng = Number(g?.location_lng);
+          const whenLabel = computeGroupLabel(g?.nextDate, g?.end_time);
+          if (whenLabel === "__HIDE__") return null;
+          if (!isGroupVisible(g)) return null;
+          return {
+            id: String(g.id),
+            title: g.title || g.name || "Unnamed Group",
+            nextDate: g.nextDate || null,
+            end_time: g.end_time || null,
+            categoryName: g.categoryName ?? null,
+            location_lat: Number.isFinite(lat) ? lat : null,
+            location_lng: Number.isFinite(lng) ? lng : null,
+            peopleCount: Number(peopleCounts?.[String(g.id)] ?? 0),
+            whenLabel: typeof whenLabel === "string" ? whenLabel : null,
+          };
+        })
+        .filter(Boolean)
+        .filter(
+          (g: any) =>
+            g.location_lat != null &&
+            g.location_lng != null &&
+            Number.isFinite(g.location_lat) &&
+            Number.isFinite(g.location_lng)
+        );
+      setUserGroups(groups);
+
+      const listings = (data.listings ?? [])
+        .filter((g: any) => g?.status === "active")
+        .map((g: any) => {
+          const lat = Number(g?.location_lat);
+          const lng = Number(g?.location_lng);
+          const whenLabel = computeGroupLabel(g?.start_time, g?.end_time);
+          if (whenLabel === "__HIDE__") return null;
+          if (!isGroupVisible(g)) return null;
+          return {
+            id: String(g.id),
+            title: g.name || g.title || "Untitled group",
+            start_time: g.start_time || null,
+            end_time: g.end_time || null,
+            categoryName: g.categoryName ?? null,
+            location_lat: Number.isFinite(lat) ? lat : null,
+            location_lng: Number.isFinite(lng) ? lng : null,
+            peopleCount: Number(peopleCounts?.[String(g.id)] ?? 0),
+            whenLabel: typeof whenLabel === "string" ? whenLabel : null,
+          };
+        })
+        .filter(Boolean)
+        .filter(
+          (g: any) =>
+            g.location_lat != null &&
+            g.location_lng != null &&
+            Number.isFinite(g.location_lat) &&
+            Number.isFinite(g.location_lng)
+        );
+      setActiveGroupListings(listings);
+    };
+
+    const loadGroups = async () => {
+      try {
+        const res = await fetch("/api/groups/activity");
+        if (!res.ok) return;
+        const data = await res.json();
         if (!active) return;
+        applyGroupData(data);
+      } catch {}
+    };
 
-        // Make formatClock available for all usages in this file (true top-level scope)
-        function formatClock(d: Date) {
-          const h = d.getHours();
-          const m = d.getMinutes();
-          const hour12 = ((h + 11) % 12) + 1;
-          const suffix = h >= 12 ? "pm" : "am";
-          if (m === 0) return `${hour12}${suffix}`;
-          return `${hour12}:${String(m).padStart(2, "0")}${suffix}`;
+    void loadGroups();
+
+    const interval = setInterval(loadGroups, 60 * 1000);
+    const supabase = createClient();
+    const channel = supabase
+      .channel("groups-activity-map")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "groups" },
+        () => {
+          void loadGroups();
         }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "group_attendees" },
+        () => {
+          void loadGroups();
+        }
+      )
+      .subscribe();
 
-        // Returns label string, null for "no badge", or "__HIDE__" to omit marker (>4 days away).
-        // Compute label for when the group is happening
-        const computeWhenLabel = (
-          value: unknown
-        ): string | null | "__HIDE__" => {
-          if (!value) return null;
-          const ts = typeof value === "string" ? Date.parse(value) : Number.NaN;
-          if (!Number.isFinite(ts)) return null;
-          const when = new Date(ts);
-          const now = new Date();
-
-          const startOfDay = (d: Date) =>
-            new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-
-          const dayDiff = Math.round(
-            (startOfDay(when) - startOfDay(now)) / 86_400_000
-          );
-
-          // Show groups only up to 7 days ahead (not before today)
-          if (dayDiff < 0 || dayDiff > 7) return "__HIDE__";
-
-          if (dayDiff === 0) {
-            const msUntil = ts - now.getTime();
-            if (msUntil <= 0) return "Today";
-            if (msUntil <= 4 * 60 * 60 * 1000) {
-              if (msUntil < 60 * 60 * 1000) {
-                const mins = Math.max(1, Math.ceil(msUntil / 60_000));
-                return `In ${mins} min${mins === 1 ? "" : "s"}`;
-              }
-              const hrs = Math.max(1, Math.ceil(msUntil / 3_600_000));
-              return `In ${hrs} hour${hrs === 1 ? "" : "s"}`;
-            }
-            return `At ${formatClock(when)}`;
-          }
-
-          if (dayDiff === 1) return "Tomorrow";
-          if (dayDiff >= 2 && dayDiff <= 7) {
-            return when.toLocaleDateString("en-US", { weekday: "long" });
-          }
-
-          // Past or out of range
-          return null;
-        };
-
-        const peopleCounts: Record<string, number> =
-          data && typeof data === "object" && data.peopleCounts
-            ? (data.peopleCounts as Record<string, number>)
-            : {};
-        // Helper to determine if a group should be visible (not expired)
-        const isGroupVisible = (group: any) => {
-          const now = new Date();
-          // Remove group at end_time or 12am next day, whichever comes first
-          let endTime = group?.end_time ? new Date(group.end_time) : null;
-          if (!endTime || isNaN(endTime.getTime())) return true; // If no end_time, fallback to visible
-          // Compute 12am the day after start_time
-          let nextMidnight = null;
-          if (group?.start_time || group?.nextDate) {
-            const start = new Date(group.start_time || group.nextDate);
-            if (!isNaN(start.getTime())) {
-              nextMidnight = new Date(start);
-              nextMidnight.setHours(24, 0, 0, 0);
-            }
-          }
-          const cutoff =
-            nextMidnight && endTime > nextMidnight ? nextMidnight : endTime;
-          return now < cutoff;
-        };
-
-        const groups = (data.groups ?? [])
-          .filter(
-            (g: any) =>
-              g?.membershipStatus === "hosting" && g?.status === "active"
-          )
-          .map((g: any) => {
-            const lat = Number(g?.location_lat);
-            const lng = Number(g?.location_lng);
-            const whenLabel = computeWhenLabel(g?.nextDate);
-            if (whenLabel === "__HIDE__") return null;
-            if (!isGroupVisible(g)) return null;
-            return {
-              id: String(g.id),
-              title: g.title || g.name || "Unnamed Group",
-              nextDate: g.nextDate || null,
-              end_time: g.end_time || null,
-              categoryName: g.categoryName ?? null,
-              location_lat: Number.isFinite(lat) ? lat : null,
-              location_lng: Number.isFinite(lng) ? lng : null,
-              peopleCount: Number(peopleCounts?.[String(g.id)] ?? 0),
-              whenLabel: typeof whenLabel === "string" ? whenLabel : null,
-            };
-          })
-          .filter(Boolean)
-          .filter(
-            (g: any) =>
-              g.location_lat != null &&
-              g.location_lng != null &&
-              Number.isFinite(g.location_lat) &&
-              Number.isFinite(g.location_lng)
-          );
-        setUserGroups(groups);
-
-        const listings = (data.listings ?? [])
-          .filter((g: any) => g?.status === "active")
-          .map((g: any) => {
-            const lat = Number(g?.location_lat);
-            const lng = Number(g?.location_lng);
-            const whenLabel = computeWhenLabel(g?.start_time);
-            if (whenLabel === "__HIDE__") return null;
-            if (!isGroupVisible(g)) return null;
-            return {
-              id: String(g.id),
-              title: g.name || g.title || "Untitled group",
-              start_time: g.start_time || null,
-              end_time: g.end_time || null,
-              categoryName: g.categoryName ?? null,
-              location_lat: Number.isFinite(lat) ? lat : null,
-              location_lng: Number.isFinite(lng) ? lng : null,
-              peopleCount: Number(peopleCounts?.[String(g.id)] ?? 0),
-              whenLabel: typeof whenLabel === "string" ? whenLabel : null,
-            };
-          })
-          .filter(Boolean)
-          .filter(
-            (g: any) =>
-              g.location_lat != null &&
-              g.location_lng != null &&
-              Number.isFinite(g.location_lat) &&
-              Number.isFinite(g.location_lng)
-          );
-        setActiveGroupListings(listings);
-      })
-      .catch(() => {});
     return () => {
       active = false;
+      clearInterval(interval);
+      supabase.removeChannel(channel);
     };
-    // Poll every minute for real-time removal of expired groups
+  }, []);
+
+  useEffect(() => {
     const interval = setInterval(() => {
-      fetch("/api/groups/activity")
-        .then((res) => res.json())
-        .then((data) => {
-          // (Repeat the same logic as above for filtering)
-          const peopleCounts: Record<string, number> =
-            data && typeof data === "object" && data.peopleCounts
-              ? (data.peopleCounts as Record<string, number>)
-              : {};
-          const isGroupVisible = (group: any) => {
-            const now = new Date();
-            let endTime = group?.end_time ? new Date(group.end_time) : null;
-            if (!endTime || isNaN(endTime.getTime())) return true;
-            let nextMidnight = null;
-            if (group?.start_time || group?.nextDate) {
-              const start = new Date(group.start_time || group.nextDate);
-              if (!isNaN(start.getTime())) {
-                nextMidnight = new Date(start);
-                nextMidnight.setHours(24, 0, 0, 0);
-              }
-            }
-            const cutoff =
-              nextMidnight && endTime > nextMidnight ? nextMidnight : endTime;
-            return now < cutoff;
-          };
-          const computeWhenLabel = (
-            value: unknown
-          ): string | null | "__HIDE__" => {
-            if (!value) return null;
-            const ts =
-              typeof value === "string" ? Date.parse(value) : Number.NaN;
-            if (!Number.isFinite(ts)) return null;
-            const when = new Date(ts);
-            const now = new Date();
-            const startOfDay = (d: Date) =>
-              new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-            const dayDiff = Math.round(
-              (startOfDay(when) - startOfDay(now)) / 86_400_000
+      setUserGroups((prev) =>
+        prev
+          .map((group) => {
+            const whenLabel = computeGroupLabel(group.nextDate, group.end_time);
+            if (whenLabel === "__HIDE__") return null;
+            if (!isGroupVisible(group)) return null;
+            return {
+              ...group,
+              whenLabel: typeof whenLabel === "string" ? whenLabel : null,
+            };
+          })
+          .filter(Boolean) as typeof prev
+      );
+      setActiveGroupListings((prev) =>
+        prev
+          .map((group) => {
+            const whenLabel = computeGroupLabel(
+              group.start_time,
+              group.end_time
             );
-            if (dayDiff < 0 || dayDiff > 7) return "__HIDE__";
-            if (dayDiff === 0) {
-              const msUntil = ts - now.getTime();
-              if (msUntil <= 0) return "Today";
-              if (msUntil <= 4 * 60 * 60 * 1000) {
-                if (msUntil < 60 * 60 * 1000) {
-                  const mins = Math.max(1, Math.ceil(msUntil / 60_000));
-                  return `In ${mins} min${mins === 1 ? "" : "s"}`;
-                }
-                const hrs = Math.max(1, Math.ceil(msUntil / 3_600_000));
-                return `In ${hrs} hour${hrs === 1 ? "" : "s"}`;
-              }
-              return `At ${formatClock(when)}`;
-            }
-            if (dayDiff === 1) return "Tomorrow";
-            if (dayDiff >= 2 && dayDiff <= 7) {
-              return when.toLocaleDateString("en-US", { weekday: "long" });
-            }
-            return null;
-          };
-          const groups = (data.groups ?? [])
-            .filter(
-              (g: any) =>
-                g?.membershipStatus === "hosting" && g?.status === "active"
-            )
-            .map((g: any) => {
-              const lat = Number(g?.location_lat);
-              const lng = Number(g?.location_lng);
-              const whenLabel = computeWhenLabel(g?.nextDate);
-              if (whenLabel === "__HIDE__") return null;
-              if (!isGroupVisible(g)) return null;
-              return {
-                id: String(g.id),
-                title: g.title || g.name || "Unnamed Group",
-                nextDate: g.nextDate || null,
-                end_time: g.end_time || null,
-                categoryName: g.categoryName ?? null,
-                location_lat: Number.isFinite(lat) ? lat : null,
-                location_lng: Number.isFinite(lng) ? lng : null,
-                peopleCount: Number(peopleCounts?.[String(g.id)] ?? 0),
-                whenLabel: typeof whenLabel === "string" ? whenLabel : null,
-              };
-            })
-            .filter(Boolean)
-            .filter(
-              (g: any) =>
-                g.location_lat != null &&
-                g.location_lng != null &&
-                Number.isFinite(g.location_lat) &&
-                Number.isFinite(g.location_lng)
-            );
-          setUserGroups(groups);
-          const listings = (data.listings ?? [])
-            .filter((g: any) => g?.status === "active")
-            .map((g: any) => {
-              const lat = Number(g?.location_lat);
-              const lng = Number(g?.location_lng);
-              const whenLabel = computeWhenLabel(g?.start_time);
-              if (whenLabel === "__HIDE__") return null;
-              if (!isGroupVisible(g)) return null;
-              return {
-                id: String(g.id),
-                title: g.name || g.title || "Untitled group",
-                start_time: g.start_time || null,
-                end_time: g.end_time || null,
-                categoryName: g.categoryName ?? null,
-                location_lat: Number.isFinite(lat) ? lat : null,
-                location_lng: Number.isFinite(lng) ? lng : null,
-                peopleCount: Number(peopleCounts?.[String(g.id)] ?? 0),
-                whenLabel: typeof whenLabel === "string" ? whenLabel : null,
-              };
-            })
-            .filter(Boolean)
-            .filter(
-              (g: any) =>
-                g.location_lat != null &&
-                g.location_lng != null &&
-                Number.isFinite(g.location_lat) &&
-                Number.isFinite(g.location_lng)
-            );
-          setActiveGroupListings(listings);
-        });
-    }, 60 * 1000); // 1 minute
+            if (whenLabel === "__HIDE__") return null;
+            if (!isGroupVisible(group)) return null;
+            return {
+              ...group,
+              whenLabel: typeof whenLabel === "string" ? whenLabel : null,
+            };
+          })
+          .filter(Boolean) as typeof prev
+      );
+    }, 60 * 1000);
+
     return () => clearInterval(interval);
   }, []);
 
@@ -2066,7 +2143,7 @@ export default function MapCanvas() {
       if (!entry) {
         const container = document.createElement("div");
         container.className =
-          "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
+          "pointer-events-auto scale-90 opacity-0 transition-all duration-300 ease-out drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
         const root = createRoot(container);
         const marker = new maplibregl.Marker({
           element: container,
@@ -2074,6 +2151,10 @@ export default function MapCanvas() {
         });
         entry = { marker, root };
         groupMarkers.set(group.id, entry);
+        requestAnimationFrame(() => {
+          container.classList.remove("opacity-0", "scale-90");
+          container.classList.add("opacity-100", "scale-100");
+        });
       }
 
       entry.root.render(
@@ -2101,6 +2182,8 @@ export default function MapCanvas() {
                 Number.isFinite(group.peopleCount)
                   ? group.peopleCount
                   : null,
+              start_time: group.nextDate ?? null,
+              end_time: group.end_time ?? null,
               coords,
             });
             setGroupCoords(coords);
@@ -2140,7 +2223,7 @@ export default function MapCanvas() {
       if (!entry) {
         const container = document.createElement("div");
         container.className =
-          "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
+          "pointer-events-auto scale-90 opacity-0 transition-all duration-300 ease-out drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
         const root = createRoot(container);
         const marker = new maplibregl.Marker({
           element: container,
@@ -2148,6 +2231,10 @@ export default function MapCanvas() {
         });
         entry = { marker, root };
         listingMarkers.set(group.id, entry);
+        requestAnimationFrame(() => {
+          container.classList.remove("opacity-0", "scale-90");
+          container.classList.add("opacity-100", "scale-100");
+        });
       }
 
       entry.root.render(
@@ -2175,6 +2262,8 @@ export default function MapCanvas() {
                 Number.isFinite(group.peopleCount)
                   ? group.peopleCount
                   : null,
+              start_time: group.start_time ?? null,
+              end_time: group.end_time ?? null,
               coords,
             });
             setGroupCoords(coords);
@@ -3161,6 +3250,36 @@ export default function MapCanvas() {
                 </span>
               </div>
             ) : null}
+            {selectedGroup?.start_time ? (
+              <div className="mt-2 flex flex-col items-center gap-1 text-sm text-muted-foreground">
+                <span>
+                  {formatGroupDateTime(
+                    selectedGroup.start_time,
+                    selectedGroup.end_time
+                  )}
+                </span>
+                {getGroupTimingBadge(
+                  selectedGroup.start_time,
+                  selectedGroup.end_time
+                ) ? (
+                  <span
+                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                      getGroupTimingBadge(
+                        selectedGroup.start_time,
+                        selectedGroup.end_time
+                      ) === "Starting soon"
+                        ? "bg-emerald-500/20 text-emerald-700"
+                        : "bg-amber-500/20 text-amber-700"
+                    }`}
+                  >
+                    {getGroupTimingBadge(
+                      selectedGroup.start_time,
+                      selectedGroup.end_time
+                    )}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
           </DrawerHeader>
           <div className="grid grid-cols-3 gap-3 px-4 pb-2">
             <>
@@ -3179,21 +3298,23 @@ export default function MapCanvas() {
                 <UsersRound className="h-5 w-5 text-foreground" />
                 <span>View</span>
               </Link>
-              <Link
-                href={
-                  selectedGroup?.id
-                    ? `/app/activity/groups/${selectedGroup.id}/chat`
-                    : "#"
-                }
-                className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground"
-                prefetch={false}
-                onClick={() => {
-                  setShowGroupDrawer(false);
-                }}
-              >
-                <MessageCircle className="h-5 w-5 text-foreground" />
-                <span>Chat</span>
-              </Link>
+              {groupChatAllowed ? (
+                <Link
+                  href={
+                    selectedGroup?.id
+                      ? `/app/activity/groups/${selectedGroup.id}/chat`
+                      : "#"
+                  }
+                  className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground"
+                  prefetch={false}
+                  onClick={() => {
+                    setShowGroupDrawer(false);
+                  }}
+                >
+                  <MessageCircle className="h-5 w-5 text-foreground" />
+                  <span>Chat</span>
+                </Link>
+              ) : null}
               <div
                 className="flex flex-col items-center gap-2 rounded-2xl bg-muted/20 p-4 text-sm font-semibold text-foreground"
                 onClick={() => {

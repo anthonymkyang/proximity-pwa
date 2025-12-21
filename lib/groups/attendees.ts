@@ -1,5 +1,6 @@
 // lib/groups/attendees.ts
 import { createClient } from "@/utils/supabase/server";
+import { getOrCreateDirectConversation } from "@/lib/messages/messages";
 
 type RequestToJoinInput = {
   groupId: string;
@@ -10,6 +11,62 @@ type LeaveGroupInput = {
   groupId: string;
   message: string | null;
 };
+
+type SendGroupMessageInput = {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  senderId: string;
+  recipientIds: string[];
+  groupId: string;
+  groupTitle: string;
+  action: "request" | "left";
+  messageText: string;
+  messageNote?: string | null;
+};
+
+async function sendGroupMessages({
+  supabase,
+  senderId,
+  recipientIds,
+  groupId,
+  groupTitle,
+  action,
+  messageText,
+  messageNote,
+}: SendGroupMessageInput) {
+  const nowIso = new Date().toISOString();
+  for (const recipientId of recipientIds) {
+    try {
+      const conversationId = await getOrCreateDirectConversation(
+        senderId,
+        recipientId
+      );
+      const { error: msgErr } = await supabase.from("messages").insert({
+        conversation_id: conversationId,
+        sender_id: senderId,
+        body: messageText,
+        message_type: "group",
+        metadata: {
+          group: {
+            id: groupId,
+            title: groupTitle,
+            action,
+            message: messageNote ?? null,
+          },
+        },
+      });
+      if (msgErr) {
+        console.warn("[sendGroupMessages] message insert failed", msgErr);
+        continue;
+      }
+      await supabase
+        .from("conversations")
+        .update({ updated_at: nowIso, last_message: messageText })
+        .eq("id", conversationId);
+    } catch (err) {
+      console.warn("[sendGroupMessages] notify message failed", err);
+    }
+  }
+}
 
 export async function requestToJoinGroup({
   groupId,
@@ -32,7 +89,7 @@ export async function requestToJoinGroup({
   // 2. Fetch group, basic checks
   const { data: group, error: groupErr } = await supabase
     .from("groups")
-    .select("id, host_id, cohost_ids, status")
+    .select("id, host_id, cohost_ids, status, title")
     .eq("id", groupId)
     .maybeSingle();
 
@@ -43,12 +100,12 @@ export async function requestToJoinGroup({
     throw new Error("Group not found.");
   }
 
-  const cohostIds: string[] = Array.isArray(group.cohost_ids)
+  const cohostIdsForRole: string[] = Array.isArray(group.cohost_ids)
     ? (group.cohost_ids as string[])
     : [];
 
   const isHost = group.host_id === userId;
-  const isCohost = cohostIds.includes(userId);
+  const isCohost = cohostIdsForRole.includes(userId);
 
   if (isHost || isCohost) {
     throw new Error("You are already hosting this group.");
@@ -115,6 +172,38 @@ export async function requestToJoinGroup({
     throw new Error("Failed to create invite request.");
   }
 
+  const groupTitle = group.title || "Group";
+  const requestNote =
+    typeof message === "string" && message.trim().length > 0
+      ? message.trim().slice(0, 1000)
+      : null;
+  const requestText = requestNote
+    ? `Request to join ${groupTitle}: ${requestNote}`
+    : `Request to join ${groupTitle}.`;
+
+  const recipients = new Set<string>();
+  if (group.host_id) recipients.add(String(group.host_id));
+  const cohostIdsForRecipients: string[] = Array.isArray(group.cohost_ids)
+    ? (group.cohost_ids as string[])
+    : [];
+  cohostIdsForRecipients.forEach((id) => {
+    if (id) recipients.add(String(id));
+  });
+  recipients.delete(userId);
+
+  if (recipients.size > 0) {
+    await sendGroupMessages({
+      supabase,
+      senderId: userId,
+      recipientIds: Array.from(recipients),
+      groupId,
+      groupTitle,
+      action: "request",
+      messageText: requestText,
+      messageNote: requestNote,
+    });
+  }
+
   return inserted;
 }
 
@@ -143,7 +232,7 @@ export async function leaveGroupWithMessage({
   // 2. Ensure group exists, basic host info
   const { data: group, error: groupErr } = await supabase
     .from("groups")
-    .select("id, host_id, cohost_ids")
+    .select("id, host_id, cohost_ids, title, start_time, end_time")
     .eq("id", groupId)
     .maybeSingle();
 
@@ -179,6 +268,47 @@ export async function leaveGroupWithMessage({
       ? message.trim().slice(0, 1000)
       : null;
 
+  const formatWhen = (iso?: string | null) => {
+    if (!iso) return null;
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return null;
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const dateOnly = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const timeText = d.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    if (dateOnly.getTime() === today.getTime()) {
+      return `Today at ${timeText}`;
+    }
+    if (dateOnly.getTime() === tomorrow.getTime()) {
+      return `Tomorrow at ${timeText}`;
+    }
+    return d.toLocaleString("en-US", {
+      weekday: "long",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  };
+
+  const groupTitle = group.title || "this group";
+  const whenText = formatWhen(group.start_time);
+  const needsOn =
+    typeof whenText === "string" &&
+    !whenText.startsWith("Today") &&
+    !whenText.startsWith("Tomorrow");
+  const fallbackMessage = whenText
+    ? `Sorry, I can no longer make it to ${groupTitle}${
+        needsOn ? " on" : ""
+      } ${whenText}.`
+    : `Sorry, I can no longer make it to ${groupTitle}.`;
+  const messageText = trimmedMessage || fallbackMessage;
+
   const { error: notifErr } = await supabase
     .from("group_notifications")
     .insert({
@@ -193,6 +323,29 @@ export async function leaveGroupWithMessage({
 
   if (notifErr) {
     throw new Error("Failed to record leave notification.");
+  }
+
+  const recipientIds = new Set<string>();
+  if (group.host_id) recipientIds.add(String(group.host_id));
+  const cohostIds: string[] = Array.isArray(group.cohost_ids)
+    ? (group.cohost_ids as string[])
+    : [];
+  cohostIds.forEach((id) => {
+    if (id) recipientIds.add(String(id));
+  });
+  recipientIds.delete(userId);
+
+  if (recipientIds.size > 0) {
+    await sendGroupMessages({
+      supabase,
+      senderId: userId,
+      recipientIds: Array.from(recipientIds),
+      groupId,
+      groupTitle,
+      action: "left",
+      messageText,
+      messageNote: messageText,
+    });
   }
 
   // 5. Remove them from the attendee list

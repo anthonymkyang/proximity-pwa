@@ -325,16 +325,18 @@ export async function GET() {
 
     let listings: ListingGroup[] = [];
     try {
-      // Only include groups with start_time between now and 7 days ahead
+      // Include in-progress groups and those starting within the next 7 days
       const now = new Date();
       const sevenDaysAhead = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
       const { data: listingRows, error: listingsErr } = await supabase
         .from("groups")
         .select(
           "id, title, start_time, end_time, cover_image_url, is_public, status, live, host_id, cohost_ids, location_lat, location_lng, group_categories(name), profiles!groups_host_id_fkey(name, profile_title, avatar_url)"
         )
-        .gte("start_time", now.toISOString())
+        .gte("start_time", yesterday.toISOString())
         .lte("start_time", sevenDaysAhead.toISOString())
+        .eq("status", "active")
         .limit(30);
 
       if (listingsErr) {

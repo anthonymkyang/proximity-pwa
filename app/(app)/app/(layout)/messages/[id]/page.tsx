@@ -132,7 +132,7 @@ type Message = {
     profile_title?: string | null;
     avatar_url?: string | null;
   } | null;
-  message_type?: "text" | "location" | "link" | null;
+  message_type?: "text" | "location" | "link" | "group" | null;
   metadata?: {
     location?: {
       lat: number;
@@ -146,6 +146,12 @@ type Message = {
       image?: string;
       siteName?: string;
       favicon?: string;
+    };
+    group?: {
+      id: string;
+      title?: string | null;
+      action?: string | null;
+      message?: string | null;
     };
   } | null;
 };
@@ -339,6 +345,91 @@ function LinkPreview({
           </p>
         </div>
       </div>
+    </div>
+  );
+}
+
+function GroupMessageCard({
+  group,
+  isMe,
+}: {
+  group: {
+    id: string;
+    title?: string | null;
+    action?: string | null;
+    message?: string | null;
+  };
+  isMe?: boolean;
+}) {
+  const action = String(group.action || "").toLowerCase();
+  const actionLabel =
+    action === "request"
+      ? "Request to join"
+      : action === "approved"
+      ? "Approved"
+      : action === "removed"
+      ? "Removed"
+      : action === "declined"
+      ? "Declined"
+      : action === "left"
+      ? "Left group"
+      : "Group update";
+  const title = group.title || "Group";
+  const message =
+    typeof group.message === "string" && group.message.trim().length
+      ? group.message.trim()
+      : null;
+  const showRequestsLink = action === "request";
+
+  return (
+    <div
+      className={`rounded-lg border p-3 ${
+        isMe ? "border-white/25 bg-white/10" : "border-border bg-background/70"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <p
+          className={`text-[10px] uppercase tracking-wide ${
+            isMe ? "text-white/70" : "text-muted-foreground"
+          }`}
+        >
+          {actionLabel}
+        </p>
+        <div className="flex items-center gap-2">
+          {showRequestsLink ? (
+            <Link
+              href={`/app/activity/groups/${group.id}/requests`}
+              className={`text-[10px] font-semibold rounded-full border px-2 py-0.5 ${
+                isMe
+                  ? "border-white/30 text-white"
+                  : "border-border text-foreground"
+              }`}
+            >
+              Review
+            </Link>
+          ) : null}
+          <Link
+            href={`/app/activity/groups/${group.id}`}
+            className={`text-[10px] font-semibold ${
+              isMe ? "text-white" : "text-foreground"
+            }`}
+          >
+            View
+          </Link>
+        </div>
+      </div>
+      <p className={`mt-1 text-sm font-semibold ${isMe ? "text-white" : ""}`}>
+        {title}
+      </p>
+      {message ? (
+        <p
+          className={`mt-1 text-xs whitespace-pre-wrap ${
+            isMe ? "text-white/80" : "text-muted-foreground"
+          }`}
+        >
+          {message}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -3664,7 +3755,9 @@ export default function ConversationPage() {
               ) : (
                 <div
                   className={`relative rounded-lg ${
-                    m.message_type === "location" || m.message_type === "link"
+                    m.message_type === "location" ||
+                    m.message_type === "link" ||
+                    m.message_type === "group"
                       ? "p-2 w-[75%] sm:w-[65%] lg:w-[55%]"
                       : "px-3 py-2 max-w-[75%] sm:max-w-[65%] lg:max-w-[55%]"
                   } ${
@@ -3717,8 +3810,16 @@ export default function ConversationPage() {
                     </div>
                   ) : null}
 
-                  {/* Link message content */}
-                  {m.message_type === "link" && m.metadata?.link ? (
+                  {/* Group message content */}
+                  {m.message_type === "group" && m.metadata?.group ? (
+                    <div className="w-full">
+                      <GroupMessageCard
+                        group={m.metadata.group}
+                        isMe={isMe}
+                      />
+                    </div>
+                  ) : /* Link message content */
+                  m.message_type === "link" && m.metadata?.link ? (
                     <div className="w-full">
                       <LinkPreview
                         link={m.metadata.link}
