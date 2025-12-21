@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
 export const dynamic = "force-dynamic";
 
 import { revalidatePath } from "next/cache";
@@ -119,7 +120,7 @@ export async function publishGroup(
   if (nextStatus === "active") {
     const { data: g, error: fetchErr } = await supabase
       .from("groups")
-      .select("start_time, end_time")
+      .select("start_time, end_time, host_id, cohost_ids, title")
       .eq("id", groupId)
       .maybeSingle();
 
@@ -139,6 +140,62 @@ export async function publishGroup(
       throw new Error(
         "Publishing failed: start/finish time requirements are not met. The finish time must be after the start time."
       );
+    }
+
+    // Best-effort: create a group conversation and add members
+    try {
+      const hostId = g?.host_id ? String(g.host_id) : null;
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      const admin =
+        hostId && supabaseUrl && serviceKey
+          ? createAdminClient(supabaseUrl, serviceKey)
+          : null;
+
+      if (admin && hostId) {
+        const groupTitle = g?.title || "Group";
+        const cohostIds: string[] = Array.isArray(g?.cohost_ids)
+          ? g?.cohost_ids.map((id: any) => String(id))
+          : [];
+        const conversationId = groupId;
+
+        await admin.from("conversations").upsert(
+          {
+            id: conversationId,
+            type: "group",
+            name: groupTitle,
+            created_by: hostId,
+          },
+          { onConflict: "id" }
+        );
+
+        const { data: attendeeRows } = await admin
+          .from("group_attendees")
+          .select("user_id")
+          .eq("group_id", groupId)
+          .in("status", ["accepted", "approved"]);
+
+        const memberIds = new Set<string>();
+        memberIds.add(hostId);
+        cohostIds.forEach((id) => {
+          if (id) memberIds.add(id);
+        });
+        (attendeeRows ?? []).forEach((row: any) => {
+          if (row?.user_id) memberIds.add(String(row.user_id));
+        });
+
+        const rows = Array.from(memberIds).map((userId) => ({
+          conversation_id: conversationId,
+          user_id: userId,
+          role: userId === hostId ? "host" : "member",
+        }));
+
+        await admin
+          .from("conversation_members")
+          .upsert(rows, { onConflict: "conversation_id,user_id" });
+      }
+    } catch (err) {
+      console.warn("[groups/actions] group chat create failed", err);
     }
   }
 

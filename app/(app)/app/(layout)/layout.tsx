@@ -45,7 +45,7 @@ export default function ShellLayout({
 
   return (
     <div className={containerClasses}>
-      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col">
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
         {!hideTopBar && (
           <div className={removePadding ? "px-4" : ""}>
             <TopBar

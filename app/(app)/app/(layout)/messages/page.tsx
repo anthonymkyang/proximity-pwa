@@ -12,6 +12,7 @@ import {
   AlertTriangle,
   Check,
   CheckCheck,
+  Lock,
 } from "lucide-react";
 import GlassButton from "@/components/ui/header-button";
 import {
@@ -23,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Badge24 } from "@/components/shadcn-studio/badge/badge-24";
 import { StatusBadge } from "@/components/status/Badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,7 +50,7 @@ import {
 // -----------------------------------------------------------------------------
 // LOCAL MOCK
 // -----------------------------------------------------------------------------
-const filters = ["All", "Unread", "Favourites", "Groups", "Cruising"] as const;
+const filters = ["All", "Unread", "Favourites", "Groups", "+ Add"] as const;
 
 // shape coming back from Supabase (normalised)
 type DBConversation = {
@@ -64,7 +66,26 @@ type DBConversation = {
   unreadCount?: number;
   presence?: "online" | "away" | "recent" | null;
   secondary?: string | null;
+  isGroup?: boolean;
 };
+
+function getConversationTime(convo: DBConversation) {
+  const raw = convo.updated_at ?? convo.lastMessageAt ?? null;
+  if (!raw) return 0;
+  const ts = new Date(raw).getTime();
+  return Number.isNaN(ts) ? 0 : ts;
+}
+
+function sortConversations(convos: DBConversation[]) {
+  return [...convos].sort((a, b) => getConversationTime(b) - getConversationTime(a));
+}
+
+function resolveCoverUrl(path?: string | null): string | null {
+  if (!path) return null;
+  const s = String(path);
+  if (s.startsWith("http://") || s.startsWith("https://")) return s;
+  return `/api/groups/storage?path=${encodeURIComponent(s.replace(/^\/+/, ""))}`;
+}
 
 // -----------------------------------------------------------------------------
 // REUSABLE ROW LAYOUT
@@ -232,6 +253,7 @@ export default function MessagesPage() {
   const [connectionNames, setConnectionNames] = useState<
     Record<string, { name?: string | null; profileTitle?: string | null }>
   >({});
+  const [connectionsLoaded, setConnectionsLoaded] = useState(false);
 
   const [rawRows, setRawRows] = useState<any[] | null>(null);
   const convoIdsRef = useRef<Set<string>>(new Set());
@@ -360,7 +382,7 @@ export default function MessagesPage() {
         // 5) we ALSO need the conversation rows (to get name)
         const { data: convoRows, error: convoRowsError } = await supabase
           .from("conversations")
-          .select("id, name")
+          .select("id, name, type")
           .in("id", convoIds);
 
         // If RLS blocks conversations, we still want to render the list using fallbacks.
@@ -373,6 +395,20 @@ export default function MessagesPage() {
         if (convoRows && Array.isArray(convoRows)) {
           for (const c of convoRows) {
             convoById[c.id] = c;
+          }
+        }
+
+        const groupConvoIds = (convoRows ?? [])
+          .filter((c) => String(c.type || "").toLowerCase() === "group")
+          .map((c) => c.id);
+        const groupCoverById: Record<string, string | null> = {};
+        if (groupConvoIds.length) {
+          const { data: groupRows } = await supabase
+            .from("groups")
+            .select("id, cover_image_url")
+            .in("id", groupConvoIds);
+          for (const g of groupRows ?? []) {
+            groupCoverById[g.id] = g.cover_image_url || null;
           }
         }
 
@@ -481,8 +517,11 @@ export default function MessagesPage() {
           const members = byConvo[convoId] ?? [];
           const convoRow = convoById[convoId] ?? null;
           const others = members.filter((m) => m.user_id !== user.id);
-          // group if >2 members (we don't have is_group on this table)
-          const isGroup = members.length > 2;
+          const convoType =
+            typeof convoRow?.type === "string"
+              ? convoRow.type.toLowerCase()
+              : null;
+          const isGroup = convoType === "group" || members.length > 2;
 
           let name: string;
           let secondary: string | null = null;
@@ -496,6 +535,7 @@ export default function MessagesPage() {
               (members.length
                 ? `${members.length} people`
                 : "Group conversation");
+            avatar = resolveCoverUrl(groupCoverById[convoId]);
           } else {
             // 1:1: show the other participant's profile title, NOT their user_id
             const other = others[0];
@@ -556,10 +596,11 @@ export default function MessagesPage() {
             unreadCount: unreadByConvo[convoId] ?? 0,
             presence: effectivePresence,
             secondary,
+            isGroup,
           } as DBConversation;
         });
 
-        setUserConversations(displayConvos);
+        setUserConversations(sortConversations(displayConvos));
         userToConvoRef.current = userToConvo;
         // Build reverse map for overrides
         const convToOther: Record<string, string | null> = {};
@@ -586,6 +627,154 @@ export default function MessagesPage() {
   const realtimeChannelRef = useRef<ReturnType<
     ReturnType<typeof createClient>["channel"]
   > | null>(null);
+
+  async function fetchConversationSummary(
+    convoId: string,
+    userId: string
+  ): Promise<DBConversation | null> {
+    try {
+      const supabase = createClient();
+      const [{ data: convoRow }, { data: memberRows, error: memberError }] =
+        await Promise.all([
+          supabase
+            .from("conversations")
+            .select("id, name, type")
+            .eq("id", convoId)
+            .maybeSingle(),
+          supabase
+            .from("conversation_members")
+            .select("conversation_id, user_id, role, joined_at")
+            .eq("conversation_id", convoId),
+        ]);
+
+      if (memberError) return null;
+      const members = memberRows ?? [];
+      const myMembership = members.find((m) => m.user_id === userId) ?? null;
+      const convoType =
+        typeof convoRow?.type === "string" ? convoRow.type.toLowerCase() : null;
+      const isGroup = convoType === "group" || members.length > 2;
+
+      const { data: latest } = await supabase
+        .from("messages")
+        .select("id, body, conversation_id, sender_id, created_at")
+        .eq("conversation_id", convoId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (latest?.id && latest?.conversation_id) {
+        messageToConvoRef.current[latest.id] = latest.conversation_id;
+        if (latest.sender_id) {
+          messageSenderRef.current[latest.id] = latest.sender_id;
+        }
+      }
+
+      let name = convoRow?.name || "Group conversation";
+      let secondary: string | null = null;
+      let avatar: string | null = null;
+      let presence: "online" | "away" | "recent" | null = null;
+
+      if (!isGroup) {
+        const other = members.find((m) => m.user_id !== userId);
+        const otherId = other?.user_id ?? null;
+        if (otherId) {
+          const { data: otherProfile } = await supabase
+            .from("profiles")
+            .select("id, profile_title, avatar_url")
+            .eq("id", otherId)
+            .maybeSingle();
+          name = otherProfile?.profile_title || "Unknown user";
+          const override = connectionNames[otherId];
+          if (override?.name) {
+            name = override.name || name;
+            secondary = override.profileTitle || null;
+          } else {
+            secondary = otherProfile?.profile_title || null;
+          }
+          avatar = otherProfile?.avatar_url ?? null;
+          const entry = presenceCtx?.[otherId];
+          presence = entry ? toUiPresence(entry as any) : null;
+          if (!userToConvoRef.current[otherId]) {
+            userToConvoRef.current[otherId] = [];
+          }
+          if (!userToConvoRef.current[otherId].includes(convoId)) {
+            userToConvoRef.current[otherId].push(convoId);
+          }
+          convoToOtherRef.current[convoId] = otherId;
+        }
+      } else {
+        name =
+          convoRow?.name ||
+          (members.length ? `${members.length} people` : "Group conversation");
+        const { data: groupRow } = await supabase
+          .from("groups")
+          .select("cover_image_url")
+          .eq("id", convoId)
+          .maybeSingle();
+        avatar = resolveCoverUrl(groupRow?.cover_image_url ?? null);
+      }
+
+      let unreadCount = 0;
+      if (latest && latest.sender_id !== userId) {
+        const { data: convoMsgs } = await supabase
+          .from("messages")
+          .select("id, sender_id")
+          .eq("conversation_id", convoId)
+          .neq("sender_id", userId);
+        const msgIds = (convoMsgs ?? []).map((m) => m.id);
+        if (msgIds.length) {
+          const { data: readRecs } = await supabase
+            .from("message_receipts")
+            .select("message_id, read_at")
+            .in("message_id", msgIds)
+            .eq("user_id", userId)
+            .not("read_at", "is", null);
+          const readById = new Set(
+            (readRecs ?? []).map((r) => r.message_id)
+          );
+          unreadCount = msgIds.filter((id) => !readById.has(id)).length;
+        }
+      }
+
+      let lastReceipt: { delivered_at: string | null; read_at: string | null } | null =
+        null;
+      if (!isGroup && latest && latest.sender_id === userId) {
+        const otherId = convoToOtherRef.current[convoId];
+        if (otherId) {
+          const { data: receiptRow } = await supabase
+            .from("message_receipts")
+            .select("delivered_at, read_at")
+            .eq("message_id", latest.id)
+            .eq("user_id", otherId)
+            .maybeSingle();
+          if (receiptRow) {
+            lastReceipt = {
+              delivered_at: receiptRow.delivered_at ?? null,
+              read_at: receiptRow.read_at ?? null,
+            };
+          }
+        }
+      }
+
+      return {
+        id: convoId,
+        name,
+        avatar,
+        lastMessage: latest?.body ?? null,
+        lastMessageId: latest?.id ?? null,
+        updated_at: latest?.created_at ?? myMembership?.joined_at ?? null,
+        lastMessageAt: latest?.created_at ?? null,
+        lastMessageSenderId: latest?.sender_id ?? null,
+        lastReceipt,
+        unreadCount,
+        presence,
+        secondary,
+        isGroup,
+      };
+    } catch {
+      return null;
+    }
+  }
 
   function initRealtime(convoIds: string[]) {
     try {
@@ -638,7 +827,32 @@ export default function MessagesPage() {
                     : c.unreadCount ?? 0,
               };
             });
-            return next;
+            return sortConversations(next);
+          });
+        }
+      );
+
+      // New conversation membership (e.g. added to a group)
+      channel.on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "conversation_members" },
+        async (payload: any) => {
+          const row = payload.new as {
+            conversation_id?: string;
+            user_id?: string;
+          };
+          const convoId = row?.conversation_id;
+          const userId = row?.user_id;
+          if (!convoId || !userId) return;
+          if (userId !== currentUserIdRef.current) return;
+          if (convoIdsRef.current.has(convoId)) return;
+
+          convoIdsRef.current.add(convoId);
+          const summary = await fetchConversationSummary(convoId, userId);
+          if (!summary) return;
+          setUserConversations((prev) => {
+            if (prev.some((c) => c.id === convoId)) return prev;
+            return sortConversations([...prev, summary]);
           });
         }
       );
@@ -808,7 +1022,10 @@ export default function MessagesPage() {
         }
         setConnectionNames(map);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (active) setConnectionsLoaded(true);
+      });
     return () => {
       active = false;
     };
@@ -848,8 +1065,31 @@ export default function MessagesPage() {
     );
   }, [presenceCtx]);
 
+  const listReady = !loading && connectionsLoaded;
   const hasNoConvos =
-    !loading && userConversations.length === 0 && !loadError && !!currentUserId;
+    listReady && userConversations.length === 0 && !loadError && !!currentUserId;
+  const visibleConversations =
+    activeFilter === "Unread"
+      ? userConversations.filter((c) => (c.unreadCount ?? 0) > 0)
+      : activeFilter === "Groups"
+      ? userConversations.filter((c) => c.isGroup)
+      : activeFilter === "Favourites"
+      ? []
+      : userConversations;
+  const hasUnreadEmpty =
+    activeFilter === "Unread" &&
+    listReady &&
+    !loadError &&
+    visibleConversations.length === 0;
+  const hasFavouritesEmpty =
+    activeFilter === "Favourites" &&
+    listReady &&
+    !loadError &&
+    visibleConversations.length === 0;
+  const unreadTotal = userConversations.reduce(
+    (acc, c) => acc + (c.unreadCount ?? 0),
+    0
+  );
 
   const toStatus = (
     presence: DBConversation["presence"]
@@ -860,7 +1100,7 @@ export default function MessagesPage() {
   };
 
   return (
-    <>
+    <div className="pb-14">
       <div className="flex items-center gap-2 pb-2 px-4">
         <h1 className="flex-1 px-1 text-4xl font-extrabold tracking-tight">
           Messages
@@ -888,42 +1128,87 @@ export default function MessagesPage() {
             className="rounded-full"
             onClick={() => setActiveFilter(f)}
           >
-            {f}
+            <span className="flex items-center gap-2">
+              <span>{f}</span>
+              {f === "Unread" && unreadTotal > 0 ? (
+                <span className="inline-flex min-w-[18px] items-center justify-center rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                  {unreadTotal}
+                </span>
+              ) : null}
+            </span>
           </Button>
         ))}
         <div className="pr-2.5"></div>
       </div>
 
       {/* Archived row */}
-      <div className="px-4">
-        <ListItemRow
-          left={<Archive className="h-5 w-5 text-muted-foreground" />}
-          right={
-            <span className="truncate text-base font-semibold text-muted-foreground">
-              Archived
-            </span>
-          }
-        />
-      </div>
+      {activeFilter === "All" ? (
+        <div className="px-4">
+          <ListItemRow
+            left={<Archive className="h-5 w-5 text-muted-foreground" />}
+            right={
+              <span className="truncate text-base font-semibold text-muted-foreground">
+                Archived
+              </span>
+            }
+          />
+        </div>
+      ) : null}
 
       {/* EMPTY STATE */}
-      {hasNoConvos ? (
+      {hasNoConvos || hasUnreadEmpty || hasFavouritesEmpty ? (
         <div className="pt-8 px-4">
           <Empty>
             <EmptyHeader>
               <EmptyMedia variant="icon">
                 <Inbox className="h-6 w-6" />
               </EmptyMedia>
-              <EmptyTitle>No messages yet</EmptyTitle>
+              <EmptyTitle>
+                {hasUnreadEmpty
+                  ? "No unread messages"
+                  : hasFavouritesEmpty
+                  ? "No favourites yet"
+                  : "No messages yet"}
+              </EmptyTitle>
               <EmptyDescription>
-                When you start chatting, your conversations will appear here.
+                {hasUnreadEmpty
+                  ? "You're all caught up."
+                  : hasFavouritesEmpty
+                  ? "Star a conversation to keep it here."
+                  : "When you start chatting, your conversations will appear here."}
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
         </div>
+      ) : !listReady ? (
+        <ul className="px-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <li key={`skeleton-${i}`}>
+              <ListItemRow
+                left={<Skeleton className="h-12 w-12 rounded-full" />}
+                right={
+                  <div className="min-w-0 grid grid-cols-[minmax(0,1fr)_auto] gap-x-3">
+                    <div className="col-start-1">
+                      <Skeleton className="h-4 w-40" />
+                    </div>
+                    <div className="col-start-2 row-start-1 flex justify-end">
+                      <Skeleton className="h-3 w-10" />
+                    </div>
+                    <div className="col-start-1 row-start-2 mt-1">
+                      <Skeleton className="h-3 w-52" />
+                    </div>
+                    <div className="col-start-2 row-start-2 mt-1 flex justify-end">
+                      <Skeleton className="h-3 w-6" />
+                    </div>
+                  </div>
+                }
+              />
+            </li>
+          ))}
+        </ul>
       ) : (
         // CONVERSATION LIST
-        <ul className="divide-y px-4">
+        <ul className="px-4 animate-in fade-in duration-300">
           {/* if there's an error, show it in-list */}
           {loadError ? (
             <li className="bg-destructive/5 py-3 flex items-start gap-3">
@@ -949,7 +1234,7 @@ export default function MessagesPage() {
             </li>
           ) : null}
 
-          {userConversations.map((c) => {
+          {visibleConversations.map((c) => {
             const ts = c.lastMessageAt || c.updated_at;
             const displayTime = ts
               ? new Date(ts).toLocaleTimeString(undefined, {
@@ -960,7 +1245,9 @@ export default function MessagesPage() {
 
             const lastLine = c.lastMessage ? c.lastMessage : "No messages yet";
             const avatarUrl = c.avatar
-              ? getAvatarProxyUrl(c.avatar) ?? undefined
+              ? c.isGroup
+                ? c.avatar
+                : getAvatarProxyUrl(c.avatar) ?? undefined
               : undefined;
 
             if (process.env.NODE_ENV !== "production") {
@@ -1009,11 +1296,13 @@ export default function MessagesPage() {
                             presence={null}
                             ring
                           />
-                          <StatusBadge
-                            status={toStatus(c.presence)}
-                            size="sm"
-                            className="absolute -bottom-0.5 -right-0.5"
-                          />
+                          {!c.isGroup ? (
+                            <StatusBadge
+                              status={toStatus(c.presence)}
+                              size="sm"
+                              className="absolute -bottom-0.5 -right-0.5"
+                            />
+                          ) : null}
                         </div>
                       }
                       right={
@@ -1044,7 +1333,8 @@ export default function MessagesPage() {
                               <span className="inline-flex min-w-[22px] items-center justify-center rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground">
                                 {c.unreadCount}
                               </span>
-                            ) : c.lastMessageSenderId === currentUserId ? (
+                            ) : !c.isGroup &&
+                              c.lastMessageSenderId === currentUserId ? (
                               c.lastReceipt?.read_at ? (
                                 <CheckCheck
                                   className="h-3.5 w-3.5 text-accent opacity-90"
@@ -1073,6 +1363,15 @@ export default function MessagesPage() {
           })}
         </ul>
       )}
+
+      {!hasNoConvos && activeFilter === "All" ? (
+        <div className="m-4 text-xs text-muted-foreground">
+          <div className="flex items-center justify-center gap-2 text-center">
+            <Lock className="h-3.5 w-3.5" />
+            <span>Your direct messages are end-to-end encrypted</span>
+          </div>
+        </div>
+      ) : null}
 
       {selectMode && (
         <div className="fixed left-0 right-0 bottom-[calc(56px+env(safe-area-inset-bottom))] z-30 border-t bg-card text-card-foreground">
@@ -1120,6 +1419,6 @@ export default function MessagesPage() {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

@@ -122,6 +122,12 @@ export async function GET(
     .select("user_id")
     .eq("conversation_id", conversationId);
 
+  const { data: convoRow } = await supabase
+    .from("conversations")
+    .select("id, name, type")
+    .eq("id", conversationId)
+    .maybeSingle();
+
   const memberIds = (members ?? []).map((m) => m.user_id);
   const others = memberIds.filter((id) => id !== user.id);
   const otherUserId = others.length === 1 ? others[0] : null;
@@ -310,7 +316,12 @@ export async function GET(
   }
 
   return NextResponse.json(
-    { messages: enrichedWithReactions, other: otherMeta ?? null, hasMore },
+    {
+      messages: enrichedWithReactions,
+      other: otherMeta ?? null,
+      conversation: convoRow ?? null,
+      hasMore,
+    },
     { status: 200 }
   );
 }

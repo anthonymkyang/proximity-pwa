@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { getOrCreateDirectConversation } from "@/lib/messages/messages";
 
 export async function POST(
@@ -93,6 +94,45 @@ export async function POST(
       .from("conversations")
       .update({ updated_at: new Date().toISOString(), last_message: messageText })
       .eq("id", conversationId);
+
+    if (action === "approved") {
+      const hostId = group.host_id ? String(group.host_id) : null;
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      const admin =
+        hostId && supabaseUrl && serviceKey
+          ? createAdminClient(supabaseUrl, serviceKey)
+          : null;
+
+      if (admin && hostId) {
+        const groupConversationId = groupId;
+        await admin.from("conversations").upsert(
+          {
+            id: groupConversationId,
+            type: "group",
+            name: groupTitle,
+            created_by: hostId,
+          },
+          { onConflict: "id" }
+        );
+
+        const memberIds = new Set<string>();
+        memberIds.add(hostId);
+        cohosts.forEach((id) => {
+          if (id) memberIds.add(String(id));
+        });
+        memberIds.add(String(targetUserId));
+
+        const rows = Array.from(memberIds).map((memberId) => ({
+          conversation_id: groupConversationId,
+          user_id: memberId,
+          role: memberId === hostId ? "host" : "member",
+        }));
+        await admin
+          .from("conversation_members")
+          .upsert(rows, { onConflict: "conversation_id,user_id" });
+      }
+    }
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {

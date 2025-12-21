@@ -87,12 +87,14 @@ import {
   Drawer,
   DrawerContent,
   DrawerDescription,
+  DrawerFooter,
   DrawerHeader,
   DrawerTitle,
 } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Textarea } from "@/components/ui/textarea";
 import { AnimatedEmoji } from "@/components/emoji/AnimatedEmoji";
 import { useWebLLM } from "@/hooks/useWebLLM";
 import { AIToolsDialog } from "@/components/ai/AIToolsDialog";
@@ -204,6 +206,84 @@ const normalizeMessage = (m: Message): Message => ({
   my_reaction: m.my_reaction ?? null,
   conversation_id: m.conversation_id,
 });
+
+const resolveCoverUrl = (path?: string | null): string | null => {
+  if (!path) return null;
+  const s = String(path);
+  if (s.startsWith("http://") || s.startsWith("https://")) return s;
+  return `/api/groups/storage?path=${encodeURIComponent(s.replace(/^\/+/, ""))}`;
+};
+
+const fmtWhen = (start?: string | null, end?: string | null) => {
+  if (!start) return "TBC";
+  const s = new Date(start);
+  const e = end ? new Date(end) : null;
+  const now = new Date();
+
+  const formatTime = (date: Date) => {
+    const hours = date.getHours();
+    const minutes = date.getMinutes();
+    const ampm = hours >= 12 ? "pm" : "am";
+    const displayHours = hours % 12 || 12;
+    return minutes === 0
+      ? `${displayHours}${ampm}`
+      : `${displayHours}:${String(minutes).padStart(2, "0")}${ampm}`;
+  };
+
+  const getDayDiff = (from: Date, to: Date) => {
+    const fromMidnight = new Date(
+      from.getFullYear(),
+      from.getMonth(),
+      from.getDate()
+    );
+    const toMidnight = new Date(to.getFullYear(), to.getMonth(), to.getDate());
+    return Math.floor(
+      (toMidnight.getTime() - fromMidnight.getTime()) / (1000 * 60 * 60 * 24)
+    );
+  };
+
+  const dayDiff = getDayDiff(now, s);
+  const sameDay = e
+    ? s.getFullYear() === e.getFullYear() &&
+      s.getMonth() === e.getMonth() &&
+      s.getDate() === e.getDate()
+    : true;
+
+  const st = formatTime(s);
+  const et = e ? formatTime(e) : null;
+
+  let datePrefix: string;
+
+  if (dayDiff === 0) {
+    datePrefix = "Today";
+  } else if (dayDiff === 1) {
+    datePrefix = "Tomorrow";
+  } else if (dayDiff < 7) {
+    datePrefix = s.toLocaleDateString(undefined, { weekday: "long" });
+  } else {
+    datePrefix = s.toLocaleDateString(undefined, {
+      day: "numeric",
+      month: "short",
+    });
+  }
+
+  if (!e) {
+    return `${datePrefix}, ${st} onwards`;
+  }
+  if (sameDay) {
+    return `${datePrefix}, ${st} to ${et}`;
+  }
+
+  const eDatePrefix = s.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+  });
+  const e2DatePrefix = e.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+  });
+  return `${eDatePrefix}, ${st} to ${e2DatePrefix}, ${et}`;
+};
 
 const PAGE_SIZE = 30;
 const LONG_PRESS_MS = 260;
@@ -729,6 +809,17 @@ export default function ConversationPage() {
   const [participantProfileTitle, setParticipantProfileTitle] = useState<
     string | null
   >(null);
+  const [isGroupConversation, setIsGroupConversation] = useState(false);
+  const [groupMemberCount, setGroupMemberCount] = useState<number | null>(null);
+  const [groupInfo, setGroupInfo] = useState<{
+    id: string;
+    title: string | null;
+    start_time: string | null;
+    end_time: string | null;
+  } | null>(null);
+  const [leaveDrawerOpen, setLeaveDrawerOpen] = useState(false);
+  const [leaveMessage, setLeaveMessage] = useState("");
+  const [leavingGroup, setLeavingGroup] = useState(false);
   const participantInitials = useMemo(() => {
     return (
       participantName
@@ -755,12 +846,61 @@ export default function ConversationPage() {
       : participantPresence === "away"
       ? "away"
       : "offline";
-  const participantStatusText =
-    participantPresence === "online"
+  const participantStatusText = useMemo(() => {
+    if (isGroupConversation) {
+      return `${groupMemberCount ?? 0} members`;
+    }
+    return participantPresence === "online"
       ? "Online"
       : participantPresence === "away"
       ? "Away"
       : "Offline";
+  }, [groupMemberCount, isGroupConversation, participantPresence]);
+
+  const buildLeaveMessage = useCallback((info: NonNullable<typeof groupInfo>) => {
+    const title = info.title || "this group";
+    const when = fmtWhen(info.start_time, info.end_time);
+    if (!when || when === "TBC") {
+      return `Sorry, I can no longer make it to ${title}.`;
+    }
+    const needsOn =
+      typeof when === "string" &&
+      !when.startsWith("Today") &&
+      !when.startsWith("Tomorrow");
+    return `Sorry, I can no longer make it to ${title}${
+      needsOn ? " on" : ""
+    } ${when}.`;
+  }, []);
+
+  const openLeaveDrawer = useCallback(() => {
+    if (!groupInfo) return;
+    setLeaveMessage(buildLeaveMessage(groupInfo));
+    setLeaveDrawerOpen(true);
+  }, [buildLeaveMessage, groupInfo]);
+
+  const handleLeaveGroup = useCallback(async () => {
+    if (!groupInfo?.id || leavingGroup) return;
+    const message = leaveMessage.trim();
+    setLeavingGroup(true);
+    try {
+      const res = await fetch(`/api/groups/${groupInfo.id}/attendees/leave`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: message.length ? message : null }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to leave group");
+      }
+      toast.success("Left group");
+      setLeaveDrawerOpen(false);
+      setLeaveMessage("");
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to leave group");
+    } finally {
+      setLeavingGroup(false);
+    }
+  }, [groupInfo, leaveMessage, leavingGroup]);
   const [contactConnectionId, setContactConnectionId] = useState<string | null>(
     null
   );
@@ -1199,33 +1339,83 @@ export default function ConversationPage() {
             otherMsg?.profiles?.profile_title ??
             data.messages?.[0]?.profiles?.profile_title ??
             null;
-          const apiName =
-            data.other?.display_name ??
-            data.other?.profile_title ??
-            fallbackTitle ??
-            null;
-          const apiProfileTitle =
-            data.other?.profile_title ?? fallbackTitle ?? null;
-          const apiOtherId = data.other?.user_id ?? null;
-          if (apiOtherId) setOtherUserId(apiOtherId);
-          else {
-            // derive other user id from messages list if possible
-            const firstOther = (data.messages as Message[] | undefined)?.find(
-              (m) => m.sender_id && m.sender_id !== user?.id
-            );
-            if (firstOther?.sender_id) setOtherUserId(firstOther.sender_id);
-          }
-          if (apiName) setParticipantName(apiName);
-          if (apiProfileTitle) setParticipantProfileTitle(apiProfileTitle);
-          const rawAvatar =
-            data.other?.avatar_url ??
-            (data.messages as Message[] | undefined)?.find(
-              (m) => m.sender_id !== user?.id && m.profiles?.avatar_url
-            )?.profiles?.avatar_url ??
-            null;
-          const proxied = getAvatarProxyUrl(rawAvatar);
-          if (proxied) {
-            setParticipantAvatar(proxied);
+          const convoType =
+            typeof data.conversation?.type === "string"
+              ? data.conversation.type.toLowerCase()
+              : null;
+          const convoName =
+            typeof data.conversation?.name === "string"
+              ? data.conversation.name
+              : null;
+          if (convoType === "group") {
+            setParticipantName(convoName || "Group chat");
+            setParticipantProfileTitle(null);
+            setOtherUserId(null);
+            setIsGroupConversation(true);
+            try {
+              const [{ data: groupRow }, { count: memberCount }] =
+                await Promise.all([
+                  supabase.current
+                    .from("groups")
+                    .select("id, title, start_time, end_time, cover_image_url")
+                    .eq("id", conversationId)
+                    .maybeSingle(),
+                  supabase.current
+                    .from("conversation_members")
+                    .select("user_id", { count: "exact", head: true })
+                    .eq("conversation_id", conversationId),
+                ]);
+              setParticipantAvatar(
+                resolveCoverUrl(groupRow?.cover_image_url ?? null)
+              );
+              setGroupMemberCount(memberCount ?? null);
+              if (groupRow?.id) {
+                setGroupInfo({
+                  id: groupRow.id,
+                  title: groupRow.title ?? null,
+                  start_time: groupRow.start_time ?? null,
+                  end_time: groupRow.end_time ?? null,
+                });
+              } else {
+                setGroupInfo(null);
+              }
+            } catch {
+              setGroupMemberCount(null);
+              setParticipantAvatar(null);
+              setGroupInfo(null);
+            }
+          } else {
+            setIsGroupConversation(false);
+            setGroupMemberCount(null);
+            setGroupInfo(null);
+            const apiName =
+              data.other?.display_name ??
+              data.other?.profile_title ??
+              fallbackTitle ??
+              null;
+            const apiProfileTitle =
+              data.other?.profile_title ?? fallbackTitle ?? null;
+            const apiOtherId = data.other?.user_id ?? null;
+            if (apiOtherId) setOtherUserId(apiOtherId);
+            else {
+              // derive other user id from messages list if possible
+              const firstOther = (data.messages as Message[] | undefined)?.find(
+                (m) => m.sender_id && m.sender_id !== user?.id
+              );
+              if (firstOther?.sender_id) setOtherUserId(firstOther.sender_id);
+            }
+            if (apiName) setParticipantName(apiName);
+            if (apiProfileTitle) setParticipantProfileTitle(apiProfileTitle);
+            const rawAvatar =
+              data.other?.avatar_url ??
+              (data.messages as Message[] | undefined)?.find(
+                (m) => m.sender_id !== user?.id && m.profiles?.avatar_url
+              )?.profiles?.avatar_url ??
+              null;
+            const proxied = getAvatarProxyUrl(rawAvatar);
+            if (proxied) {
+              setParticipantAvatar(proxied);
+            }
           }
           setHasMore(Boolean(data.hasMore));
         }
@@ -3303,11 +3493,13 @@ export default function ConversationPage() {
                     />
                     <AvatarFallback>{participantInitials}</AvatarFallback>
                   </Avatar>
-                  <StatusBadge
-                    status={participantStatusBadge}
-                    size="sm"
-                    className="absolute bottom-0.5 right-0.5"
-                  />
+                  {!isGroupConversation ? (
+                    <StatusBadge
+                      status={participantStatusBadge}
+                      size="sm"
+                      className="absolute bottom-0.5 right-0.5"
+                    />
+                  ) : null}
                 </div>
                 <div className="leading-tight">
                   <div className="text-sm font-medium flex items-center gap-1 max-w-60">
@@ -3333,11 +3525,13 @@ export default function ConversationPage() {
                     />
                     <AvatarFallback>{participantInitials}</AvatarFallback>
                   </Avatar>
-                  <StatusBadge
-                    status={participantStatusBadge}
-                    size="sm"
-                    className="absolute bottom-0.5 right-0.5"
-                  />
+                  {!isGroupConversation ? (
+                    <StatusBadge
+                      status={participantStatusBadge}
+                      size="sm"
+                      className="absolute bottom-0.5 right-0.5"
+                    />
+                  ) : null}
                 </div>
                 <div className="leading-tight">
                   <div className="text-sm font-medium flex items-center gap-1 max-w-60">
@@ -3368,67 +3562,97 @@ export default function ConversationPage() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuItem>
-              <UserRound className="h-4 w-4" />
-              View profile
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              disabled={loadingConnections && !contactConnectionId}
-              onSelect={(e) => {
-                e.preventDefault();
-                if (contactConnectionId) {
-                  router.push(`/app/connections/${contactConnectionId}`);
-                  return;
-                }
-                setContactDrawerOpen(true);
-                if (!contactNickname && participantName) {
-                  setContactNickname(participantName);
-                }
-              }}
-            >
-              <UserPlus className="h-4 w-4" />
-              {contactConnectionId ? "View contact" : "Add contact"}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              disabled={
-                loadingConnections ||
-                pinning ||
-                !otherUserId ||
-                (Boolean(contactConnectionId) && !pinConnectionId)
-              }
-              onSelect={(e) => {
-                e.preventDefault();
-                void handlePinToggle();
-              }}
-            >
-              <Pin className="h-4 w-4" />
-              {pinConnectionId ? "Unpin profile" : "Pin profile"}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem>
-              <Archive className="h-4 w-4" />
-              Archive chat
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              disabled={loadingGhosted}
-              onSelect={(e) => {
-                e.preventDefault();
-                void handleToggleGhosted();
-              }}
-            >
-              <Ghost className={`h-4 w-4 ${isGhosted ? "fill-current" : ""}`} />
-              Ghosted me
-              {isGhosted && <Check className="h-4 w-4 ml-auto" />}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive">
-              <Shield className="h-4 w-4" />
-              Block contact
-            </DropdownMenuItem>
-            <DropdownMenuItem variant="destructive">
-              <Flag className="h-4 w-4" />
-              Report user
-            </DropdownMenuItem>
+            {isGroupConversation ? (
+              <>
+                <DropdownMenuItem
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    if (conversationId) {
+                      router.push(`/app/activity/groups/${conversationId}`);
+                    }
+                  }}
+                >
+                  View group
+                </DropdownMenuItem>
+                <DropdownMenuItem>Mute</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  variant="destructive"
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    openLeaveDrawer();
+                  }}
+                >
+                  Leave group
+                </DropdownMenuItem>
+              </>
+            ) : (
+              <>
+                <DropdownMenuItem>
+                  <UserRound className="h-4 w-4" />
+                  View profile
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={loadingConnections && !contactConnectionId}
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    if (contactConnectionId) {
+                      router.push(`/app/connections/${contactConnectionId}`);
+                      return;
+                    }
+                    setContactDrawerOpen(true);
+                    if (!contactNickname && participantName) {
+                      setContactNickname(participantName);
+                    }
+                  }}
+                >
+                  <UserPlus className="h-4 w-4" />
+                  {contactConnectionId ? "View contact" : "Add contact"}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={
+                    loadingConnections ||
+                    pinning ||
+                    !otherUserId ||
+                    (Boolean(contactConnectionId) && !pinConnectionId)
+                  }
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    void handlePinToggle();
+                  }}
+                >
+                  <Pin className="h-4 w-4" />
+                  {pinConnectionId ? "Unpin profile" : "Pin profile"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem>
+                  <Archive className="h-4 w-4" />
+                  Archive chat
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={loadingGhosted}
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    void handleToggleGhosted();
+                  }}
+                >
+                  <Ghost
+                    className={`h-4 w-4 ${isGhosted ? "fill-current" : ""}`}
+                  />
+                  Ghosted me
+                  {isGhosted && <Check className="h-4 w-4 ml-auto" />}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive">
+                  <Shield className="h-4 w-4" />
+                  Block contact
+                </DropdownMenuItem>
+                <DropdownMenuItem variant="destructive">
+                  <Flag className="h-4 w-4" />
+                  Report user
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -4204,6 +4428,42 @@ export default function ConversationPage() {
               </Button>
             </div>
           </div>
+        </DrawerContent>
+      </Drawer>
+
+      <Drawer
+        open={leaveDrawerOpen}
+        onOpenChange={(open) => {
+          setLeaveDrawerOpen(open);
+          if (!open) setLeaveMessage("");
+        }}
+      >
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>Leave group</DrawerTitle>
+            <DrawerDescription>
+              Send a message to the host and co-hosts.
+            </DrawerDescription>
+          </DrawerHeader>
+          <div className="px-4">
+            <div className="rounded-lg bg-card/60 shadow-none p-3">
+              <Textarea
+                value={leaveMessage}
+                onChange={(e) => setLeaveMessage(e.target.value)}
+                placeholder="Write a short message…"
+                rows={4}
+              />
+            </div>
+          </div>
+          <DrawerFooter className="px-4 pb-4">
+            <Button
+              variant="destructive"
+              onClick={handleLeaveGroup}
+              disabled={leavingGroup}
+            >
+              {leavingGroup ? "Leaving…" : "Leave group"}
+            </Button>
+          </DrawerFooter>
         </DrawerContent>
       </Drawer>
 
