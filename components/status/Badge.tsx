@@ -41,7 +41,7 @@ export function StatusBadge({
       aria-label={status}
       title={status}
       className={cn(
-        "inline-flex shrink-0 rounded-full",
+        "inline-flex shrink-0 rounded-full box-border transition-colors duration-200 ease-out",
         sizeClass,
         colorClass,
         withRing ? "ring-2 ring-background" : "",

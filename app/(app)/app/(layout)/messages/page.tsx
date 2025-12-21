@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import Link from "next/link";
 import {
   Search,
@@ -258,6 +258,9 @@ export default function MessagesPage() {
   const [rawRows, setRawRows] = useState<any[] | null>(null);
   const convoIdsRef = useRef<Set<string>>(new Set());
   const [showDebug, setShowDebug] = useState(false);
+  const listItemRefs = useRef<Map<string, HTMLLIElement>>(new Map());
+  const listPositionsRef = useRef<Map<string, DOMRect>>(new Map());
+  const listReadyRef = useRef(false);
   // Ref mapping user_id -> conversation ids for 1:1
   const userToConvoRef = useRef<Record<string, string[]>>({});
   const convoToOtherRef = useRef<Record<string, string | null>>({});
@@ -1099,6 +1102,37 @@ export default function MessagesPage() {
     return "offline";
   };
 
+  useLayoutEffect(() => {
+    if (!listReady) return;
+    const nextPositions = new Map<string, DOMRect>();
+    listItemRefs.current.forEach((el, id) => {
+      if (!el) return;
+      nextPositions.set(id, el.getBoundingClientRect());
+    });
+
+    if (listReadyRef.current) {
+      nextPositions.forEach((next, id) => {
+        const prev = listPositionsRef.current.get(id);
+        if (!prev) return;
+        const dy = prev.top - next.top;
+        if (dy === 0) return;
+        const el = listItemRefs.current.get(id);
+        if (!el) return;
+        el.animate(
+          [{ transform: `translateY(${dy}px)` }, { transform: "translateY(0)" }],
+          {
+            duration: 220,
+            easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+          }
+        );
+      });
+    } else {
+      listReadyRef.current = true;
+    }
+
+    listPositionsRef.current = nextPositions;
+  }, [listReady, visibleConversations]);
+
   return (
     <div className="pb-14">
       <div className="flex items-center gap-2 pb-2 px-4">
@@ -1263,7 +1297,16 @@ export default function MessagesPage() {
             }
 
             return (
-              <li key={c.id}>
+              <li
+                key={c.id}
+                ref={(el) => {
+                  if (el) {
+                    listItemRefs.current.set(c.id, el);
+                  } else {
+                    listItemRefs.current.delete(c.id);
+                  }
+                }}
+              >
                 <SwipeableRow
                   onArchive={() => console.log("archive", c.id)}
                   onDelete={() => console.log("delete", c.id)}
