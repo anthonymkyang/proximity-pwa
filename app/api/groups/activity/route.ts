@@ -34,6 +34,7 @@ type ListingGroup = {
   name: string;
   start_time: string | null;
   cover_image_url: string | null;
+  status?: string | null;
   categoryName: string | null;
   host_id: string | null;
   cohost_ids: string[];
@@ -345,6 +346,7 @@ export async function GET() {
           start_time: row.start_time || null,
           end_time: row.end_time || null,
           cover_image_url: row.cover_image_url || null,
+          status: row.status || null,
           categoryName: row.group_categories?.name ?? null,
           host_id: row.host_id || null,
           cohost_ids: Array.isArray(row.cohost_ids)

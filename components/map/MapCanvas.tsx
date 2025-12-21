@@ -1868,7 +1868,10 @@ export default function MapCanvas() {
             return null;
           };
           const groups = (data.groups ?? [])
-            .filter((g: any) => g?.membershipStatus === "hosting")
+            .filter(
+              (g: any) =>
+                g?.membershipStatus === "hosting" && g?.status === "active"
+            )
             .map((g: any) => {
               const lat = Number(g?.location_lat);
               const lng = Number(g?.location_lng);
@@ -1897,6 +1900,7 @@ export default function MapCanvas() {
             );
           setUserGroups(groups);
           const listings = (data.listings ?? [])
+            .filter((g: any) => g?.status === "active")
             .map((g: any) => {
               const lat = Number(g?.location_lat);
               const lng = Number(g?.location_lng);
@@ -2136,7 +2140,7 @@ export default function MapCanvas() {
       if (!entry) {
         const container = document.createElement("div");
         container.className =
-          "pointer-events-auto z-30 drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
+          "pointer-events-auto drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]";
         const root = createRoot(container);
         const marker = new maplibregl.Marker({
           element: container,

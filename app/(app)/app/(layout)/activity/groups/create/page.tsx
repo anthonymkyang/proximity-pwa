@@ -218,6 +218,7 @@ export default function CreateGroupPage() {
   const markerRef = React.useRef<maplibregl.Marker | null>(null);
   const [mapReady, setMapReady] = React.useState(false);
   const isNavigatingAwayRef = React.useRef(false);
+  const isDirtyRef = React.useRef(false);
 
   const today = React.useMemo(() => {
     const d = new Date();
@@ -673,6 +674,12 @@ export default function CreateGroupPage() {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [formData]);
 
+  React.useEffect(() => {
+    isDirtyRef.current = Boolean(
+      formData.title || formData.description || formData.category_id
+    );
+  }, [formData.title, formData.description, formData.category_id]);
+
   // Intercept browser back/forward navigation
   React.useEffect(() => {
     const handlePopState = () => {
@@ -681,7 +688,7 @@ export default function CreateGroupPage() {
         return;
       }
 
-      if (formData.title || formData.description || formData.category_id) {
+      if (isDirtyRef.current) {
         // Prevent navigation by pushing current state back
         window.history.pushState(null, "", window.location.href);
 
@@ -703,7 +710,7 @@ export default function CreateGroupPage() {
       // Reset ref on unmount
       isNavigatingAwayRef.current = false;
     };
-  }, [formData]);
+  }, []);
 
   // Persist progress to localStorage when state changes (after hydration)
   React.useEffect(() => {
