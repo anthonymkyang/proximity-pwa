@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/utils/supabase/client";
-import { Compass, Heart, Users, MessageCircle, User } from "lucide-react";
+import { Compass, Zap, Users, MessageCircle, User } from "lucide-react";
 
 export default function AppBar() {
   const pathname = usePathname();
@@ -187,7 +187,7 @@ export default function AppBar() {
 
   const navItems = [
     { name: "Explore", href: "/app", icon: Compass },
-    { name: "Activity", href: "/app/activity", icon: Heart },
+    { name: "Activity", href: "/app/activity", icon: Zap },
     { name: "Connections", href: "/app/connections", icon: Users },
     { name: "Messages", href: "/app/messages", icon: MessageCircle },
     { name: "Me", href: "/app/settings", icon: User },

@@ -83,6 +83,13 @@ import * as Flags from "country-flag-icons/react/3x2";
 import { SocialIcon } from "react-social-icons";
 
 const baseFilters = ["All", "Contacts", "Pins", "Online", "Nearby"] as const;
+const searchHints = [
+  "by name",
+  "by number",
+  "for area",
+  "what they're into",
+  "for anything",
+] as const;
 
 type ConnectionRow = {
   id: string;
@@ -193,6 +200,9 @@ export default function ConnectionsPage() {
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<ConnectionRow[]>([]);
   const [query, setQuery] = useState("");
+  const [searchHintIndex, setSearchHintIndex] = useState(0);
+  const [searchHintCharIndex, setSearchHintCharIndex] = useState(0);
+  const [searchHintDeleting, setSearchHintDeleting] = useState(false);
   const { presence, currentUserId } = usePresence();
   const [nickname, setNickname] = useState("Anthony");
   const [myProfile, setMyProfile] = useState<any>(null);
@@ -218,6 +228,38 @@ export default function ConnectionsPage() {
   // --- Scroll state for gradients ---
   const scrollViewportRef = useRef<HTMLDivElement>(null);
   const [canScrollTop, setCanScrollTop] = useState(false);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const currentHint = searchHints[searchHintIndex] || "";
+    if (!searchHintDeleting) {
+      if (searchHintCharIndex < currentHint.length) {
+        timer = setTimeout(() => {
+          setSearchHintCharIndex((prev) => prev + 1);
+        }, 70);
+      } else {
+        timer = setTimeout(() => setSearchHintDeleting(true), 1600);
+      }
+    } else if (searchHintCharIndex > 0) {
+      timer = setTimeout(() => {
+        setSearchHintCharIndex((prev) => prev - 1);
+      }, 45);
+    } else {
+      timer = setTimeout(() => {
+        setSearchHintDeleting(false);
+        setSearchHintIndex((prev) => (prev + 1) % searchHints.length);
+      }, 200);
+    }
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [searchHintCharIndex, searchHintDeleting, searchHintIndex]);
+
+  const searchPlaceholder = useMemo(() => {
+    const suffix = searchHints[searchHintIndex]?.slice(0, searchHintCharIndex);
+    return suffix ? `Search ${suffix}` : "Search";
+  }, [searchHintCharIndex, searchHintIndex]);
   const [canScrollBottom, setCanScrollBottom] = useState(false);
   const [listVisible, setListVisible] = useState(false);
 
@@ -953,9 +995,9 @@ export default function ConnectionsPage() {
 
       {/* Search */}
       <div className="pb-5 px-4">
-        <InputGroup>
+        <InputGroup className="border-0 shadow-none">
           <InputGroupInput
-            placeholder="Search connections"
+            placeholder={searchPlaceholder}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -995,7 +1037,7 @@ export default function ConnectionsPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="rounded-full"
+                      className="rounded-full border-muted/40"
                     >
                       <span className="flex items-center gap-1">
                         <Plus className="h-3.5 w-3.5" />
@@ -1082,6 +1124,7 @@ export default function ConnectionsPage() {
                   "rounded-full",
                   isActive && "border border-primary",
                   isAll && "border-primary",
+                  !isActive && "border-muted/40",
                   reorderMode && isCustom && "cursor-grab"
                 )}
                 onClick={() => {
@@ -1774,13 +1817,7 @@ export default function ConnectionsPage() {
                     className="px-4"
                   >
                     <Link
-                      href={
-                        c.type === "contact" && c.id
-                          ? `/app/connections/${c.id}`
-                          : c.type === "pin" && c.profileId
-                          ? `/app/profile/${c.profileId}`
-                          : `/app/connections/${c.id}`
-                      }
+                      href={`/app/connections/${c.id}`}
                       className="block"
                     >
                       <ListItemRow

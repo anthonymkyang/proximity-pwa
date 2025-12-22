@@ -1143,7 +1143,7 @@ export default function MessagesPage() {
       </div>
       {/* Search */}
       <div className="pb-5 px-4">
-        <InputGroup>
+        <InputGroup className="border-0 shadow-none">
           <InputGroupInput placeholder="Ask or search messages" />
           <InputGroupAddon>
             <Search className="h-4 w-4 text-muted-foreground" />
@@ -1159,7 +1159,9 @@ export default function MessagesPage() {
             key={f}
             size="sm"
             variant={activeFilter === f ? "default" : "outline"}
-            className="rounded-full"
+            className={`rounded-full ${
+              activeFilter === f ? "" : "border-muted/40"
+            }`}
             onClick={() => setActiveFilter(f)}
           >
             <span className="flex items-center gap-2">

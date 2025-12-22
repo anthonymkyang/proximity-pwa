@@ -2348,47 +2348,78 @@ export default function ConversationPage() {
       }
     }
     try {
-      // Detect URLs in the message
       const urlRegex = /(https?:\/\/[^\s]+)/gi;
       const urls = text.match(urlRegex);
+      const firstUrl = urls?.[0] ?? null;
 
-      let payload: any = { body: text, ...replyMeta };
+      const sendPayload = async (payload: any) => {
+        console.log("Sending message with payload:", payload);
+        const res = await fetch(`/api/messages/${conversationId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        console.log("Message API response:", data);
+      };
 
-      // If message contains exactly one URL and nothing else (or just the URL), treat it as a link message
-      if (urls && urls.length === 1 && text.trim() === urls[0].trim()) {
+      const buildUrlDisplay = (rawUrl: string) => {
         try {
-          // Fetch link preview
+          const parsed = new URL(rawUrl);
+          const host = parsed.hostname.replace(/^www\./i, "");
+          return `${host}/..`;
+        } catch {
+          return rawUrl;
+        }
+      };
+
+      const buildLinkPayload = async (rawUrl: string) => {
+        try {
           const previewRes = await fetch("/api/messages/link-preview", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: urls[0] }),
+            body: JSON.stringify({ url: rawUrl }),
           });
-
           if (previewRes.ok) {
             const previewData = await previewRes.json();
-            payload = {
-              body: text,
+            return {
+              body: rawUrl,
               message_type: "link",
-              metadata: {
-                link: previewData,
-              },
+              metadata: { link: previewData },
               ...replyMeta,
             };
           }
         } catch (previewErr) {
           console.error("Failed to fetch link preview:", previewErr);
-          // Continue with regular message if preview fails
         }
+        return { body: rawUrl, ...replyMeta };
+      };
+
+      if (firstUrl) {
+        const urlIndex = text.indexOf(firstUrl);
+        const before = text.slice(0, urlIndex);
+        const after = text.slice(urlIndex + firstUrl.length);
+        const hasBefore = /\S/.test(before);
+        const hasAfter = /\S/.test(after);
+        let textWithoutUrl = text;
+
+        if (hasBefore && hasAfter) {
+          textWithoutUrl = `${before}${buildUrlDisplay(firstUrl)}${after}`;
+        } else {
+          textWithoutUrl = `${before}${after}`;
+        }
+        textWithoutUrl = textWithoutUrl.replace(/\s+/g, " ").trim();
+
+        const linkPayload = await buildLinkPayload(firstUrl);
+        await sendPayload(linkPayload);
+
+        if (textWithoutUrl.length > 0 && textWithoutUrl !== firstUrl) {
+          await sendPayload({ body: textWithoutUrl, ...replyMeta });
+        }
+        return;
       }
 
-      console.log("Sending message with payload:", payload);
-      const res = await fetch(`/api/messages/${conversationId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      console.log("Message API response:", data);
+      await sendPayload({ body: text, ...replyMeta });
     } catch (err) {
       console.error("Send message error:", err);
     }
@@ -3267,13 +3298,18 @@ export default function ConversationPage() {
       .sort()
       .join(",");
   }, [messages]);
-  const displayName = (contactNickname?.trim() || participantName || "").trim();
-  const secondaryName =
-    contactNickname?.trim() && participantProfileTitle
-      ? participantProfileTitle
-      : participantProfileTitle && participantProfileTitle !== displayName
-      ? participantProfileTitle
-      : null;
+  const displayName = (
+    isGroupConversation
+      ? groupInfo?.title || participantName
+      : contactNickname?.trim() || participantName || ""
+  ).trim();
+  const secondaryName = isGroupConversation
+    ? null
+    : contactNickname?.trim() && participantProfileTitle
+    ? participantProfileTitle
+    : participantProfileTitle && participantProfileTitle !== displayName
+    ? participantProfileTitle
+    : null;
 
   useEffect(() => {
     if (!conversationId) return;

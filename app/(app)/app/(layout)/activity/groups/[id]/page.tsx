@@ -613,6 +613,32 @@ export default function GroupPage() {
   }, [group?.start_time, group?.end_time]);
 
   const isCancelled = String(group?.status || "").toLowerCase() === "cancelled";
+  const isInProgress = React.useMemo(() => {
+    if (isCancelled) return false;
+    const startIso =
+      typeof group?.start_time === "string" && group?.start_time
+        ? (group!.start_time as string)
+        : null;
+    if (!startIso) return false;
+    const start = new Date(startIso);
+    const endIso =
+      typeof group?.end_time === "string" && group?.end_time
+        ? (group!.end_time as string)
+        : null;
+    const end = endIso ? new Date(endIso) : null;
+    const nextMidnight = new Date(
+      start.getFullYear(),
+      start.getMonth(),
+      start.getDate() + 1,
+      0,
+      0,
+      0,
+      0
+    );
+    const cutoff = end && end < nextMidnight ? end : nextMidnight;
+    const now = Date.now();
+    return now >= start.getTime() && now < cutoff.getTime();
+  }, [group?.start_time, group?.end_time, isCancelled]);
 
   // Use smart crop to find the best position for the cover image
   const { objectPosition } = useSmartCrop(coverUrl, 1, 1);
@@ -824,30 +850,40 @@ export default function GroupPage() {
               <Skeleton className="h-5 w-48" />
             ) : (
               <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-sm min-w-0">
-                  <CalendarClock className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span
-                      className={`font-medium ${
-                        isCancelled ? "line-through opacity-70" : ""
-                      }`}
-                    >
-                      {day || "Date TBD"}
-                    </span>
-                    {startTime && (
-                      <>
-                        <span className="text-muted-foreground">·</span>
-                        <span
-                          className={`text-muted-foreground ${
-                            isCancelled ? "line-through opacity-70" : ""
-                          }`}
-                        >
-                          {startTime}
-                          {endTime ? <> - {endTime}</> : null}
-                        </span>
-                      </>
-                    )}
+                <div className="flex flex-col gap-1 text-sm min-w-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <CalendarClock className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span
+                        className={`font-medium ${
+                          isCancelled ? "line-through opacity-70" : ""
+                        }`}
+                      >
+                        {day || "Date TBD"}
+                      </span>
+                      {startTime && (
+                        <>
+                          <span className="text-muted-foreground">·</span>
+                          <span
+                            className={`text-muted-foreground ${
+                              isCancelled ? "line-through opacity-70" : ""
+                            }`}
+                          >
+                            {startTime}
+                            {endTime ? <> - {endTime}</> : null}
+                          </span>
+                        </>
+                      )}
+                    </div>
                   </div>
+                  {isInProgress ? (
+                    <Badge
+                      variant="destructive"
+                      className="text-[10px] uppercase tracking-wide w-fit px-2 py-0.5 ml-6"
+                    >
+                      In progress
+                    </Badge>
+                  ) : null}
                 </div>
                 {!isArchived &&
                   (!isHost && !isCohost ? (

@@ -68,7 +68,13 @@ export function Badge24({
           className
         )}
       >
-        {src ? <AvatarImage src={src} alt={alt || "Avatar"} /> : null}
+        {src ? (
+          <AvatarImage
+            src={src}
+            alt={alt || "Avatar"}
+            className="h-full w-full object-cover"
+          />
+        ) : null}
         <AvatarFallback>{fallback || ""}</AvatarFallback>
       </Avatar>
       <span
