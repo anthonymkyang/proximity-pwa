@@ -153,6 +153,7 @@ export default function ProfilePage() {
 
   const longPressTimerRef = useRef<number | null>(null);
   const reactionBtnRef = useRef<HTMLDivElement | null>(null);
+  const reactionSendingRef = useRef(false);
 
   const clearLongPressTimer = () => {
     if (longPressTimerRef.current != null) {
@@ -208,6 +209,8 @@ export default function ProfilePage() {
 
   const sendReaction = useCallback(
     async (type: ReactionType) => {
+      if (reactionSendingRef.current) return;
+      reactionSendingRef.current = true;
       // Update button with selected emoji and trigger animation
       setSelectedReaction(type);
       setTriggerAnimation(true);
@@ -223,7 +226,7 @@ export default function ProfilePage() {
       const t = reactionMenu.target;
       if (!t?.toUserId) return;
       try {
-        await fetch("/api/profile-reactions", {
+        const response = await fetch("/api/profile-reactions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -232,8 +235,16 @@ export default function ProfilePage() {
             context: t.context ?? null,
           }),
         });
+        if (response.ok) {
+          const data = await response.json();
+          if (data?.notify_error) {
+            console.warn("[profile] notify error", data.notify_error);
+          }
+        }
       } catch {
         // ignore
+      } finally {
+        reactionSendingRef.current = false;
       }
     },
     [reactionMenu.target]
@@ -2322,16 +2333,6 @@ export default function ProfilePage() {
                   className="p-2 text-2xl leading-none rounded-full transition pointer-events-auto hover:bg-muted"
                   data-reaction={r.type}
                   onPointerDown={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    sendReaction(r.type);
-                  }}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    sendReaction(r.type);
-                  }}
-                  onTouchStart={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
                     sendReaction(r.type);

@@ -265,6 +265,10 @@ export default function AvatarEditorPage() {
       console.error(updateError);
     }
 
+    if (!updateError) {
+      void fetch("/api/notifications/avatar", { method: "POST" });
+    }
+
     router.replace("/app/settings");
     if (prevObjectUrl.current) {
       URL.revokeObjectURL(prevObjectUrl.current);

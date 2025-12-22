@@ -13,6 +13,7 @@ type AnimatedEmojiProps = {
   playOnce?: boolean;
   restAtEnd?: boolean;
   restFrameFraction?: number; // 0..1 fraction of animation to rest on
+  disableAnimation?: boolean;
 };
 
 export function AnimatedEmoji({
@@ -25,6 +26,7 @@ export function AnimatedEmoji({
   playOnce = false,
   restAtEnd = false,
   restFrameFraction,
+  disableAnimation = false,
 }: AnimatedEmojiProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const animRef = useRef<AnimationItem | null>(null);
@@ -32,6 +34,7 @@ export function AnimatedEmoji({
   const [failed, setFailed] = useState(false);
 
   const playAnimation = () => {
+    if (disableAnimation) return;
     const anim = animRef.current;
     if (!anim) return;
     try {
@@ -97,10 +100,12 @@ export function AnimatedEmoji({
       anim.addEventListener("DOMLoaded", handleDomLoaded);
       anim.addEventListener("data_failed", handleFailed);
       anim.addEventListener("complete", handleComplete);
-      const start = () => {
-        playAnimation();
-      };
-      playTimer = setTimeout(start, delayMs);
+      if (!disableAnimation) {
+        const start = () => {
+          playAnimation();
+        };
+        playTimer = setTimeout(start, delayMs);
+      }
     } catch {
       setLoaded(false);
       setFailed(true);
@@ -115,7 +120,7 @@ export function AnimatedEmoji({
       anim?.destroy();
       if (playTimer) clearTimeout(playTimer);
     };
-  }, [src, delayMs, playOnce, restAtEnd, restFrameFraction]);
+  }, [src, delayMs, playOnce, restAtEnd, restFrameFraction, disableAnimation]);
 
   return (
     <button

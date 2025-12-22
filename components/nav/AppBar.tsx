@@ -10,6 +10,7 @@ export default function AppBar() {
   const pathname = usePathname();
   const supabaseRef = useRef(createClient());
   const [hasUnread, setHasUnread] = useState(false);
+  const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -66,7 +67,29 @@ export default function AppBar() {
       }
     };
 
+    const refreshNotificationsUnread = async () => {
+      try {
+        const supabase = supabaseRef.current;
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) {
+          if (active) setHasUnreadNotifications(false);
+          return;
+        }
+        const { count } = await supabase
+          .from("notifications")
+          .select("id", { count: "exact", head: true })
+          .eq("recipient_id", user.id)
+          .is("read_at", null);
+        if (active) setHasUnreadNotifications((count ?? 0) > 0);
+      } catch {
+        if (active) setHasUnreadNotifications(false);
+      }
+    };
+
     refreshUnread();
+    refreshNotificationsUnread();
 
     const supabase = supabaseRef.current;
     const channel = supabase.channel("appbar:unread");
@@ -128,9 +151,37 @@ export default function AppBar() {
 
     channel.subscribe();
 
+    let notifChannel: ReturnType<typeof supabase.channel> | null = null;
+    const subscribeNotifications = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user || !active) return;
+      notifChannel = supabase
+        .channel(`appbar:notifications:${user.id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "notifications",
+            filter: `recipient_id=eq.${user.id}`,
+          },
+          () => {
+            refreshNotificationsUnread();
+          }
+        )
+        .subscribe();
+    };
+
+    void subscribeNotifications();
+
     return () => {
       active = false;
       supabase.removeChannel(channel);
+      if (notifChannel) {
+        supabase.removeChannel(notifChannel);
+      }
     };
   }, []);
 
@@ -148,6 +199,8 @@ export default function AppBar() {
         {navItems.map(({ name, href, icon: Icon }) => {
           const active = pathname === href;
           const showUnreadDot = name === "Messages" && hasUnread;
+          const showNotificationsDot =
+            name === "Activity" && hasUnreadNotifications;
           return (
             <li key={href} className="flex-1 text-center">
               <Link
@@ -160,7 +213,7 @@ export default function AppBar() {
               >
                 <span className="relative mb-0.5 inline-flex">
                   <Icon className="h-5 w-5" />
-                  {showUnreadDot ? (
+                  {showUnreadDot || showNotificationsDot ? (
                     <span className="absolute -top-0.5 -right-1 h-2 w-2 rounded-full bg-destructive" />
                   ) : null}
                 </span>

@@ -73,6 +73,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const { data: existing } = await supabase
+    .from("profile_reactions")
+    .select("reaction_type")
+    .eq("from_user_id", user.id)
+    .eq("to_user_id", to_user_id)
+    .maybeSingle();
+
   // Upsert: update if exists, insert if not
   const { data, error } = await supabase
     .from("profile_reactions")
@@ -94,7 +101,50 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ reaction: data });
+  let notifyErrorMessage: string | null = null;
+  const shouldNotify = to_user_id !== user.id;
+
+  if (shouldNotify) {
+    const since = new Date(Date.now() - 8 * 1000).toISOString();
+    const { data: recent } = await supabase
+      .from("notifications")
+      .select("id")
+      .eq("recipient_id", to_user_id)
+      .eq("actor_id", user.id)
+      .eq("type", "profile_reaction")
+      .eq("entity_type", "profile")
+      .eq("entity_id", to_user_id)
+      .gte("created_at", since)
+      .limit(1);
+
+    if (recent && recent.length > 0) {
+      return NextResponse.json({
+        reaction: data,
+        notify_error: null,
+      });
+    }
+
+    const { error: notifyError } = await supabase.from("notifications").insert({
+      recipient_id: to_user_id,
+      actor_id: user.id,
+      type: "profile_reaction",
+      entity_type: "profile",
+      entity_id: to_user_id,
+      data: {
+        reaction: reaction_type,
+      },
+    });
+
+    if (notifyError) {
+      notifyErrorMessage = notifyError.message || "notify_insert_failed";
+      console.warn("[profile-reactions] notify insert failed", notifyError);
+    }
+  }
+
+  return NextResponse.json({
+    reaction: data,
+    notify_error: notifyErrorMessage,
+  });
 }
 
 // DELETE - Remove a profile reaction

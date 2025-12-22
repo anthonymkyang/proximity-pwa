@@ -96,6 +96,25 @@ export async function POST(
       .eq("id", conversationId);
 
     if (action === "approved") {
+      const { error: notifyError } = await supabase
+        .from("notifications")
+        .insert({
+          recipient_id: targetUserId,
+          actor_id: user.id,
+          type: "group_join_approved",
+          entity_type: "group",
+          entity_id: groupId,
+          data: {
+            group_title: groupTitle,
+          },
+        });
+
+      if (notifyError) {
+        console.warn("[groups/notify] notification insert failed", notifyError);
+      }
+    }
+
+    if (action === "approved") {
       const hostId = group.host_id ? String(group.host_id) : null;
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
       const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;

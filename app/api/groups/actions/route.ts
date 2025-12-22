@@ -120,7 +120,7 @@ export async function publishGroup(
   if (nextStatus === "active") {
     const { data: g, error: fetchErr } = await supabase
       .from("groups")
-      .select("start_time, end_time, host_id, cohost_ids, title")
+      .select("start_time, end_time, host_id, cohost_ids, title, status")
       .eq("id", groupId)
       .maybeSingle();
 
@@ -141,6 +141,9 @@ export async function publishGroup(
         "Publishing failed: start/finish time requirements are not met. The finish time must be after the start time."
       );
     }
+
+    const wasActive = String(g?.status || "") === "active";
+    const shouldNotify = nextStatus === "active" && !wasActive;
 
     // Best-effort: create a group conversation and add members
     try {
@@ -193,6 +196,48 @@ export async function publishGroup(
         await admin
           .from("conversation_members")
           .upsert(rows, { onConflict: "conversation_id,user_id" });
+
+        if (shouldNotify) {
+          const [contactRes, pinRes] = await Promise.all([
+            admin
+              .from("connection_contacts")
+              .select("connection_id, connections!inner(owner_id)")
+              .eq("profile_id", hostId),
+            admin
+              .from("connection_pins")
+              .select("connection_id, connections!inner(owner_id)")
+              .eq("pinned_profile_id", hostId),
+          ]);
+
+          const recipients = new Set<string>();
+          const collectOwnerId = (row: any) => {
+            const owner =
+              row?.connections?.owner_id ||
+              row?.connections?.[0]?.owner_id ||
+              null;
+            if (owner && owner !== hostId) {
+              recipients.add(String(owner));
+            }
+          };
+
+          (contactRes.data || []).forEach(collectOwnerId);
+          (pinRes.data || []).forEach(collectOwnerId);
+
+          if (recipients.size) {
+            await admin.from("notifications").insert(
+              Array.from(recipients).map((recipientId) => ({
+                recipient_id: recipientId,
+                actor_id: hostId,
+                type: "group_created",
+                entity_type: "group",
+                entity_id: groupId,
+                data: {
+                  group_title: groupTitle,
+                },
+              }))
+            );
+          }
+        }
       }
     } catch (err) {
       console.warn("[groups/actions] group chat create failed", err);
