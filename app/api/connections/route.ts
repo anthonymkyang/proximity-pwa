@@ -18,50 +18,55 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const targetProfileId = url.searchParams.get("target_profile_id");
 
+  const selectWithCategory = `
+    id,
+    type,
+    title,
+    note,
+    category_id,
+    created_at,
+    updated_at,
+    last_interacted_at,
+    connection_contacts:connection_contacts (
+      profile_id,
+      profiles:profiles!connection_contacts_profile_id_fkey (
+        id,
+        profile_title,
+        avatar_url,
+        username,
+        date_of_birth,
+        sexuality:sexualities!profiles_sexuality_id_fkey(label),
+        position:positions!profiles_position_id_fkey(label)
+      ),
+      display_name,
+      email,
+      phone,
+      handle,
+      metadata
+    ),
+    connection_pins:connection_pins (
+      pinned_profile_id,
+      nickname,
+      metadata,
+      pinned_profile:profiles!connection_pins_pinned_profile_id_fkey (
+        id,
+        profile_title,
+        avatar_url,
+        username,
+        date_of_birth,
+        sexuality:sexualities!profiles_sexuality_id_fkey(label),
+        position:positions!profiles_position_id_fkey(label)
+      )
+    )
+  `;
+  const selectWithoutCategory = selectWithCategory.replace(
+    "category_id,\n",
+    ""
+  );
+
   let query = supabase
     .from("connections")
-    .select(
-      `
-        id,
-        type,
-        title,
-        note,
-        created_at,
-        updated_at,
-        last_interacted_at,
-        connection_contacts:connection_contacts (
-          profile_id,
-          profiles:profiles!connection_contacts_profile_id_fkey (
-            id,
-            profile_title,
-            avatar_url,
-            username,
-            date_of_birth,
-            sexuality:sexualities!profiles_sexuality_id_fkey(label),
-            position:positions!profiles_position_id_fkey(label)
-          ),
-          display_name,
-          email,
-          phone,
-          handle,
-          metadata
-        ),
-        connection_pins:connection_pins (
-          pinned_profile_id,
-          nickname,
-          metadata,
-          pinned_profile:profiles!connection_pins_pinned_profile_id_fkey (
-            id,
-            profile_title,
-            avatar_url,
-            username,
-            date_of_birth,
-            sexuality:sexualities!profiles_sexuality_id_fkey(label),
-            position:positions!profiles_position_id_fkey(label)
-          )
-        )
-      `
-    )
+    .select(selectWithCategory)
     .eq("owner_id", user.id)
     .order("updated_at", { ascending: false });
 
@@ -71,7 +76,17 @@ export async function GET(req: Request) {
     );
   }
 
-  const { data, error } = await query;
+  let { data, error } = await query;
+  if (error?.message?.includes("category_id")) {
+    query = supabase
+      .from("connections")
+      .select(selectWithoutCategory)
+      .eq("owner_id", user.id)
+      .order("updated_at", { ascending: false });
+    const retry = await query;
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error) {
     return NextResponse.json(

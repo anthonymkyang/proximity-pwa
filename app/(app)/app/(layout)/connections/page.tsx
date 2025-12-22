@@ -9,6 +9,7 @@ import {
 import { useId, useRef } from "react";
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { AnimatePresence, motion } from "framer-motion";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -19,7 +20,17 @@ import {
 } from "@/components/ui/input-group";
 import { createClient } from "@/utils/supabase/client";
 import { Input } from "@/components/ui/input";
-import { Search, Plus, Check, ContactRound, Pin } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import {
+  Search,
+  Plus,
+  Check,
+  ContactRound,
+  Pin,
+  MoreVertical,
+  GripVertical,
+  X,
+} from "lucide-react";
 import getAvatarProxyUrl from "@/lib/profiles/getAvatarProxyUrl";
 import {
   Empty,
@@ -39,6 +50,13 @@ import {
   DrawerTitle,
   DrawerTrigger,
 } from "@/components/ui/drawer";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -64,20 +82,14 @@ import { StatusBadge } from "@/components/status/Badge";
 import * as Flags from "country-flag-icons/react/3x2";
 import { SocialIcon } from "react-social-icons";
 
-const filters = [
-  "All",
-  "Contacts",
-  "Pins",
-  "Online",
-  "Nearby",
-  "+ Add",
-] as const;
+const baseFilters = ["All", "Contacts", "Pins", "Online", "Nearby"] as const;
 
 type ConnectionRow = {
   id: string;
   type: "contact" | "pin";
   title: string;
   note?: string | null;
+  category_id?: string | null;
   connection_contacts?: any;
   connection_pins?: any;
   updated_at?: string | null;
@@ -97,6 +109,13 @@ type UIConnection = {
   fallback: string;
   isContact?: boolean;
   isPin?: boolean;
+  categoryId?: string | null;
+};
+
+type ConnectionCategory = {
+  id: string;
+  name: string;
+  sort_order?: number | null;
 };
 
 // Reusable row layout similar to Messages list
@@ -149,8 +168,27 @@ function distanceKm(
 }
 
 export default function ConnectionsPage() {
-  const [activeFilter, setActiveFilter] =
-    useState<(typeof filters)[number]>("All");
+  const [activeFilter, setActiveFilter] = useState<string>("All");
+  const [addCategoryOpen, setAddCategoryOpen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [categories, setCategories] = useState<ConnectionCategory[]>([]);
+  const [renameCategoryOpen, setRenameCategoryOpen] = useState(false);
+  const [renameCategoryId, setRenameCategoryId] = useState<string | null>(null);
+  const [renameCategoryValue, setRenameCategoryValue] = useState("");
+  const [deleteCategoryOpen, setDeleteCategoryOpen] = useState(false);
+  const [deleteCategoryId, setDeleteCategoryId] = useState<string | null>(null);
+  const [reorderMode, setReorderMode] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [draggingCategoryId, setDraggingCategoryId] = useState<string | null>(
+    null
+  );
+  const filterRowRef = useRef<HTMLDivElement>(null);
+  const lastDragAtRef = useRef(0);
+  const [addToCategoryOpen, setAddToCategoryOpen] = useState(false);
+  const [addToCategoryId, setAddToCategoryId] = useState<string | null>(null);
+  const [addingConnectionId, setAddingConnectionId] = useState<string | null>(
+    null
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<ConnectionRow[]>([]);
@@ -181,6 +219,23 @@ export default function ConnectionsPage() {
   const scrollViewportRef = useRef<HTMLDivElement>(null);
   const [canScrollTop, setCanScrollTop] = useState(false);
   const [canScrollBottom, setCanScrollBottom] = useState(false);
+  const [listVisible, setListVisible] = useState(false);
+
+  const filters = useMemo(
+    () => [
+      ...baseFilters,
+      ...categories.map((category) => category.name),
+      "+ Add",
+    ],
+    [categories]
+  );
+  const categoryByName = useMemo(() => {
+    const map = new Map<string, string>();
+    categories.forEach((category) => {
+      map.set(category.name, category.id);
+    });
+    return map;
+  }, [categories]);
 
   const myCoords = useMemo(() => {
     if (!currentUserId) return null;
@@ -422,6 +477,126 @@ export default function ConnectionsPage() {
     }
   };
 
+  const handleAddCategory = async () => {
+    const name = newCategoryName.trim();
+    if (!name) return;
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+      const maxOrder =
+        categories.length > 0
+          ? Math.max(
+              ...categories.map((category) => category.sort_order ?? 0)
+            )
+          : 0;
+      const { data, error } = await supabase
+        .from("connection_categories")
+        .insert({ name, owner_id: user.id, sort_order: maxOrder + 1 })
+        .select("id, name, sort_order")
+        .single();
+      if (error) throw error;
+      setCategories((prev) => [...prev, data]);
+      setActiveFilter(data.name);
+      setAddToCategoryId(data.id);
+      setAddToCategoryOpen(true);
+      setAddCategoryOpen(false);
+      setNewCategoryName("");
+    } catch (err: any) {
+      console.error("Failed to add label:", err?.message || err);
+    }
+  };
+
+  const handleRenameCategory = async () => {
+    const name = renameCategoryValue.trim();
+    if (!renameCategoryId || !name) return;
+    try {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("connection_categories")
+        .update({ name })
+        .eq("id", renameCategoryId);
+      if (error) throw error;
+      setCategories((prev) =>
+        prev.map((category) =>
+          category.id === renameCategoryId ? { ...category, name } : category
+        )
+      );
+      if (categoryByName.get(activeFilter) === renameCategoryId) {
+        setActiveFilter(name);
+      }
+      setRenameCategoryOpen(false);
+      setRenameCategoryId(null);
+      setRenameCategoryValue("");
+    } catch (err: any) {
+      console.error("Failed to rename label:", err?.message || err);
+    }
+  };
+
+  const handleDeleteCategory = async () => {
+    if (!deleteCategoryId) return;
+    try {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("connection_categories")
+        .delete()
+        .eq("id", deleteCategoryId);
+      if (error) throw error;
+      setCategories((prev) =>
+        prev.filter((category) => category.id !== deleteCategoryId)
+      );
+      if (categoryByName.get(activeFilter) === deleteCategoryId) {
+        setActiveFilter("All");
+      }
+      setDeleteCategoryOpen(false);
+      setDeleteCategoryId(null);
+    } catch (err: any) {
+      console.error("Failed to delete label:", err?.message || err);
+    }
+  };
+
+  const persistCategoryOrder = async (next: ConnectionCategory[]) => {
+    try {
+      const supabase = createClient();
+      const payload = next.map((category, index) => ({
+        id: category.id,
+        sort_order: index + 1,
+      }));
+      const { error } = await supabase
+        .from("connection_categories")
+        .upsert(payload, { onConflict: "id" });
+      if (error) throw error;
+    } catch (err: any) {
+      console.error("Failed to reorder labels:", err?.message || err);
+    }
+  };
+
+  const handleToggleCategory = async (
+    connectionId: string,
+    nextCategoryId: string | null
+  ) => {
+    try {
+      setAddingConnectionId(connectionId);
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("connections")
+        .update({ category_id: nextCategoryId })
+        .eq("id", connectionId);
+      if (error) throw error;
+      setRows((prev) =>
+        prev.map((row) =>
+          row.id === connectionId ? { ...row, category_id: nextCategoryId } : row
+        )
+      );
+    } catch (err: any) {
+      console.error("Failed to update label:", err?.message || err);
+    } finally {
+      setAddingConnectionId(null);
+    }
+  };
+
   useEffect(() => {
     let active = true;
     setLoading(true);
@@ -449,6 +624,77 @@ export default function ConnectionsPage() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    const supabase = createClient();
+    const loadCategories = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("connection_categories")
+          .select("id, name, sort_order")
+          .order("sort_order", { ascending: true, nullsFirst: true })
+          .order("created_at", { ascending: false });
+        if (error) throw error;
+        if (active) setCategories(data ?? []);
+      } catch (err) {
+        if (active) setCategories([]);
+      }
+    };
+    loadCategories();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!filters.includes(activeFilter)) {
+      setActiveFilter("All");
+    }
+  }, [filters, activeFilter]);
+
+  useEffect(() => {
+    if (!categoryByName.has(activeFilter)) {
+      setEditMode(false);
+    }
+  }, [activeFilter, categoryByName]);
+
+  useEffect(() => {
+    if (!editMode) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        event.target instanceof Element &&
+        event.target.closest('[data-edit-remove="true"]')
+      ) {
+        return;
+      }
+      setEditMode(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [editMode]);
+
+
+  useEffect(() => {
+    if (!reorderMode) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        filterRowRef.current &&
+        event.target instanceof Node &&
+        filterRowRef.current.contains(event.target)
+      ) {
+        return;
+      }
+      setReorderMode(false);
+      setDraggingCategoryId(null);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [reorderMode]);
 
   const connections: UIConnection[] = useMemo(() => {
     // Build a map of profileIds to contacts for quick lookup
@@ -600,15 +846,55 @@ export default function ConnectionsPage() {
         fallback,
         isContact: row.type === "contact",
         isPin: row.type === "pin",
+        categoryId: row.category_id ?? null,
       };
     });
   }, [rows, presence, myCoords]);
+
+  const dedupedConnectionsForCategory = useMemo(() => {
+    const profileIdTypes = new Map<string, Set<"contact" | "pin">>();
+    for (const conn of connections) {
+      if (!conn.profileId) continue;
+      if (!profileIdTypes.has(conn.profileId)) {
+        profileIdTypes.set(conn.profileId, new Set());
+      }
+      profileIdTypes.get(conn.profileId)!.add(conn.type);
+    }
+
+    const seenProfileIds = new Map<string, UIConnection>();
+    const list: UIConnection[] = [];
+    for (const conn of connections) {
+      if (!conn.profileId) {
+        list.push(conn);
+        continue;
+      }
+      const existing = seenProfileIds.get(conn.profileId);
+      if (!existing) {
+        seenProfileIds.set(conn.profileId, conn);
+        const types = profileIdTypes.get(conn.profileId);
+        conn.isContact = types?.has("contact") ?? false;
+        conn.isPin = types?.has("pin") ?? false;
+        list.push(conn);
+      } else if (existing.type === "pin" && conn.type === "contact") {
+        const types = profileIdTypes.get(conn.profileId);
+        conn.isContact = types?.has("contact") ?? false;
+        conn.isPin = types?.has("pin") ?? false;
+        seenProfileIds.set(conn.profileId, conn);
+        const idx = list.indexOf(existing);
+        if (idx !== -1) list[idx] = conn;
+      }
+    }
+    return list;
+  }, [connections]);
 
   const filteredConnections = useMemo(() => {
     const q = query.trim().toLowerCase();
     let list = connections;
 
-    if (activeFilter === "Contacts") {
+    const categoryId = categoryByName.get(activeFilter) || null;
+    if (categoryId) {
+      list = list.filter((c) => c.categoryId === categoryId);
+    } else if (activeFilter === "Contacts") {
       list = list.filter((c) => c.type === "contact");
     } else if (activeFilter === "Pins") {
       list = list.filter((c) => c.type === "pin");
@@ -621,43 +907,7 @@ export default function ConnectionsPage() {
           (a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity)
         );
     } else if (activeFilter === "All") {
-      // Build a map of profileIds to track if they exist as both contact and pin
-      const profileIdTypes = new Map<string, Set<"contact" | "pin">>();
-      for (const conn of connections) {
-        if (!conn.profileId) continue;
-        if (!profileIdTypes.has(conn.profileId)) {
-          profileIdTypes.set(conn.profileId, new Set());
-        }
-        profileIdTypes.get(conn.profileId)!.add(conn.type);
-      }
-
-      // Dedupe: if a profileId exists as both contact and pin, keep only the contact
-      const seenProfileIds = new Map<string, UIConnection>();
-      list = [];
-      for (const conn of connections) {
-        if (!conn.profileId) {
-          list.push(conn);
-          continue;
-        }
-        const existing = seenProfileIds.get(conn.profileId);
-        if (!existing) {
-          seenProfileIds.set(conn.profileId, conn);
-          // Update flags based on what types exist for this profileId
-          const types = profileIdTypes.get(conn.profileId);
-          conn.isContact = types?.has("contact") ?? false;
-          conn.isPin = types?.has("pin") ?? false;
-          list.push(conn);
-        } else if (existing.type === "pin" && conn.type === "contact") {
-          // Replace pin with contact, update flags based on what types exist for this profileId
-          const types = profileIdTypes.get(conn.profileId);
-          conn.isContact = types?.has("contact") ?? false;
-          conn.isPin = types?.has("pin") ?? false;
-          seenProfileIds.set(conn.profileId, conn);
-          const idx = list.indexOf(existing);
-          if (idx !== -1) list[idx] = conn;
-        }
-        // else: already have this profileId, skip this one
-      }
+      list = dedupedConnectionsForCategory;
     }
 
     if (!q) return list;
@@ -666,7 +916,23 @@ export default function ConnectionsPage() {
         c.title.toLowerCase().includes(q) ||
         (c.subtitle || "").toLowerCase().includes(q)
     );
-  }, [connections, query, activeFilter]);
+  }, [
+    connections,
+    query,
+    activeFilter,
+    categoryByName,
+    dedupedConnectionsForCategory,
+  ]);
+
+  useEffect(() => {
+    if (loading) {
+      setListVisible(false);
+      return;
+    }
+    setListVisible(false);
+    const frame = requestAnimationFrame(() => setListVisible(true));
+    return () => cancelAnimationFrame(frame);
+  }, [activeFilter, filteredConnections.length, loading, error]);
 
   const toStatus = (
     presence: UIConnection["presence"]
@@ -700,47 +966,164 @@ export default function ConnectionsPage() {
       </div>
 
       {/* Filter chips */}
-      <div className="flex gap-2 overflow-x-auto pb-3 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+      <div
+        ref={filterRowRef}
+        className="flex gap-2 overflow-x-auto pb-3 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+      >
         <div className="pl-2.5"></div>
         {filters.map((f) => {
           const isAdd = f === "+ Add";
           const isAll = f === "All";
           const isActive = activeFilter === f;
+          const categoryId = categoryByName.get(f) || null;
+          const isCustom = Boolean(categoryId);
+          if (isAdd) {
+            return (
+              <motion.div
+                key={f}
+                layout="position"
+                transition={{ type: "spring", stiffness: 260, damping: 30 }}
+              >
+                <Drawer
+                  open={addCategoryOpen}
+                  onOpenChange={(open) => {
+                    setAddCategoryOpen(open);
+                    if (!open) setNewCategoryName("");
+                  }}
+                >
+                  <DrawerTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="rounded-full"
+                    >
+                      <span className="flex items-center gap-1">
+                        <Plus className="h-3.5 w-3.5" />
+                        Add
+                      </span>
+                    </Button>
+                  </DrawerTrigger>
+                  <DrawerContent>
+                    <div className="mx-auto w-full max-w-xl p-4 pb-6">
+                      <DrawerHeader className="pt-0 px-0 pb-2">
+                        <DrawerTitle>Add label</DrawerTitle>
+                        <DrawerDescription>
+                          Create a label to organise your connections.
+                        </DrawerDescription>
+                      </DrawerHeader>
+                      <div className="rounded-lg bg-secondary/30 p-4 space-y-2">
+                        <Label>Label</Label>
+                        <Input
+                          placeholder="e.g. Dom tops"
+                          value={newCategoryName}
+                          onChange={(e) => setNewCategoryName(e.target.value)}
+                        />
+                      </div>
+                      <DrawerFooter className="pt-4 px-0 pb-0">
+                        <DrawerClose asChild>
+                          <Button
+                            disabled={!newCategoryName.trim()}
+                            onClick={handleAddCategory}
+                          >
+                            Add label
+                          </Button>
+                        </DrawerClose>
+                      </DrawerFooter>
+                    </div>
+                  </DrawerContent>
+                </Drawer>
+              </motion.div>
+            );
+          }
+
+          const handleDragStart = (event: React.DragEvent) => {
+            if (!reorderMode || !isCustom || !categoryId) return;
+            event.dataTransfer.setData("text/plain", categoryId);
+            event.dataTransfer.effectAllowed = "move";
+            setDraggingCategoryId(categoryId);
+            lastDragAtRef.current = Date.now();
+          };
+          const handleDragOver = (event: React.DragEvent) => {
+            if (!reorderMode || !isCustom || !categoryId) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+          };
+          const handleDrop = () => {
+            if (!reorderMode || !isCustom || !categoryId) return;
+            if (!draggingCategoryId || draggingCategoryId === categoryId) {
+              setDraggingCategoryId(null);
+              return;
+            }
+            lastDragAtRef.current = Date.now();
+            const next = [...categories];
+            const fromIndex = next.findIndex((c) => c.id === draggingCategoryId);
+            const toIndex = next.findIndex((c) => c.id === categoryId);
+            if (fromIndex === -1 || toIndex === -1) {
+              setDraggingCategoryId(null);
+              return;
+            }
+            const [moved] = next.splice(fromIndex, 1);
+            next.splice(toIndex, 0, moved);
+            setCategories(next);
+            setDraggingCategoryId(null);
+            void persistCategoryOrder(next);
+          };
+
           return (
-            <Button
+            <motion.div
               key={f}
-              size="sm"
-              variant={isActive ? "default" : "outline"}
-              className={cn(
-                "rounded-full",
-                isActive && "border border-primary",
-                isAll && "border-primary"
-              )}
-              onClick={() => setActiveFilter(f)}
+              layout="position"
+              transition={{ type: "spring", stiffness: 260, damping: 30 }}
             >
-              {isAdd ? (
+              <Button
+                size="sm"
+                variant={isActive ? "default" : "outline"}
+                className={cn(
+                  "rounded-full",
+                  isActive && "border border-primary",
+                  isAll && "border-primary",
+                  reorderMode && isCustom && "cursor-grab"
+                )}
+                onClick={() => {
+                  if (reorderMode) {
+                    const draggedRecently =
+                      Date.now() - lastDragAtRef.current < 250;
+                    if (!draggedRecently) {
+                      setReorderMode(false);
+                      setDraggingCategoryId(null);
+                    }
+                    if (draggedRecently) return;
+                  }
+                  setActiveFilter(f);
+                }}
+                draggable={reorderMode && isCustom}
+                onDragStart={handleDragStart}
+                onDragOver={handleDragOver}
+                onDrop={handleDrop}
+              >
                 <span className="flex items-center gap-1">
-                  <Plus className="h-3.5 w-3.5" />
-                  Add
+                  {f}
+                  {reorderMode && isCustom ? (
+                    <GripVertical className="h-3.5 w-3.5" />
+                  ) : null}
                 </span>
-              ) : (
-                f
-              )}
-            </Button>
+              </Button>
+            </motion.div>
           );
         })}
         <div className="pr-2.5"></div>
       </div>
 
       {/* My Contact Card */}
-      <Drawer>
+      {activeFilter === "All" ? (
+        <Drawer>
         <DrawerTrigger asChild>
           <div className="py-2 px-4 cursor-pointer">
-            <div className="border rounded-lg bg-card text-card-foreground hover:bg-muted transition-colors">
+            <div className="rounded-lg bg-card text-card-foreground hover:bg-muted transition-colors">
               <div className="p-4 flex items-center justify-between gap-4">
                 <p className="font-semibold">My contact card</p>
                 <Button size="sm" variant="outline">
-                  Add details
+                  My details
                 </Button>
               </div>
             </div>
@@ -1120,125 +1503,367 @@ export default function ConnectionsPage() {
             </div>
           </div>
         </DrawerContent>
+        </Drawer>
+      ) : null}
+
+      <Drawer
+        open={addToCategoryOpen}
+        onOpenChange={(open) => {
+          setAddToCategoryOpen(open);
+          if (!open) setAddToCategoryId(null);
+        }}
+      >
+        <DrawerContent>
+          <div className="mx-auto w-full max-w-xl p-4 pb-6">
+            <DrawerHeader className="pt-0 px-0 pb-2">
+              <DrawerTitle>Add connections</DrawerTitle>
+              <DrawerDescription>
+                Select contacts or pins to include in this label.
+              </DrawerDescription>
+            </DrawerHeader>
+            <div className="space-y-2">
+              {dedupedConnectionsForCategory.map((connection) => {
+                const isAdded =
+                  addToCategoryId != null &&
+                  connection.categoryId === addToCategoryId;
+                return (
+                  <div
+                    key={connection.id}
+                    className="flex items-center justify-between gap-3 rounded-lg bg-card px-3 py-2"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Avatar className="h-10 w-10">
+                        <AvatarImage
+                          src={
+                            connection.avatarUrl ||
+                            (undefined as unknown as string)
+                          }
+                          alt={connection.title}
+                        />
+                        <AvatarFallback>{connection.fallback}</AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold truncate">
+                          {connection.title}
+                        </div>
+                        {connection.subtitle ? (
+                          <div className="text-xs text-muted-foreground truncate">
+                            {connection.subtitle}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                    <Button
+                      size="icon"
+                      variant={isAdded ? "secondary" : "outline"}
+                      className="shrink-0"
+                      disabled={addingConnectionId === connection.id}
+                      onClick={() =>
+                        handleToggleCategory(
+                          connection.id,
+                          isAdded ? null : addToCategoryId
+                        )
+                      }
+                    >
+                      {isAdded ? (
+                        <Check className="h-4 w-4" />
+                      ) : (
+                        <Plus className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </DrawerContent>
+      </Drawer>
+
+      <Drawer open={renameCategoryOpen} onOpenChange={setRenameCategoryOpen}>
+        <DrawerContent>
+          <div className="mx-auto w-full max-w-xl p-4 pb-6">
+            <DrawerHeader className="pt-0 px-0 pb-2">
+              <DrawerTitle>Rename label</DrawerTitle>
+            </DrawerHeader>
+            <div className="rounded-lg bg-secondary/30 p-4 space-y-2">
+              <Label>Label</Label>
+              <Input
+                placeholder="e.g. Dom tops"
+                value={renameCategoryValue}
+                onChange={(e) => setRenameCategoryValue(e.target.value)}
+              />
+            </div>
+            <DrawerFooter className="pt-4 px-0 pb-0">
+              <DrawerClose asChild>
+                <Button
+                  disabled={!renameCategoryValue.trim()}
+                  onClick={handleRenameCategory}
+                >
+                  Save
+                </Button>
+              </DrawerClose>
+            </DrawerFooter>
+          </div>
+        </DrawerContent>
+      </Drawer>
+
+      <Drawer open={deleteCategoryOpen} onOpenChange={setDeleteCategoryOpen}>
+        <DrawerContent>
+          <div className="mx-auto w-full max-w-xl p-4 pb-6">
+            <DrawerHeader className="pt-0 px-0 pb-2">
+              <DrawerTitle>Delete label</DrawerTitle>
+              <DrawerDescription>
+                Connections will stay, but the label will be removed.
+              </DrawerDescription>
+            </DrawerHeader>
+            <DrawerFooter className="pt-4 px-0 pb-0">
+              <DrawerClose asChild>
+                <Button variant="destructive" onClick={handleDeleteCategory}>
+                  Delete label
+                </Button>
+              </DrawerClose>
+            </DrawerFooter>
+          </div>
+        </DrawerContent>
       </Drawer>
 
       {/* Connections list styled like Messages */}
       <div>
-        {loading ? null : error ? (
-          <div className="px-4 text-sm text-muted-foreground">{error}</div>
-        ) : filteredConnections.length === 0 ? (
-          <div className="pt-8">
-            <Empty>
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <Users className="h-6 w-6" />
-                </EmptyMedia>
-                {activeFilter === "Contacts" ? (
-                  <>
-                    <EmptyTitle>No contacts yet</EmptyTitle>
-                    <EmptyDescription>
-                      Add people you’ve exchanged details with to see them here.
-                    </EmptyDescription>
-                  </>
-                ) : activeFilter === "Pins" ? (
-                  <>
-                    <EmptyTitle>No pinned profiles</EmptyTitle>
-                    <EmptyDescription>
-                      Pin profiles you like to keep them handy.
-                    </EmptyDescription>
-                  </>
-                ) : activeFilter === "Online" ? (
-                  <>
-                    <EmptyTitle>No one online right now</EmptyTitle>
-                    <EmptyDescription>
-                      Check back soon or pin more profiles to grow this list.
-                    </EmptyDescription>
-                  </>
-                ) : activeFilter === "Nearby" ? (
-                  <>
-                    <EmptyTitle>No nearby connections</EmptyTitle>
-                    <EmptyDescription>
-                      Try again later or adjust your filters.
-                    </EmptyDescription>
-                  </>
-                ) : (
-                  <>
-                    <EmptyTitle>No connections yet</EmptyTitle>
-                    <EmptyDescription>
-                      Pin profiles you like or add contacts after exchanging
-                      details.
-                    </EmptyDescription>
-                  </>
-                )}
-              </EmptyHeader>
-            </Empty>
+        {categoryByName.has(activeFilter) ? (
+          <div className="flex items-center justify-between px-4 pb-2">
+            <h2 className="text-xl font-semibold">{activeFilter}</h2>
+            <div className="inline-flex w-fit gap-2">
+              <Button
+                variant="secondary"
+                className="rounded-full h-9 w-9 p-0 focus-visible:z-10 backdrop-blur-2xl bg-white/10 dark:bg-white/5 shadow-[0_8px_32px_0_rgba(0,0,0,0.12)] hover:bg-white/20 dark:hover:bg-white/10 transition-all"
+                size="sm"
+                aria-label="Add"
+                onClick={() => {
+                  const categoryId = categoryByName.get(activeFilter) || null;
+                  setAddToCategoryId(categoryId);
+                  setAddToCategoryOpen(true);
+                }}
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="secondary"
+                    className="rounded-full h-9 w-9 p-0 focus-visible:z-10 backdrop-blur-2xl bg-white/10 dark:bg-white/5 shadow-[0_8px_32px_0_rgba(0,0,0,0.12)] hover:bg-white/20 dark:hover:bg-white/10 transition-all"
+                    size="sm"
+                  >
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem onClick={() => setEditMode(true)}>
+                    Edit
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      const categoryId =
+                        categoryByName.get(activeFilter) || null;
+                      if (!categoryId) return;
+                      const category = categories.find(
+                        (c) => c.id === categoryId
+                      );
+                      setRenameCategoryId(categoryId);
+                      setRenameCategoryValue(category?.name ?? activeFilter);
+                      setRenameCategoryOpen(true);
+                    }}
+                  >
+                    Rename
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => setReorderMode((prev) => !prev)}
+                  >
+                    {reorderMode ? "Done reordering" : "Reorder"}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="text-destructive focus:text-destructive"
+                    onClick={() => {
+                      const categoryId =
+                        categoryByName.get(activeFilter) || null;
+                      if (!categoryId) return;
+                      setDeleteCategoryId(categoryId);
+                      setDeleteCategoryOpen(true);
+                    }}
+                  >
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
-        ) : (
-          filteredConnections.map((c) => (
-            <Link
-              key={c.id}
-              href={
-                c.type === "contact" && c.id
-                  ? `/app/connections/${c.id}`
-                  : c.type === "pin" && c.profileId
-                  ? `/app/profile/${c.profileId}`
-                  : `/app/connections/${c.id}`
-              }
-              className="block px-4"
-            >
-              <ListItemRow
-                left={
-                  <div className="relative h-12 w-12">
-                    <Avatar className="h-12 w-12">
-                      <AvatarImage
-                        src={c.avatarUrl || (undefined as unknown as string)}
-                        alt={c.title}
+        ) : null}
+        {loading ? null : (
+          <div
+            className={cn(
+              "transition-[opacity,transform] duration-200 ease-out",
+              listVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1"
+            )}
+          >
+            {error ? (
+              <div className="px-4 text-sm text-muted-foreground">{error}</div>
+            ) : filteredConnections.length === 0 ? (
+              <div className="pt-8">
+                <Empty>
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <Users className="h-6 w-6" />
+                    </EmptyMedia>
+                    {activeFilter === "Contacts" ? (
+                      <>
+                        <EmptyTitle>No contacts yet</EmptyTitle>
+                        <EmptyDescription>
+                          Add people you’ve exchanged details with to see them here.
+                        </EmptyDescription>
+                      </>
+                    ) : activeFilter === "Pins" ? (
+                      <>
+                        <EmptyTitle>No pinned profiles</EmptyTitle>
+                        <EmptyDescription>
+                          Pin profiles you like to keep them handy.
+                        </EmptyDescription>
+                      </>
+                    ) : activeFilter === "Online" ? (
+                      <>
+                        <EmptyTitle>No one online right now</EmptyTitle>
+                        <EmptyDescription>
+                          Check back soon or pin more profiles to grow this list.
+                        </EmptyDescription>
+                      </>
+                    ) : activeFilter === "Nearby" ? (
+                      <>
+                        <EmptyTitle>No nearby connections</EmptyTitle>
+                        <EmptyDescription>
+                          Try again later or adjust your filters.
+                        </EmptyDescription>
+                      </>
+                    ) : categoryByName.has(activeFilter) ? (
+                      <>
+                        <EmptyTitle>Nobody here yet</EmptyTitle>
+                        <EmptyDescription>
+                          Add connections to the list to start.
+                        </EmptyDescription>
+                      </>
+                    ) : (
+                      <>
+                        <EmptyTitle>No connections yet</EmptyTitle>
+                        <EmptyDescription>
+                          Pin profiles you like or add contacts after exchanging
+                          details.
+                        </EmptyDescription>
+                      </>
+                    )}
+                  </EmptyHeader>
+                </Empty>
+              </div>
+            ) : (
+              <AnimatePresence initial={false} mode="popLayout">
+                {filteredConnections.map((c) => (
+                  <motion.div
+                    key={c.id}
+                    layout
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.2, ease: "easeOut" }}
+                    className="px-4"
+                  >
+                    <Link
+                      href={
+                        c.type === "contact" && c.id
+                          ? `/app/connections/${c.id}`
+                          : c.type === "pin" && c.profileId
+                          ? `/app/profile/${c.profileId}`
+                          : `/app/connections/${c.id}`
+                      }
+                      className="block"
+                    >
+                      <ListItemRow
+                        left={
+                          <div className="relative h-12 w-12">
+                            <Avatar className="h-12 w-12">
+                              <AvatarImage
+                                src={
+                                  c.avatarUrl ||
+                                  (undefined as unknown as string)
+                                }
+                                alt={c.title}
+                              />
+                              <AvatarFallback>{c.fallback}</AvatarFallback>
+                            </Avatar>
+                            <StatusBadge
+                              status={toStatus(c.presence)}
+                              size="sm"
+                              className="absolute -bottom-0.5 -right-0.5"
+                            />
+                          </div>
+                        }
+                        right={
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0 space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <p className="truncate text-base font-semibold max-w-[60vw] sm:max-w-[70vw]">
+                                  <span className="truncate inline-block max-w-[48vw] align-middle">
+                                    {c.title}
+                                  </span>
+                                  {c.secondary ? (
+                                    <span className="pl-2 text-sm font-normal text-muted-foreground truncate inline-block max-w-[32vw] align-middle">
+                                      {c.secondary}
+                                    </span>
+                                  ) : null}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+                                {c.subtitle ? (
+                                  <span className="truncate">{c.subtitle}</span>
+                                ) : null}
+                              </div>
+                            </div>
+                            {categoryByName.has(activeFilter) && editMode ? (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="h-8 w-8 p-0 rounded-full"
+                        aria-label="Remove from label"
+                        data-edit-remove="true"
+                        disabled={addingConnectionId === c.id}
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  void handleToggleCategory(c.id, null);
+                                }}
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            ) : activeFilter === "All" &&
+                              (c.isContact || c.isPin) ? (
+                              <div className="flex gap-1 ml-2 shrink-0">
+                                {c.isContact ? (
+                                  <span className="h-6 w-6 rounded-full bg-muted/60 text-muted-foreground inline-flex items-center justify-center">
+                                    <ContactRound className="h-3.5 w-3.5" />
+                                  </span>
+                                ) : null}
+                                {c.isPin ? (
+                                  <span className="h-6 w-6 rounded-full bg-muted/60 text-muted-foreground inline-flex items-center justify-center">
+                                    <Pin className="h-3.5 w-3.5 fill-current" />
+                                  </span>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </div>
+                        }
                       />
-                      <AvatarFallback>{c.fallback}</AvatarFallback>
-                    </Avatar>
-                    <StatusBadge
-                      status={toStatus(c.presence)}
-                      size="sm"
-                      className="absolute -bottom-0.5 -right-0.5"
-                    />
-                  </div>
-                }
-                right={
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0 space-y-0.5">
-                      <div className="flex items-center gap-2">
-                        <p className="truncate text-base font-semibold max-w-[60vw] sm:max-w-[70vw]">
-                          <span className="truncate inline-block max-w-[48vw] align-middle">
-                            {c.title}
-                          </span>
-                          {c.secondary ? (
-                            <span className="pl-2 text-sm font-normal text-muted-foreground truncate inline-block max-w-[32vw] align-middle">
-                              {c.secondary}
-                            </span>
-                          ) : null}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
-                        {c.subtitle ? (
-                          <span className="truncate">{c.subtitle}</span>
-                        ) : null}
-                      </div>
-                    </div>
-                    {activeFilter === "All" && (c.isContact || c.isPin) ? (
-                      <div className="flex gap-1 ml-2 shrink-0">
-                        {c.isContact && (
-                          <ContactRound className="h-4 w-4 text-muted-foreground" />
-                        )}
-                        {c.isPin && (
-                          <Pin className="h-4 w-4 text-muted-foreground fill-current" />
-                        )}
-                      </div>
-                    ) : null}
-                  </div>
-                }
-              />
-            </Link>
-          ))
+                    </Link>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            )}
+          </div>
         )}
       </div>
     </>
