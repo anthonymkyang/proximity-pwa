@@ -108,12 +108,14 @@ export function GroupScrolling({
   const router = useRouter();
 
   return (
-    <div className="flex gap-3 overflow-x-auto pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]{display:none;}">
-      <div className="pl-1.5"></div>
+    <div className="-mx-4 flex gap-3 overflow-x-auto pb-2 px-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]{display:none;}">
       {loading ? (
         <div className="flex gap-3">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="w-[60vw] rounded-xl sm:w-[380px] space-y-2">
+            <div
+              key={i}
+              className="w-[60vw] shrink-0 rounded-xl sm:w-[380px] space-y-2"
+            >
               <div className="aspect-14/9 w-full rounded-xl bg-muted animate-pulse" />
               <div className="h-4 bg-muted rounded animate-pulse" />
               <div className="h-3 bg-muted rounded w-2/3 animate-pulse" />
@@ -129,7 +131,7 @@ export function GroupScrolling({
           return (
             <div
               key={group.id}
-              className="w-[60vw] rounded-xl sm:w-[380px] cursor-pointer"
+              className="w-[60vw] shrink-0 rounded-xl sm:w-[380px] cursor-pointer"
               onClick={() => router.push(`/app/activity/groups/${group.id}`)}
             >
               <div className="relative mb-3 aspect-14/9 w-full overflow-hidden rounded-xl bg-card/60">
@@ -224,7 +226,6 @@ export function GroupScrolling({
           No upcoming groups
         </div>
       )}
-      <div className="pr-1.5"></div>
     </div>
   );
 }

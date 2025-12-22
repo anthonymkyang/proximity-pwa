@@ -19,6 +19,7 @@ export default function ShellLayout({
   const showBack = !rootPaths.includes(pathname);
   const hideTopBar =
     pathname?.startsWith("/app/messages/") ||
+    pathname?.startsWith("/app/notifications") ||
     (pathname?.startsWith("/app/activity/groups/") &&
       !pathname?.includes("/manage") &&
       !pathname?.includes("/create") &&

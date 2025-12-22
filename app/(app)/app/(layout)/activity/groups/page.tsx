@@ -31,6 +31,7 @@ type MyGroupCard = {
   title: string;
   name?: string; // API might use name instead of title
   nextDate: string | null; // from API
+  end_time?: string | null;
   membershipStatus: "hosting" | "co-hosting" | "attending";
   lifecycleStatus: "active" | "in_progress" | null;
   status?: string; // <-- Add this line to match API and fix TS error
@@ -276,6 +277,7 @@ export default function ActivityGroupsPage() {
         const normalizedMyGroups = myGroupsList.map((g: any) => ({
           ...g,
           title: g.title || g.name || "Untitled group",
+          end_time: g.end_time ?? null,
           nextDate:
             g?.nextDate ||
             g?.start_time ||
@@ -324,11 +326,23 @@ export default function ActivityGroupsPage() {
     loadGroups();
   }, []);
 
-  // Separate my groups into categories
+  const inProgressGroups = React.useMemo(() => {
+    if (!myGroups) return [];
+    return myGroups.filter(
+      (g) =>
+        g.lifecycleStatus === "in_progress" ||
+        g.live === true ||
+        isCurrentlyHappening(g.nextDate)
+    );
+  }, [myGroups]);
+
   const upcomingGroups = React.useMemo(() => {
     if (!myGroups) return [];
     const filtered = myGroups.filter(
-      (g) => isFuture(g.nextDate) && g.status === "active"
+      (g) =>
+        isFuture(g.nextDate) &&
+        g.status === "active" &&
+        !inProgressGroups.some((ig) => ig.id === g.id)
     );
     filtered.sort((a, b) => {
       const ta = a.nextDate ? new Date(a.nextDate).getTime() : 0;
@@ -336,28 +350,38 @@ export default function ActivityGroupsPage() {
       return ta - tb;
     });
     return filtered;
-  }, [myGroups]);
+  }, [myGroups, inProgressGroups]);
 
-  const inProgressGroups = React.useMemo(
-    () => myGroups?.filter((g) => (g as any).live === true) || [],
-    [myGroups]
+  const nextUpcomingGroup = React.useMemo(
+    () => (upcomingGroups.length ? upcomingGroups[0] : null),
+    [upcomingGroups]
+  );
+
+  const remainingUpcomingGroups = React.useMemo(
+    () =>
+      upcomingGroups.filter((g) => g.id !== nextUpcomingGroup?.id),
+    [upcomingGroups, nextUpcomingGroup]
   );
 
   const availableNearbyGroups = React.useMemo(
-    () =>
-      nearbyGroups?.filter(
-        (g) => isFuture(g.start_time) && g.lifecycleStatus !== "in_progress"
-      ) || [],
+    () => nearbyGroups || [],
     [nearbyGroups]
   );
 
-  const nextUpcomingGroup = React.useMemo(() => {
-    const liveIds = new Set(inProgressGroups.map((g) => g.id));
-    const notLive = upcomingGroups.filter(
-      (g) => !liveIds.has(g.id) && !isCurrentlyHappening(g.nextDate)
+  const highlightGroups = React.useMemo(() => {
+    if (!myGroups) return [];
+    const completed = myGroups.filter(
+      (g) => String(g.status || "").toLowerCase() === "completed"
     );
-    return upcomingGroups.length ? upcomingGroups[0] : null;
-  }, [upcomingGroups, inProgressGroups]);
+    completed.sort((a, b) => {
+      const ta = a.end_time || a.nextDate;
+      const tb = b.end_time || b.nextDate;
+      const aTime = ta ? new Date(ta).getTime() : 0;
+      const bTime = tb ? new Date(tb).getTime() : 0;
+      return bTime - aTime;
+    });
+    return completed.slice(0, 3);
+  }, [myGroups]);
 
   // Fallback: if Next up stack is empty, fetch attendees client-side (approved/accepted) + cohosts.
   React.useEffect(() => {
@@ -447,7 +471,7 @@ export default function ActivityGroupsPage() {
   }, [nextUpcomingGroup, supabase]);
 
   return (
-    <div className="flex flex-col gap-6 pb-[calc(72px+env(safe-area-inset-bottom))]">
+    <div className="flex flex-col gap-8 pb-[calc(72px+env(safe-area-inset-bottom))]">
       <div className="flex items-center justify-between px-4">
         <h1 className="text-4xl font-extrabold tracking-tight">Groups</h1>
         <div className="inline-flex w-fit gap-2">
@@ -472,6 +496,93 @@ export default function ActivityGroupsPage() {
           </Button>
         </div>
       </div>
+      <section className="px-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            In progress
+          </h3>
+        </div>
+        {inProgressGroups.length ? (
+          <div className="mt-4">
+            <GroupScrolling
+              groups={inProgressGroups}
+              avatarStacks={avatarStacks}
+            />
+          </div>
+        ) : (
+          <div className="mt-4 text-sm text-muted-foreground">
+            No groups are in progress right now.
+          </div>
+        )}
+      </section>
+      <section className="px-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Next up
+          </h3>
+        </div>
+        {nextUpcomingGroup ? (
+          <div className="mt-4">
+            <GroupCard
+              group={nextUpcomingGroup}
+              isMyGroup
+              avatarStacks={avatarStacks}
+              onClick={() =>
+                router.push(`/app/activity/groups/${nextUpcomingGroup.id}`)
+              }
+            />
+          </div>
+        ) : (
+          <div className="mt-4 text-sm text-muted-foreground">
+            No upcoming groups yet.
+          </div>
+        )}
+      </section>
+      <section className="px-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Upcoming
+          </h3>
+        </div>
+        {remainingUpcomingGroups.length ? (
+          <div className="mt-4">
+            <GroupScrolling
+              groups={remainingUpcomingGroups}
+              avatarStacks={avatarStacks}
+            />
+          </div>
+        ) : (
+          <div className="mt-4 text-sm text-muted-foreground">
+            Nothing else scheduled.
+          </div>
+        )}
+      </section>
+      <section className="px-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Nearby
+          </h3>
+        </div>
+        <div className="mt-4">
+          <NearbyGroupsMap groups={availableNearbyGroups} />
+        </div>
+      </section>
+      <section className="px-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Highlights
+          </h3>
+        </div>
+        {highlightGroups.length ? (
+          <div className="mt-4">
+            <GroupScrolling groups={highlightGroups} avatarStacks={avatarStacks} />
+          </div>
+        ) : (
+          <div className="mt-4 text-sm text-muted-foreground">
+            No completed groups yet.
+          </div>
+        )}
+      </section>
     </div>
   );
 }

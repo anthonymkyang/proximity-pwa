@@ -207,11 +207,21 @@ const normalizeMessage = (m: Message): Message => ({
   conversation_id: m.conversation_id,
 });
 
+function initialsFrom(text?: string | null): string {
+  if (!text) return "U";
+  const parts = String(text).trim().split(/\s+/);
+  const first = parts[0]?.[0] ?? "";
+  const last = parts.length > 1 ? parts[parts.length - 1][0] ?? "" : "";
+  return (first + last || first || "U").toUpperCase().slice(0, 2);
+}
+
 const resolveCoverUrl = (path?: string | null): string | null => {
   if (!path) return null;
   const s = String(path);
   if (s.startsWith("http://") || s.startsWith("https://")) return s;
-  return `/api/groups/storage?path=${encodeURIComponent(s.replace(/^\/+/, ""))}`;
+  return `/api/groups/storage?path=${encodeURIComponent(
+    s.replace(/^\/+/, "")
+  )}`;
 };
 
 const fmtWhen = (start?: string | null, end?: string | null) => {
@@ -857,20 +867,23 @@ export default function ConversationPage() {
       : "Offline";
   }, [groupMemberCount, isGroupConversation, participantPresence]);
 
-  const buildLeaveMessage = useCallback((info: NonNullable<typeof groupInfo>) => {
-    const title = info.title || "this group";
-    const when = fmtWhen(info.start_time, info.end_time);
-    if (!when || when === "TBC") {
-      return `Sorry, I can no longer make it to ${title}.`;
-    }
-    const needsOn =
-      typeof when === "string" &&
-      !when.startsWith("Today") &&
-      !when.startsWith("Tomorrow");
-    return `Sorry, I can no longer make it to ${title}${
-      needsOn ? " on" : ""
-    } ${when}.`;
-  }, []);
+  const buildLeaveMessage = useCallback(
+    (info: NonNullable<typeof groupInfo>) => {
+      const title = info.title || "this group";
+      const when = fmtWhen(info.start_time, info.end_time);
+      if (!when || when === "TBC") {
+        return `Sorry, I can no longer make it to ${title}.`;
+      }
+      const needsOn =
+        typeof when === "string" &&
+        !when.startsWith("Today") &&
+        !when.startsWith("Tomorrow");
+      return `Sorry, I can no longer make it to ${title}${
+        needsOn ? " on" : ""
+      } ${when}.`;
+    },
+    []
+  );
 
   const openLeaveDrawer = useCallback(() => {
     if (!groupInfo) return;
@@ -3968,295 +3981,320 @@ export default function ConversationPage() {
                     </div>
                   );
                 })}
-              {m.deleted_at ? (
-                <div
-                  className={`text-sm italic text-muted-foreground px-3 py-2 ${
-                    isMe ? "text-right" : "text-left"
-                  }`}
-                >
-                  Message deleted
-                </div>
-              ) : (
-                <div
-                  className={`relative rounded-lg ${
-                    m.message_type === "location" ||
-                    m.message_type === "link" ||
-                    m.message_type === "group"
-                      ? "p-2 w-[75%] sm:w-[65%] lg:w-[55%]"
-                      : "px-3 py-2 max-w-[75%] sm:max-w-[65%] lg:max-w-[55%]"
-                  } ${
-                    isMe
-                      ? "bg-primary text-white rounded-br-none"
-                      : "bg-muted text-foreground rounded-bl-none"
-                  } transition-all duration-300 ease-out overflow-hidden pointer-events-auto`}
-                  onMouseDown={(e) => {
-                    if (e.button !== 0) return;
-                    startLongPress(m.id);
-                  }}
-                  onMouseUp={cancelLongPress}
-                  onMouseLeave={cancelLongPress}
-                  onTouchStart={() => startLongPress(m.id)}
-                  onTouchEnd={cancelLongPress}
-                  onTouchCancel={cancelLongPress}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setReactionTargetId(m.id);
-                  }}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    void handleReactionToggle(m, "heart");
-                  }}
-                >
-                  {m.reply_to_id && m.reply_to_body ? (
-                    <div
-                      className={`mb-2 rounded px-2 py-1.5 border-l-2 ${
-                        isMe
-                          ? "bg-white/20 border-white/40"
-                          : "bg-black/10 border-black/30"
-                      }`}
-                    >
+              {(() => {
+                const bubble = (
+                  <div
+                    className={`relative rounded-lg ${
+                      m.message_type === "location" ||
+                      m.message_type === "link" ||
+                      m.message_type === "group"
+                        ? "p-2 w-[75%] sm:w-[65%] lg:w-[55%]"
+                        : "px-3 py-2 max-w-[75%] sm:max-w-[65%] lg:max-w-[55%]"
+                    } ${
+                      isMe
+                        ? "bg-primary text-white rounded-br-none"
+                        : "bg-muted text-foreground rounded-bl-none"
+                    } transition-all duration-300 ease-out overflow-hidden pointer-events-auto`}
+                    onMouseDown={(e) => {
+                      if (e.button !== 0) return;
+                      startLongPress(m.id);
+                    }}
+                    onMouseUp={cancelLongPress}
+                    onMouseLeave={cancelLongPress}
+                    onTouchStart={() => startLongPress(m.id)}
+                    onTouchEnd={cancelLongPress}
+                    onTouchCancel={cancelLongPress}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setReactionTargetId(m.id);
+                    }}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      void handleReactionToggle(m, "heart");
+                    }}
+                  >
+                    {m.reply_to_id && m.reply_to_body ? (
                       <div
-                        className={`text-[10px] font-semibold mb-0.5 ${
-                          isMe ? "text-white/90" : "text-foreground/80"
+                        className={`mb-2 rounded px-2 py-1.5 border-l-2 ${
+                          isMe
+                            ? "bg-white/20 border-white/40"
+                            : "bg-black/10 border-black/30"
                         }`}
                       >
-                        {m.reply_to_sender_id === currentUserId
-                          ? "You"
-                          : participantName || "Them"}
+                        <div
+                          className={`text-[10px] font-semibold mb-0.5 ${
+                            isMe ? "text-white/90" : "text-foreground/80"
+                          }`}
+                        >
+                          {m.reply_to_sender_id === currentUserId
+                            ? "You"
+                            : participantName || "Them"}
+                        </div>
+                        <div
+                          className={`text-xs line-clamp-2 ${
+                            isMe ? "text-white/80" : "text-foreground/70"
+                          }`}
+                        >
+                          {m.reply_to_body}
+                        </div>
                       </div>
+                    ) : null}
+
+                    {/* Group message content */}
+                    {m.message_type === "group" && m.metadata?.group ? (
+                      <div className="w-full">
+                        <GroupMessageCard group={m.metadata.group} isMe={isMe} />
+                      </div>
+                    ) : /* Link message content */
+                    m.message_type === "link" && m.metadata?.link ? (
+                      <div className="w-full">
+                        <LinkPreview
+                          link={m.metadata.link}
+                          onClick={() => {
+                            if (m.metadata?.link?.url) {
+                              setViewingLinkUrl(m.metadata.link.url);
+                              setLinkViewerDrawerOpen(true);
+                            }
+                          }}
+                          isMe={isMe}
+                        />
+                      </div>
+                    ) : /* Location message content */
+                    m.message_type === "location" && m.metadata?.location ? (
+                      <div className="space-y-2 w-full">
+                        {/* Static map preview */}
+                        <StaticMapPreview
+                          location={{
+                            lat: m.metadata.location.lat,
+                            lng: m.metadata.location.lng,
+                          }}
+                          onClick={() => {
+                            if (m.metadata?.location) {
+                              setViewingLocation({
+                                lat: m.metadata.location.lat,
+                                lng: m.metadata.location.lng,
+                                address: m.metadata.location.address,
+                              });
+                              setViewLocationModalOpen(true);
+                            }
+                          }}
+                        />
+                        {/* Address text */}
+                        {m.metadata.location.address && (
+                          <p className="text-xs text-muted-foreground truncate">
+                            {m.metadata.location.address}
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-sm leading-relaxed wrap-break-word">
+                        {m.body}
+                      </p>
+                    )}
+
+                    {translations[m.id] && (
                       <div
-                        className={`text-xs line-clamp-2 ${
-                          isMe ? "text-white/80" : "text-foreground/70"
+                        className={`mt-2 pt-2 border-t ${
+                          isMe ? "border-white/20" : "border-black/20"
                         }`}
                       >
-                        {m.reply_to_body}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {/* Group message content */}
-                  {m.message_type === "group" && m.metadata?.group ? (
-                    <div className="w-full">
-                      <GroupMessageCard
-                        group={m.metadata.group}
-                        isMe={isMe}
-                      />
-                    </div>
-                  ) : /* Link message content */
-                  m.message_type === "link" && m.metadata?.link ? (
-                    <div className="w-full">
-                      <LinkPreview
-                        link={m.metadata.link}
-                        onClick={() => {
-                          if (m.metadata?.link?.url) {
-                            setViewingLinkUrl(m.metadata.link.url);
-                            setLinkViewerDrawerOpen(true);
-                          }
-                        }}
-                        isMe={isMe}
-                      />
-                    </div>
-                  ) : /* Location message content */
-                  m.message_type === "location" && m.metadata?.location ? (
-                    <div className="space-y-2 w-full">
-                      {/* Static map preview */}
-                      <StaticMapPreview
-                        location={{
-                          lat: m.metadata.location.lat,
-                          lng: m.metadata.location.lng,
-                        }}
-                        onClick={() => {
-                          if (m.metadata?.location) {
-                            setViewingLocation({
-                              lat: m.metadata.location.lat,
-                              lng: m.metadata.location.lng,
-                              address: m.metadata.location.address,
-                            });
-                            setViewLocationModalOpen(true);
-                          }
-                        }}
-                      />
-                      {/* Address text */}
-                      {m.metadata.location.address && (
-                        <p className="text-xs text-muted-foreground truncate">
-                          {m.metadata.location.address}
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-sm leading-relaxed wrap-break-word">
-                      {m.body}
-                    </p>
-                  )}
-
-                  {translations[m.id] && (
-                    <div
-                      className={`mt-2 pt-2 border-t ${
-                        isMe ? "border-white/20" : "border-black/20"
-                      }`}
-                    >
-                      {translations[m.id].isLoading ? (
-                        <div
-                          className={`text-xs ${
-                            isMe ? "text-white/70" : "text-foreground/60"
-                          }`}
-                        >
-                          {modelState === "loading" && loadingProgress.text ? (
-                            <div className="flex items-center gap-2">
-                              <span className="italic">
-                                {loadingProgress.text}
-                              </span>
-                              {loadingProgress.progress > 0 && (
-                                <span className="font-semibold">
-                                  {loadingProgress.progress}%
-                                </span>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="italic">
-                              {translations[m.id].loadingMessage ||
-                                "Translating..."}
-                            </span>
-                          )}
-                        </div>
-                      ) : translations[m.id].error ? (
-                        <div
-                          className={`text-xs italic ${
-                            isMe ? "text-red-200" : "text-red-600"
-                          }`}
-                        >
-                          {translations[m.id].error}
-                        </div>
-                      ) : (
-                        <>
+                        {translations[m.id].isLoading ? (
                           <div
-                            className={`flex items-center justify-between gap-2 mb-1`}
-                          >
-                            <div
-                              className={`text-[10px] font-semibold ${
-                                isMe ? "text-white/70" : "text-foreground/60"
-                              }`}
-                            >
-                              {translations[m.id].detectedLanguage
-                                ? `Translated from ${
-                                    translations[m.id].detectedLanguage
-                                  }`
-                                : "Translation"}
-                            </div>
-                            {translations[m.id].detectedLanguage &&
-                              (() => {
-                                const normalizedLang = normalizeLanguage(
-                                  translations[m.id].detectedLanguage!
-                                );
-                                return (
-                                  autoTranslateLanguages.has(normalizedLang) &&
-                                  latestTranslatedMessageByLanguage[
-                                    translations[m.id].detectedLanguage!
-                                  ] === m.id
-                                );
-                              })() && (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    const rawLang =
-                                      translations[m.id].detectedLanguage;
-                                    if (rawLang) {
-                                      const normalizedLang =
-                                        normalizeLanguage(rawLang);
-                                      setStoppedAutoTranslateLanguages(
-                                        (prev) => {
-                                          const next = new Set(prev);
-                                          next.add(normalizedLang);
-                                          return next;
-                                        }
-                                      );
-                                      setAutoTranslateLanguages((prev) => {
-                                        const next = new Set(prev);
-                                        next.delete(normalizedLang);
-                                        return next;
-                                      });
-                                      toast.success(
-                                        `Stopped auto-translating ${rawLang}`
-                                      );
-                                    }
-                                  }}
-                                  className={`text-[9px] px-1.5 py-0.5 rounded transition-colors ${
-                                    isMe
-                                      ? "bg-white/20 hover:bg-white/30 text-white"
-                                      : "bg-black/10 hover:bg-black/20 text-foreground/70"
-                                  }`}
-                                >
-                                  Stop auto-translate
-                                </button>
-                              )}
-                          </div>
-                          <p
-                            className={`text-sm leading-relaxed wrap-break-word ${
-                              isMe ? "text-white/90" : "text-foreground/90"
+                            className={`text-xs ${
+                              isMe ? "text-white/70" : "text-foreground/60"
                             }`}
                           >
-                            {translations[m.id].translatedText}
-                          </p>
+                            {modelState === "loading" && loadingProgress.text ? (
+                              <div className="flex items-center gap-2">
+                                <span className="italic">
+                                  {loadingProgress.text}
+                                </span>
+                                {loadingProgress.progress > 0 && (
+                                  <span className="font-semibold">
+                                    {loadingProgress.progress}%
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="italic">
+                                {translations[m.id].loadingMessage ||
+                                  "Translating..."}
+                              </span>
+                            )}
+                          </div>
+                        ) : translations[m.id].error ? (
+                          <div
+                            className={`text-xs italic ${
+                              isMe ? "text-red-200" : "text-red-600"
+                            }`}
+                          >
+                            {translations[m.id].error}
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <div
+                                className={`text-[10px] font-semibold ${
+                                  isMe ? "text-white/70" : "text-foreground/60"
+                                }`}
+                              >
+                                {translations[m.id].detectedLanguage
+                                  ? `Translated from ${
+                                      translations[m.id].detectedLanguage
+                                    }`
+                                  : "Translation"}
+                              </div>
+                              {translations[m.id].detectedLanguage &&
+                                (() => {
+                                  const normalizedLang = normalizeLanguage(
+                                    translations[m.id].detectedLanguage!
+                                  );
+                                  return (
+                                    autoTranslateLanguages.has(normalizedLang) &&
+                                    latestTranslatedMessageByLanguage[
+                                      translations[m.id].detectedLanguage!
+                                    ] === m.id
+                                  );
+                                })() && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const rawLang =
+                                        translations[m.id].detectedLanguage;
+                                      if (rawLang) {
+                                        const normalizedLang =
+                                          normalizeLanguage(rawLang);
+                                        setStoppedAutoTranslateLanguages(
+                                          (prev) => {
+                                            const next = new Set(prev);
+                                            next.add(normalizedLang);
+                                            return next;
+                                          }
+                                        );
+                                        setAutoTranslateLanguages((prev) => {
+                                          const next = new Set(prev);
+                                          next.delete(normalizedLang);
+                                          return next;
+                                        });
+                                        toast.success(
+                                          `Stopped auto-translating ${rawLang}`
+                                        );
+                                      }
+                                    }}
+                                    className={`text-[9px] px-1.5 py-0.5 rounded transition-colors ${
+                                      isMe
+                                        ? "bg-white/20 hover:bg-white/30 text-white"
+                                        : "bg-black/10 hover:bg-black/20 text-foreground/70"
+                                    }`}
+                                  >
+                                    Stop auto-translate
+                                  </button>
+                                )}
+                            </div>
+                            <p
+                              className={`text-sm leading-relaxed wrap-break-word ${
+                                isMe ? "text-white/90" : "text-foreground/90"
+                              }`}
+                            >
+                              {translations[m.id].translatedText}
+                            </p>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    <div
+                      className={`mt-1 text-xs flex items-center gap-2 ${
+                        isMe ? "text-blue-100" : "text-muted-foreground"
+                      }`}
+                      style={{
+                        justifyContent: isMe ? "space-between" : "space-between",
+                      }}
+                    >
+                      {isMe ? (
+                        <>
+                          <div className="flex-1 flex items-center gap-1">
+                            {reactionChip}
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span>
+                              {new Date(m.created_at).toLocaleTimeString(
+                                undefined,
+                                {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                  hour12: false,
+                                }
+                              )}
+                            </span>
+                            {m.read_at ? (
+                              <CheckCheck className="h-3.5 w-3.5 text-white" />
+                            ) : m.delivered_at ? (
+                              <div className="flex gap-0.5">
+                                <Check className="h-3.5 w-3.5 text-white/70" />
+                                <Check className="h-3.5 w-3.5 text-white/70" />
+                              </div>
+                            ) : (
+                              <Check className="h-3.5 w-3.5 text-white/70" />
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-1">
+                            <span>
+                              {new Date(m.created_at).toLocaleTimeString(
+                                undefined,
+                                {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                  hour12: false,
+                                }
+                              )}
+                            </span>
+                          </div>
+                          {reactionChip}
                         </>
                       )}
                     </div>
-                  )}
-                  <div
-                    className={`mt-1 text-xs flex items-center gap-2 ${
-                      isMe ? "text-blue-100" : "text-muted-foreground"
-                    }`}
-                    style={{
-                      justifyContent: isMe ? "space-between" : "space-between",
-                    }}
-                  >
-                    {isMe ? (
-                      <>
-                        <div className="flex-1 flex items-center gap-1">
-                          {reactionChip}
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <span>
-                            {new Date(m.created_at).toLocaleTimeString(
-                              undefined,
-                              {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                                hour12: false,
-                              }
-                            )}
-                          </span>
-                          {m.read_at ? (
-                            <CheckCheck className="h-3.5 w-3.5 text-white" />
-                          ) : m.delivered_at ? (
-                            <div className="flex gap-0.5">
-                              <Check className="h-3.5 w-3.5 text-white/70" />
-                              <Check className="h-3.5 w-3.5 text-white/70" />
-                            </div>
-                          ) : (
-                            <Check className="h-3.5 w-3.5 text-white/70" />
-                          )}
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="flex items-center gap-1">
-                          <span>
-                            {new Date(m.created_at).toLocaleTimeString(
-                              undefined,
-                              {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                                hour12: false,
-                              }
-                            )}
-                          </span>
-                        </div>
-                        {reactionChip}
-                      </>
-                    )}
                   </div>
-                </div>
-              )}
+                );
+
+                if (m.deleted_at) {
+                  return (
+                    <div
+                      className={`text-sm italic text-muted-foreground px-3 py-2 ${
+                        isMe ? "text-right" : "text-left"
+                      }`}
+                    >
+                      Message deleted
+                    </div>
+                  );
+                }
+
+                if (isGroupConversation && !isMe) {
+                  return (
+                    <div className="flex items-end gap-2">
+                      <Avatar className="h-7 w-7 shrink-0">
+                        {m.profiles?.avatar_url ? (
+                          <AvatarImage
+                            src={
+                              getAvatarProxyUrl(m.profiles.avatar_url) ??
+                              undefined
+                            }
+                            alt={m.profiles?.profile_title || "User"}
+                          />
+                        ) : null}
+                        <AvatarFallback className="text-[10px]">
+                          {initialsFrom(m.profiles?.profile_title || "U")}
+                        </AvatarFallback>
+                      </Avatar>
+                      {bubble}
+                    </div>
+                  );
+                }
+
+                return bubble;
+              })()}
             </div>
           );
         })}

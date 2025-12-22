@@ -2,10 +2,137 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { createClient } from "@/utils/supabase/client";
 import { Compass, Heart, Users, MessageCircle, User } from "lucide-react";
 
 export default function AppBar() {
   const pathname = usePathname();
+  const supabaseRef = useRef(createClient());
+  const [hasUnread, setHasUnread] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    const refreshUnread = async () => {
+      try {
+        const supabase = supabaseRef.current;
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) {
+          if (active) setHasUnread(false);
+          return;
+        }
+
+        const { data: memberships } = await supabase
+          .from("conversation_members")
+          .select("conversation_id")
+          .eq("user_id", user.id);
+        const convoIds = (memberships ?? [])
+          .map((m) => m.conversation_id)
+          .filter(Boolean);
+        if (convoIds.length === 0) {
+          if (active) setHasUnread(false);
+          return;
+        }
+
+        const { data: msgs } = await supabase
+          .from("messages")
+          .select("id")
+          .in("conversation_id", convoIds)
+          .neq("sender_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(200);
+
+        const msgIds = (msgs ?? []).map((m) => m.id).filter(Boolean);
+        if (msgIds.length === 0) {
+          if (active) setHasUnread(false);
+          return;
+        }
+
+        const { data: readRecs } = await supabase
+          .from("message_receipts")
+          .select("message_id")
+          .in("message_id", msgIds)
+          .eq("user_id", user.id)
+          .not("read_at", "is", null);
+
+        const readSet = new Set((readRecs ?? []).map((r) => r.message_id));
+        const hasUnreadLocal = msgIds.some((id) => !readSet.has(id));
+        if (active) setHasUnread(hasUnreadLocal);
+      } catch {
+        if (active) setHasUnread(false);
+      }
+    };
+
+    refreshUnread();
+
+    const supabase = supabaseRef.current;
+    const channel = supabase.channel("appbar:unread");
+
+    channel.on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "messages" },
+      async (payload: any) => {
+        const senderId = payload?.new?.sender_id as string | undefined;
+        const convoId = payload?.new?.conversation_id as string | undefined;
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user || !senderId || senderId === user.id) return;
+        if (convoId) {
+          const { data: memberRow } = await supabase
+            .from("conversation_members")
+            .select("conversation_id")
+            .eq("conversation_id", convoId)
+            .eq("user_id", user.id)
+            .maybeSingle();
+          if (!memberRow) return;
+        }
+        setHasUnread(true);
+      }
+    );
+
+    channel.on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "conversation_members" },
+      async (payload: any) => {
+        const row = payload?.new as {
+          user_id?: string;
+          conversation_id?: string;
+        };
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user || row?.user_id !== user.id) return;
+        refreshUnread();
+      }
+    );
+
+    channel.on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "message_receipts" },
+      async (payload: any) => {
+        const row = (payload.new ?? payload.old) as {
+          user_id?: string;
+          read_at?: string | null;
+        };
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user || row?.user_id !== user.id || !row.read_at) return;
+        refreshUnread();
+      }
+    );
+
+    channel.subscribe();
+
+    return () => {
+      active = false;
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const navItems = [
     { name: "Explore", href: "/app", icon: Compass },
@@ -20,6 +147,7 @@ export default function AppBar() {
       <ul className="flex justify-between items-center py-2">
         {navItems.map(({ name, href, icon: Icon }) => {
           const active = pathname === href;
+          const showUnreadDot = name === "Messages" && hasUnread;
           return (
             <li key={href} className="flex-1 text-center">
               <Link
@@ -30,7 +158,12 @@ export default function AppBar() {
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <Icon className="h-5 w-5 mb-0.5" />
+                <span className="relative mb-0.5 inline-flex">
+                  <Icon className="h-5 w-5" />
+                  {showUnreadDot ? (
+                    <span className="absolute -top-0.5 -right-1 h-2 w-2 rounded-full bg-destructive" />
+                  ) : null}
+                </span>
                 {name}
               </Link>
             </li>
