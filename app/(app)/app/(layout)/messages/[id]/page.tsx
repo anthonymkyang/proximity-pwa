@@ -85,6 +85,7 @@ import { getAvatarProxyUrl } from "@/lib/profiles/getAvatarProxyUrl";
 import { toast } from "sonner";
 import { useE2EE } from "@/components/providers/e2ee-context";
 import { decryptAesGcm, encryptAesGcm } from "@/lib/crypto/e2ee";
+import { getDevice, getDeviceUuid, setDevice } from "@/lib/crypto/deviceStore";
 import {
   Drawer,
   DrawerContent,
@@ -815,6 +816,7 @@ export default function ConversationPage() {
     : (params as any).id ?? null;
   const queryId = search.get("id");
   const conversationId = routeId ?? queryId ?? null;
+  const showE2EEDebug = search.get("e2ee") === "1";
   const [participantName, setParticipantName] = useState(
     search.get("name") ?? "Contact"
   );
@@ -850,11 +852,20 @@ export default function ConversationPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const decryptedIdsRef = useRef<Set<string>>(new Set());
   const decryptingIdsRef = useRef<Set<string>>(new Set());
+  const decryptRetryIdsRef = useRef<Set<string>>(new Set());
   const readReceiptInFlightRef = useRef(false);
   const readReceiptSentRef = useRef<Set<string>>(new Set());
   const [newMessage, setNewMessage] = useState("");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [otherUserId, setOtherUserId] = useState<string | null>(null);
+  const [debugDeviceId, setDebugDeviceId] = useState<string | null>(null);
+  const [debugDeviceUuid, setDebugDeviceUuid] = useState<string | null>(null);
+  const [debugKeyLoaded, setDebugKeyLoaded] = useState(false);
+  const [debugServerDeviceId, setDebugServerDeviceId] = useState<string | null>(
+    null
+  );
+  const [debugServerKeys, setDebugServerKeys] = useState<number | null>(null);
+  const [lastDecryptError, setLastDecryptError] = useState<string | null>(null);
   const participantPresence = useMemo(
     () => (otherUserId ? toUiPresence(presence[otherUserId]) : null),
     [otherUserId, presence]
@@ -1179,6 +1190,76 @@ export default function ConversationPage() {
   useEffect(() => {
     currentUserIdRef.current = currentUserId;
   }, [currentUserId]);
+
+  useEffect(() => {
+    if (!showE2EEDebug) {
+      setLastDecryptError(null);
+      return;
+    }
+    if (!currentUserId) return;
+    let active = true;
+    const run = async () => {
+      const device = await getDevice(currentUserId);
+      const uuid = getDeviceUuid(currentUserId);
+      if (!active) return;
+      setDebugDeviceId(device?.deviceId ?? null);
+      setDebugDeviceUuid(device?.deviceUuid ?? uuid ?? null);
+    };
+    void run();
+    return () => {
+      active = false;
+    };
+  }, [currentUserId, showE2EEDebug]);
+
+  useEffect(() => {
+    if (!showE2EEDebug || !currentUserId || !debugDeviceUuid) return;
+    let active = true;
+    const run = async () => {
+      const { data: serverRow } = await supabase.current
+        .from("user_devices")
+        .select("id, device_uuid")
+        .eq("user_id", currentUserId)
+        .eq("device_uuid", debugDeviceUuid)
+        .maybeSingle();
+      if (!active) return;
+      const serverId = serverRow?.id ?? null;
+      setDebugServerDeviceId(serverId);
+      if (serverId && debugDeviceId && serverId !== debugDeviceId) {
+        const stored = await getDevice(currentUserId);
+        if (stored) {
+          await setDevice({ ...stored, deviceId: serverId });
+          setDebugDeviceId(serverId);
+        }
+      }
+      if (!conversationId || !serverId) {
+        setDebugServerKeys(null);
+        return;
+      }
+      const { count } = await supabase.current
+        .from("conversation_keys")
+        .select("id", { count: "exact", head: true })
+        .eq("conversation_id", conversationId)
+        .eq("device_id", serverId);
+      if (!active) return;
+      setDebugServerKeys(count ?? null);
+    };
+    void run();
+    return () => {
+      active = false;
+    };
+  }, [
+    conversationId,
+    currentUserId,
+    debugDeviceId,
+    debugDeviceUuid,
+    showE2EEDebug,
+  ]);
+
+  useEffect(() => {
+    if (!showE2EEDebug || !conversationId) return;
+    const key = getConversationKey(conversationId);
+    setDebugKeyLoaded(Boolean(key));
+  }, [conversationId, getConversationKey, showE2EEDebug, status]);
 
   useEffect(() => {
     if (!reactionTargetId) return;
@@ -1511,8 +1592,59 @@ export default function ConversationPage() {
             )
           );
           decryptedIdsRef.current.add(message.id);
-        } catch {
-          // ignore decryption failures
+        } catch (err) {
+          if (
+            status === "unlocked" &&
+            !decryptRetryIdsRef.current.has(message.id)
+          ) {
+            decryptRetryIdsRef.current.add(message.id);
+            await refreshDeviceKeys();
+            const refreshedKey = getConversationKey(conversationId);
+            if (refreshedKey) {
+              try {
+                const plaintext = await decryptAesGcm(
+                  refreshedKey,
+                  message.ciphertext ?? "",
+                  message.nonce ?? ""
+                );
+                const parsed = JSON.parse(plaintext) as {
+                  body?: string | null;
+                  message_type?: Message["message_type"];
+                  metadata?: Message["metadata"];
+                  reply_to_body?: string | null;
+                };
+                if (cancelled) return;
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === message.id
+                      ? {
+                          ...m,
+                          body: parsed.body ?? m.body,
+                          message_type: parsed.message_type ?? m.message_type,
+                          metadata: parsed.metadata ?? m.metadata,
+                          reply_to_body: parsed.reply_to_body ?? m.reply_to_body,
+                        }
+                      : m
+                  )
+                );
+                decryptedIdsRef.current.add(message.id);
+                decryptRetryIdsRef.current.delete(message.id);
+                continue;
+              } catch (retryErr) {
+                if (showE2EEDebug) {
+                  const messageText =
+                    retryErr instanceof Error
+                      ? retryErr.message
+                      : String(retryErr);
+                  setLastDecryptError(`${message.id}: ${messageText}`);
+                }
+              }
+            }
+          } else if (showE2EEDebug) {
+            const messageText = err instanceof Error ? err.message : String(err);
+            setLastDecryptError(`${message.id}: ${messageText}`);
+          }
+          // ignore decryption failures after retry
         } finally {
           decryptingIdsRef.current.delete(message.id);
         }
@@ -1522,7 +1654,14 @@ export default function ConversationPage() {
     return () => {
       cancelled = true;
     };
-  }, [conversationId, getConversationKey, messages, refreshDeviceKeys, status]);
+  }, [
+    conversationId,
+    getConversationKey,
+    messages,
+    refreshDeviceKeys,
+    showE2EEDebug,
+    status,
+  ]);
 
   // simple realtime subscription
   useEffect(() => {
@@ -2377,10 +2516,13 @@ export default function ConversationPage() {
       const sendPayload = async (payload: any) => {
         console.log("Sending message with payload:", payload);
         let encryptedRequest = payload;
+        console.log("[e2ee] send status", status);
         if (status === "unlocked") {
+          console.log("[e2ee] ensuring conversation key", conversationId);
           const key = conversationId
             ? await ensureConversationKey(conversationId)
             : null;
+          console.log("[e2ee] conversation key ready", Boolean(key));
           if (!key) {
             toast.error("Unable to encrypt message.");
           } else {
@@ -5209,6 +5351,24 @@ export default function ConversationPage() {
           </div>
         </DrawerContent>
       </Drawer>
+      {showE2EEDebug && (
+        <div className="fixed bottom-4 left-4 right-4 z-50 rounded-lg border border-border bg-background/95 p-3 text-xs shadow-lg">
+          <div className="font-semibold mb-1">E2EE Debug</div>
+          <div className="flex flex-col gap-1">
+            <div>Status: {status}</div>
+            <div>User: {currentUserId ?? "unknown"}</div>
+            <div>Device ID: {debugDeviceId ?? "unknown"}</div>
+            <div>Device UUID: {debugDeviceUuid ?? "unknown"}</div>
+            <div>Server device ID: {debugServerDeviceId ?? "unknown"}</div>
+            <div>
+              Server key rows:{" "}
+              {debugServerKeys == null ? "unknown" : debugServerKeys}
+            </div>
+            <div>Key loaded: {debugKeyLoaded ? "yes" : "no"}</div>
+            <div>Last decrypt error: {lastDecryptError ?? "none"}</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

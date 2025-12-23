@@ -12,16 +12,6 @@ export default async function PinSetupPage() {
     redirect("/auth");
   }
 
-  const { data: backupRow } = await supabase
-    .from("user_key_backups")
-    .select("user_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (backupRow) {
-    redirect("/app");
-  }
-
   return (
     <main className="min-h-screen flex items-center justify-center px-4">
       <PinSetupClient />

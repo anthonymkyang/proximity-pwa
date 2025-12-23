@@ -20,6 +20,7 @@ import {
 } from "@/lib/crypto/e2ee";
 import {
   getDevice,
+  getDeviceUuid,
   getRememberedBundle,
   setDevice,
   setRememberedBundle,
@@ -56,9 +57,18 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
   const supabase = useRef(createClient()).current;
   const [status, setStatus] = useState<E2EEStatus>("disabled");
   const [loading, setLoading] = useState(true);
+  const statusRef = useRef<E2EEStatus>("disabled");
+  const loadStatusInFlightRef = useRef(false);
+  const lastStatusRef = useRef<{
+    userId: string | null;
+    remembered: boolean;
+    backup: boolean;
+  } | null>(null);
   const [conversationKeys, setConversationKeys] = useState<ConversationKeyMap>(
     () => new Map()
   );
+  const hydratedRef = useRef(false);
+  const sharedKeysRef = useRef<Set<string>>(new Set());
   const backupKeyRef = useRef<CryptoKey | null>(null);
   const bundleRef = useRef<{ version: number; conversations: Record<string, string> } | null>(
     null
@@ -66,9 +76,20 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
   const deviceRef = useRef<{
     userId: string;
     deviceId: string;
+    deviceUuid: string;
     publicKey: string;
     privateKey: CryptoKey;
   } | null>(null);
+  const ensureDeviceInFlightRef = useRef<Promise<
+    | {
+        userId: string;
+        deviceId: string;
+        deviceUuid: string;
+        publicKey: string;
+        privateKey: CryptoKey;
+      }
+    | null
+  > | null>(null);
 
   const setKeysFromBundle = useCallback(
     async (bundle: Record<string, string>) => {
@@ -84,47 +105,133 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  React.useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
+  const upsertConversationKeys = useCallback(
+    async (conversationId: string, rows: any[]) => {
+      if (!rows.length) return;
+      if (process.env.NODE_ENV !== "production") {
+        console.log("[e2ee] upsert keys", {
+          conversationId,
+          rows: rows.length,
+        });
+      }
+      try {
+        const { error } = await supabase.rpc("upsert_conversation_keys", {
+          convo_id: conversationId,
+          payload: rows,
+        });
+        if (!error) {
+          if (process.env.NODE_ENV !== "production") {
+            console.log("[e2ee] rpc upsert ok");
+          }
+          return;
+        }
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("[e2ee] rpc upsert failed", error);
+        }
+      } catch (err) {
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("[e2ee] rpc upsert failed", err);
+        }
+      }
+
+      const { error: upsertErr } = await supabase
+        .from("conversation_keys")
+        .upsert(rows, {
+          onConflict: "conversation_id,user_id,device_id",
+        });
+      if (upsertErr && process.env.NODE_ENV !== "production") {
+        console.warn("[e2ee] conversation_keys upsert failed", upsertErr);
+      }
+    },
+    [supabase]
+  );
+
   const ensureDevice = useCallback(
     async (userId: string) => {
       if (deviceRef.current?.userId === userId) return deviceRef.current;
-      const stored = await getDevice(userId);
-      if (stored) {
-        const { data: existing } = await supabase
-          .from("user_devices")
-          .select("id")
-          .eq("id", stored.deviceId)
-          .eq("user_id", userId)
-          .maybeSingle();
-        if (existing?.id) {
-          deviceRef.current = stored;
-          return stored;
+      if (ensureDeviceInFlightRef.current) {
+        return await ensureDeviceInFlightRef.current;
+      }
+      const task = (async () => {
+        const stored = await getDevice(userId);
+        if (stored) {
+          const { data: existing } = await supabase
+            .from("user_devices")
+            .select("id, device_uuid")
+            .eq("device_uuid", stored.deviceUuid)
+            .eq("user_id", userId)
+            .maybeSingle();
+          if (existing?.id) {
+            if (stored.deviceId !== existing.id) {
+              const updated = { ...stored, deviceId: existing.id };
+              await setDevice(updated);
+              deviceRef.current = updated;
+              return updated;
+            }
+            deviceRef.current = stored;
+            return stored;
+          }
         }
-        await clearDevice(userId);
+
+        const deviceLabel = buildDeviceLabel();
+        const { data: existingByLabel } = await supabase
+          .from("user_devices")
+          .select("id, device_uuid")
+          .eq("user_id", userId)
+          .eq("device_label", deviceLabel)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (process.env.NODE_ENV !== "production") {
+          console.log("[e2ee] registering device", {
+            hasStored: Boolean(stored),
+            reuseByLabel: Boolean(existingByLabel?.id),
+          });
+        }
+
+        const pair = await generateDeviceKeyPair();
+        const publicKey = await crypto.subtle.exportKey("spki", pair.publicKey);
+        const publicKeyBase64 = toBase64(publicKey);
+        const deviceUuid =
+          existingByLabel?.device_uuid ?? stored?.deviceUuid ?? getDeviceUuid(userId);
+        const { data: row, error } = await supabase
+          .from("user_devices")
+          .upsert(
+            {
+              user_id: userId,
+              device_uuid: deviceUuid,
+              public_key: publicKeyBase64,
+              device_label: deviceLabel,
+            },
+            { onConflict: "user_id,device_uuid" }
+          )
+          .select("id")
+          .single();
+        if (error || !row) {
+          throw new Error(error?.message || "Failed to register device");
+        }
+        const device = {
+          userId,
+          deviceId: row.id,
+          deviceUuid,
+          publicKey: publicKeyBase64,
+          privateKey: pair.privateKey,
+        };
+        await setDevice(device);
+        deviceRef.current = device;
+        return device;
+      })();
+      ensureDeviceInFlightRef.current = task;
+      try {
+        return await task;
+      } finally {
+        ensureDeviceInFlightRef.current = null;
       }
-      const pair = await generateDeviceKeyPair();
-      const publicKey = await crypto.subtle.exportKey("spki", pair.publicKey);
-      const publicKeyBase64 = toBase64(publicKey);
-      const { data: row, error } = await supabase
-        .from("user_devices")
-        .insert({
-          user_id: userId,
-          public_key: publicKeyBase64,
-          device_label: buildDeviceLabel(),
-        })
-        .select("id")
-        .single();
-      if (error || !row) {
-        throw new Error(error?.message || "Failed to register device");
-      }
-      const device = {
-        userId,
-        deviceId: row.id,
-        publicKey: publicKeyBase64,
-        privateKey: pair.privateKey,
-      };
-      await setDevice(device);
-      deviceRef.current = device;
-      return device;
     },
     [supabase]
   );
@@ -170,21 +277,34 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
   const loadDeviceKeys = useCallback(
     async (userId: string) => {
       const device = await ensureDevice(userId);
-      const { data: rows } = await supabase
+      const { data: rows, error } = await supabase
         .from("conversation_keys")
-        .select("conversation_id, key_ciphertext")
+        .select("conversation_id, key_ciphertext, created_at")
         .eq("user_id", userId)
         .eq("device_id", device.deviceId);
-      if (!rows || rows.length === 0) return 0;
+      if (process.env.NODE_ENV !== "production") {
+        console.log("[e2ee] loadDeviceKeys", {
+          userId,
+          deviceId: device.deviceId,
+          rows: rows?.length ?? 0,
+          error: error?.message ?? null,
+        });
+      }
+      if (error || !rows || rows.length === 0) return 0;
 
       const nextBundle = bundleRef.current?.conversations
         ? { ...bundleRef.current.conversations }
         : {};
-      const nextMap = new Map(conversationKeys);
+      const entries: Array<{ convoId: string; key: CryptoKey }> = [];
       let added = 0;
-      for (const row of rows) {
+      const sortedRows = [...rows].sort((a, b) => {
+        const aTime = a.created_at ? Date.parse(a.created_at) : 0;
+        const bTime = b.created_at ? Date.parse(b.created_at) : 0;
+        return bTime - aTime;
+      });
+      for (const row of sortedRows) {
         const convoId = row.conversation_id;
-        if (!convoId || nextBundle[convoId]) continue;
+        if (!convoId) continue;
         try {
           const payload = JSON.parse(row.key_ciphertext);
           const epk = await importPublicKey(payload.epk);
@@ -196,52 +316,112 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
           );
           nextBundle[convoId] = wrapped;
           const key = await importAesKey(fromBase64(wrapped));
-          nextMap.set(convoId, key);
+          entries.push({ convoId, key });
           added += 1;
-        } catch {
-          // ignore invalid rows
+        } catch (err) {
+          if (process.env.NODE_ENV !== "production") {
+            console.warn("[e2ee] loadDeviceKeys failed", {
+              conversationId: convoId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
       }
       bundleRef.current = {
         version: bundleRef.current?.version || 1,
         conversations: nextBundle,
       };
-      setConversationKeys(nextMap);
+      if (entries.length) {
+        setConversationKeys((prev) => {
+          const next = new Map(prev);
+          entries.forEach(({ convoId, key }) => {
+            next.set(convoId, key);
+          });
+          return next;
+        });
+        if (process.env.NODE_ENV !== "production") {
+          console.log("[e2ee] loadDeviceKeys added", entries.length);
+        }
+      }
       await persistBackupBundle(userId);
       return added;
     },
-    [conversationKeys, ensureDevice, persistBackupBundle, supabase]
+    [ensureDevice, persistBackupBundle, supabase]
   );
 
   const loadStatus = useCallback(async () => {
+    if (loadStatusInFlightRef.current) return;
+    loadStatusInFlightRef.current = true;
     setLoading(true);
     try {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      if (!user) {
+      let activeUser = user ?? null;
+      if (!activeUser) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        activeUser = sessionData.session?.user ?? null;
+      }
+      if (!activeUser) {
         setStatus("disabled");
         setLoading(false);
+        hydratedRef.current = false;
+        lastStatusRef.current = null;
+        loadStatusInFlightRef.current = false;
         return;
       }
-      await ensureDevice(user.id);
-      const remembered = await getRememberedBundle(user.id);
+      await ensureDevice(activeUser.id);
+      const remembered = await getRememberedBundle(activeUser.id);
+      if (process.env.NODE_ENV !== "production") {
+        console.log("[e2ee] remembered bundle", Boolean(remembered));
+      }
       const { data: backupRow } = await supabase
         .from("user_key_backups")
         .select("user_id")
-        .eq("user_id", user.id)
+        .eq("user_id", activeUser.id)
         .maybeSingle();
+      const rememberedOk = Boolean(
+        remembered?.backupKeyBase64 && remembered.bundleJson
+      );
+      const snapshot = {
+        userId: activeUser.id,
+        remembered: rememberedOk,
+        backup: Boolean(backupRow),
+      };
+      const last = lastStatusRef.current;
+      if (
+        last &&
+        last.userId === snapshot.userId &&
+        last.remembered === snapshot.remembered &&
+        last.backup === snapshot.backup &&
+        statusRef.current === "locked" &&
+        !snapshot.remembered &&
+        snapshot.backup
+      ) {
+        setLoading(false);
+        loadStatusInFlightRef.current = false;
+        return;
+      }
+      lastStatusRef.current = snapshot;
       if (!backupRow) {
         backupKeyRef.current = null;
         bundleRef.current = null;
         setConversationKeys(new Map());
+        hydratedRef.current = false;
         if (remembered) {
-          await clearRememberedBundle(user.id);
+          await clearRememberedBundle(activeUser.id);
         }
         setStatus("disabled");
+        loadStatusInFlightRef.current = false;
         return;
       }
-      if (remembered?.backupKeyBase64 && remembered.bundleJson) {
+      if (rememberedOk) {
+        if (hydratedRef.current) {
+          setStatus("unlocked");
+          setLoading(false);
+          loadStatusInFlightRef.current = false;
+          return;
+        }
         const backupKey = await importAesKey(fromBase64(remembered.backupKeyBase64));
         backupKeyRef.current = backupKey;
         const parsed = JSON.parse(remembered.bundleJson) || {};
@@ -252,13 +432,16 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
         };
         await setKeysFromBundle(bundle);
         setStatus("unlocked");
-        await loadDeviceKeys(user.id);
+        await loadDeviceKeys(activeUser.id);
+        hydratedRef.current = true;
         setLoading(false);
+        loadStatusInFlightRef.current = false;
         return;
       }
       setStatus("locked");
     } finally {
       setLoading(false);
+      loadStatusInFlightRef.current = false;
     }
   }, [ensureDevice, loadDeviceKeys, setKeysFromBundle, supabase]);
 
@@ -274,11 +457,16 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      if (!user) return;
-      const device = await ensureDevice(user.id);
+      let activeUser = user ?? null;
+      if (!activeUser) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        activeUser = sessionData.session?.user ?? null;
+      }
+      if (!activeUser) return;
+      const device = await ensureDevice(activeUser.id);
       if (!active) return;
       channel = supabase
-        .channel(`e2ee-keys-${user.id}-${device.deviceId}`)
+        .channel(`e2ee-keys-${activeUser.id}-${device.deviceId}`)
         .on(
           "postgres_changes",
           {
@@ -288,7 +476,7 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
             filter: `device_id=eq.${device.deviceId}`,
           },
           async () => {
-            await loadDeviceKeys(user.id);
+            await loadDeviceKeys(activeUser.id);
           }
         )
         .subscribe();
@@ -307,14 +495,19 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      if (!user) throw new Error("Unauthenticated");
+      let activeUser = user ?? null;
+      if (!activeUser) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        activeUser = sessionData.session?.user ?? null;
+      }
+      if (!activeUser) throw new Error("Unauthenticated");
 
-      const device = await ensureDevice(user.id);
+      const device = await ensureDevice(activeUser.id);
 
       const { data: memberships } = await supabase
         .from("conversation_members")
         .select("conversation_id")
-        .eq("user_id", user.id);
+        .eq("user_id", activeUser.id);
       const convoIds = Array.from(
         new Set((memberships ?? []).map((m) => m.conversation_id))
       );
@@ -366,7 +559,7 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
       });
 
       await supabase.from("user_key_backups").upsert({
-        user_id: user.id,
+        user_id: activeUser.id,
         backup_ciphertext: backupPayload,
         backup_salt: toBase64(salt),
         kdf_params: {
@@ -376,7 +569,7 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
       });
 
       await supabase.from("user_recovery_keys").upsert({
-        user_id: user.id,
+        user_id: activeUser.id,
         recovery_ciphertext: JSON.stringify({
           wrapped_key_ciphertext: recoveryWrapped.ciphertext,
           wrapped_key_nonce: recoveryWrapped.nonce,
@@ -391,10 +584,25 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
         const memberIds = Array.from(
           new Set((memberRows ?? []).map((row) => row.user_id))
         );
-        const { data: deviceRows } = await supabase
-          .from("user_devices")
-          .select("id, user_id, public_key")
-          .in("user_id", memberIds);
+        let deviceRows: any[] | null = null;
+        try {
+          const { data: rpcRows, error: rpcErr } = await supabase.rpc(
+            "get_conversation_member_devices",
+            { convo_id: directIds[0] }
+          );
+          if (!rpcErr && Array.isArray(rpcRows)) {
+            deviceRows = rpcRows;
+          }
+        } catch {
+          // ignore
+        }
+        if (!deviceRows) {
+          const { data: fallbackRows } = await supabase
+            .from("user_devices")
+            .select("id, user_id, public_key")
+            .in("user_id", memberIds);
+          deviceRows = fallbackRows ?? [];
+        }
 
         const rows: any[] = [];
         for (const conversationId of directIds) {
@@ -433,24 +641,42 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
           }
         }
         if (rows.length) {
-          await supabase.from("conversation_keys").upsert(rows, {
-            onConflict: "conversation_id,user_id,device_id",
-          });
+          const grouped = rows.reduce<Record<string, any[]>>((acc, row) => {
+            if (!row?.conversation_id) return acc;
+            if (!acc[row.conversation_id]) acc[row.conversation_id] = [];
+            acc[row.conversation_id].push(row);
+            return acc;
+          }, {});
+          for (const [convoId, convoRows] of Object.entries(grouped)) {
+            await upsertConversationKeys(convoId, convoRows);
+          }
         }
       }
 
       await setKeysFromBundle(bundle);
       setStatus("unlocked");
       if (remember && backupKeyRef.current && bundleRef.current) {
-        await setRememberedBundle({
-          userId: user.id,
-          backupKeyBase64: toBase64(await exportAesKey(backupKeyRef.current)),
-          bundleJson: JSON.stringify(bundleRef.current),
-        });
+        try {
+          await setRememberedBundle({
+            userId: activeUser.id,
+            backupKeyBase64: toBase64(
+              await exportAesKey(backupKeyRef.current)
+            ),
+            bundleJson: JSON.stringify(bundleRef.current),
+          });
+          if (process.env.NODE_ENV !== "production") {
+            console.log("[e2ee] remembered bundle saved");
+          }
+        } catch {
+          if (process.env.NODE_ENV !== "production") {
+            console.log("[e2ee] failed to save remembered bundle");
+          }
+          // ignore local storage failures
+        }
       }
       return recoveryKey;
     },
-    [ensureDevice, setKeysFromBundle, supabase]
+    [ensureDevice, setKeysFromBundle, supabase, upsertConversationKeys]
   );
 
   const unlockWithPin = useCallback(
@@ -458,12 +684,17 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      if (!user) throw new Error("Unauthenticated");
+      let activeUser = user ?? null;
+      if (!activeUser) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        activeUser = sessionData.session?.user ?? null;
+      }
+      if (!activeUser) throw new Error("Unauthenticated");
 
       const { data: backup } = await supabase
         .from("user_key_backups")
         .select("backup_ciphertext, backup_salt, kdf_params")
-        .eq("user_id", user.id)
+        .eq("user_id", activeUser.id)
         .maybeSingle();
       if (!backup) throw new Error("No backup found");
 
@@ -491,14 +722,26 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
         conversations: { ...bundle },
       };
       await setKeysFromBundle(bundle);
-      await loadDeviceKeys(user.id);
+      await loadDeviceKeys(activeUser.id);
       setStatus("unlocked");
       if (remember && backupKeyRef.current && bundleRef.current) {
-        await setRememberedBundle({
-          userId: user.id,
-          backupKeyBase64: toBase64(await exportAesKey(backupKeyRef.current)),
-          bundleJson: JSON.stringify(bundleRef.current),
-        });
+        try {
+          await setRememberedBundle({
+            userId: activeUser.id,
+            backupKeyBase64: toBase64(
+              await exportAesKey(backupKeyRef.current)
+            ),
+            bundleJson: JSON.stringify(bundleRef.current),
+          });
+          if (process.env.NODE_ENV !== "production") {
+            console.log("[e2ee] remembered bundle saved");
+          }
+        } catch {
+          if (process.env.NODE_ENV !== "production") {
+            console.log("[e2ee] failed to save remembered bundle");
+          }
+          // ignore local storage failures
+        }
       }
     },
     [loadDeviceKeys, setKeysFromBundle, supabase]
@@ -509,18 +752,23 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      if (!user) throw new Error("Unauthenticated");
+      let activeUser = user ?? null;
+      if (!activeUser) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        activeUser = sessionData.session?.user ?? null;
+      }
+      if (!activeUser) throw new Error("Unauthenticated");
 
       const [{ data: backup }, { data: recovery }] = await Promise.all([
         supabase
           .from("user_key_backups")
           .select("backup_ciphertext")
-          .eq("user_id", user.id)
+          .eq("user_id", activeUser.id)
           .maybeSingle(),
         supabase
           .from("user_recovery_keys")
           .select("recovery_ciphertext")
-          .eq("user_id", user.id)
+          .eq("user_id", activeUser.id)
           .maybeSingle(),
       ]);
       if (!backup || !recovery) throw new Error("Missing recovery data");
@@ -548,14 +796,26 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
         conversations: { ...bundle },
       };
       await setKeysFromBundle(bundle);
-      await loadDeviceKeys(user.id);
+      await loadDeviceKeys(activeUser.id);
       setStatus("unlocked");
       if (remember && backupKeyRef.current && bundleRef.current) {
-        await setRememberedBundle({
-          userId: user.id,
-          backupKeyBase64: toBase64(await exportAesKey(backupKeyRef.current)),
-          bundleJson: JSON.stringify(bundleRef.current),
-        });
+        try {
+          await setRememberedBundle({
+            userId: activeUser.id,
+            backupKeyBase64: toBase64(
+              await exportAesKey(backupKeyRef.current)
+            ),
+            bundleJson: JSON.stringify(bundleRef.current),
+          });
+          if (process.env.NODE_ENV !== "production") {
+            console.log("[e2ee] remembered bundle saved");
+          }
+        } catch {
+          if (process.env.NODE_ENV !== "production") {
+            console.log("[e2ee] failed to save remembered bundle");
+          }
+          // ignore local storage failures
+        }
       }
     },
     [loadDeviceKeys, setKeysFromBundle, supabase]
@@ -568,103 +828,17 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
     [conversationKeys]
   );
 
-  const ensureConversationKey = useCallback(
-    async (conversationId: string) => {
-      const existing = conversationKeys.get(conversationId) ?? null;
-      if (existing) return existing;
-      if (status !== "unlocked") return null;
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) return null;
-
-      const device = await ensureDevice(user.id);
-      const key = await generateAesKey();
-      const raw = await exportAesKey(key);
-      const next = new Map(conversationKeys);
-      next.set(conversationId, key);
-      setConversationKeys(next);
-
-      try {
-        const { data: members } = await supabase
-          .from("conversation_members")
-          .select("user_id")
-          .eq("conversation_id", conversationId);
-        const memberIds = Array.from(
-          new Set((members ?? []).map((m) => m.user_id))
-        );
-        const { data: deviceRows } = await supabase
-          .from("user_devices")
-          .select("id, user_id, public_key")
-          .in("user_id", memberIds);
-        const rows: any[] = [];
-        const safeDeviceRows = Array.isArray(deviceRows) ? deviceRows : [];
-        const hasOwnDevice = safeDeviceRows.some(
-          (row) => row?.id === device.deviceId
-        );
-        if (!hasOwnDevice) {
-          safeDeviceRows.push({
-            id: device.deviceId,
-            user_id: user.id,
-            public_key: device.publicKey,
-          });
-        }
-        for (const deviceRow of safeDeviceRows) {
-          try {
-            const publicKey = await importPublicKey(deviceRow.public_key);
-            const epkPair = await generateDeviceKeyPair();
-            const epkPublic = await crypto.subtle.exportKey(
-              "spki",
-              epkPair.publicKey
-            );
-            const sharedKey = await deriveSharedKey(
-              epkPair.privateKey,
-              publicKey
-            );
-            const wrapped = await encryptAesGcm(sharedKey, toBase64(raw));
-            rows.push({
-              conversation_id: conversationId,
-              user_id: deviceRow.user_id,
-              device_id: deviceRow.id,
-              key_ciphertext: JSON.stringify({
-                ciphertext: wrapped.ciphertext,
-                nonce: wrapped.nonce,
-                epk: toBase64(epkPublic),
-              }),
-            });
-          } catch {
-            // ignore per-device failures
-          }
-        }
-        if (rows.length) {
-          const { error: upsertError } = await supabase
-            .from("conversation_keys")
-            .upsert(rows, {
-            onConflict: "conversation_id,user_id,device_id",
-          });
-          if (upsertError) {
-            throw new Error(upsertError.message);
-          }
-        }
-      } catch {
-        // best-effort
-      }
-
-      if (!backupKeyRef.current || !bundleRef.current) return key;
-      bundleRef.current.conversations[conversationId] = toBase64(raw);
-      await persistBackupBundle(user.id);
-
-      return key;
-    },
-    [conversationKeys, status, supabase, ensureDevice, persistBackupBundle]
-  );
-
   const refreshDeviceKeys = useCallback(async () => {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) return 0;
-    const added = await loadDeviceKeys(user.id);
+    let activeUser = user ?? null;
+    if (!activeUser) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      activeUser = sessionData.session?.user ?? null;
+    }
+    if (!activeUser) return 0;
+    const added = await loadDeviceKeys(activeUser.id);
     return added;
   }, [loadDeviceKeys, supabase]);
 
@@ -673,24 +847,70 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      if (!user) return 0;
+      let activeUser = user ?? null;
+      if (!activeUser) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        activeUser = sessionData.session?.user ?? null;
+      }
+      if (!activeUser) {
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("[e2ee] reshare missing user");
+        }
+        return 0;
+      }
       const key = conversationKeys.get(conversationId);
-      if (!key) return 0;
+      if (!key) {
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("[e2ee] reshare missing key", conversationId);
+        }
+        return 0;
+      }
 
       const raw = await exportAesKey(key);
-      const { data: members } = await supabase
-        .from("conversation_members")
-        .select("user_id")
-        .eq("conversation_id", conversationId);
-      const memberIds = Array.from(
-        new Set((members ?? []).map((m) => m.user_id))
-      );
-      if (!memberIds.length) return 0;
-      const { data: deviceRows } = await supabase
-        .from("user_devices")
-        .select("id, user_id, public_key")
-        .in("user_id", memberIds);
-      if (!deviceRows?.length) return 0;
+      let deviceRows: any[] | null = null;
+      try {
+        const { data: rpcRows, error: rpcErr } = await supabase.rpc(
+          "get_conversation_member_devices",
+          { convo_id: conversationId }
+        );
+        if (!rpcErr && Array.isArray(rpcRows)) {
+          deviceRows = rpcRows;
+          if (process.env.NODE_ENV !== "production") {
+            console.log("[e2ee] reshare rpc devices", rpcRows.length);
+          }
+        }
+      } catch {
+        // ignore
+      }
+      if (!deviceRows) {
+        const { data: members } = await supabase
+          .from("conversation_members")
+          .select("user_id")
+          .eq("conversation_id", conversationId);
+        const memberIds = Array.from(
+          new Set((members ?? []).map((m) => m.user_id))
+        );
+        if (!memberIds.length) {
+          if (process.env.NODE_ENV !== "production") {
+            console.warn("[e2ee] reshare no members", conversationId);
+          }
+          return 0;
+        }
+        const { data: fallbackRows } = await supabase
+          .from("user_devices")
+          .select("id, user_id, public_key")
+          .in("user_id", memberIds);
+        deviceRows = fallbackRows ?? [];
+        if (process.env.NODE_ENV !== "production") {
+          console.log("[e2ee] reshare fallback devices", deviceRows.length);
+        }
+      }
+      if (!deviceRows?.length) {
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("[e2ee] reshare no devices", conversationId);
+        }
+        return 0;
+      }
 
       const rows: any[] = [];
       for (const deviceRow of deviceRows) {
@@ -721,13 +941,147 @@ export function E2EEProvider({ children }: { children: React.ReactNode }) {
         }
       }
       if (rows.length) {
-        await supabase.from("conversation_keys").upsert(rows, {
-          onConflict: "conversation_id,user_id,device_id",
-        });
+        await upsertConversationKeys(conversationId, rows);
+        if (process.env.NODE_ENV !== "production") {
+          console.log("[e2ee] reshare upserted", rows.length);
+        }
+      } else if (process.env.NODE_ENV !== "production") {
+        console.warn("[e2ee] reshare no rows", conversationId);
       }
       return rows.length;
     },
-    [conversationKeys, supabase]
+    [conversationKeys, supabase, upsertConversationKeys]
+  );
+
+  const ensureConversationKey = useCallback(
+    async (conversationId: string) => {
+      if (!conversationId) return null;
+      const existing = conversationKeys.get(conversationId) ?? null;
+      if (existing) {
+        if (
+          statusRef.current === "unlocked" &&
+          !sharedKeysRef.current.has(conversationId)
+        ) {
+          if (process.env.NODE_ENV !== "production") {
+            console.log("[e2ee] reshare existing key", conversationId);
+          }
+          const shared = await reshareConversationKey(conversationId);
+          if (shared > 0) sharedKeysRef.current.add(conversationId);
+        }
+        return existing;
+      }
+      if (statusRef.current !== "unlocked") return null;
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      let activeUser = user ?? null;
+      if (!activeUser) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        activeUser = sessionData.session?.user ?? null;
+      }
+      if (!activeUser) return null;
+
+      await ensureDevice(activeUser.id);
+      const key = await generateAesKey();
+      const raw = await exportAesKey(key);
+      const next = new Map(conversationKeys);
+      next.set(conversationId, key);
+      setConversationKeys(next);
+
+      try {
+        let deviceRows: any[] | null = null;
+        try {
+          const { data: rpcRows, error: rpcErr } = await supabase.rpc(
+            "get_conversation_member_devices",
+            { convo_id: conversationId }
+          );
+          if (!rpcErr && Array.isArray(rpcRows)) {
+            deviceRows = rpcRows;
+            if (process.env.NODE_ENV !== "production") {
+              console.log("[e2ee] member devices rpc", rpcRows.length);
+            }
+          }
+        } catch {
+          // ignore
+        }
+
+        if (!deviceRows) {
+          const { data: members } = await supabase
+            .from("conversation_members")
+            .select("user_id")
+            .eq("conversation_id", conversationId);
+          const memberIds = Array.from(
+            new Set((members ?? []).map((m) => m.user_id))
+          );
+          if (process.env.NODE_ENV !== "production") {
+            console.log("[e2ee] member ids", memberIds.length);
+          }
+          if (memberIds.length) {
+            const { data: fallbackRows } = await supabase
+              .from("user_devices")
+              .select("id, user_id, public_key")
+              .in("user_id", memberIds);
+            deviceRows = fallbackRows ?? [];
+          } else {
+            deviceRows = [];
+          }
+        }
+
+        if (deviceRows?.length) {
+          const rows: any[] = [];
+          for (const deviceRow of deviceRows) {
+            try {
+              const publicKey = await importPublicKey(deviceRow.public_key);
+              const epkPair = await generateDeviceKeyPair();
+              const epkPublic = await crypto.subtle.exportKey(
+                "spki",
+                epkPair.publicKey
+              );
+              const sharedKey = await deriveSharedKey(
+                epkPair.privateKey,
+                publicKey
+              );
+              const wrapped = await encryptAesGcm(sharedKey, toBase64(raw));
+              rows.push({
+                conversation_id: conversationId,
+                user_id: deviceRow.user_id,
+                device_id: deviceRow.id,
+                key_ciphertext: JSON.stringify({
+                  ciphertext: wrapped.ciphertext,
+                  nonce: wrapped.nonce,
+                  epk: toBase64(epkPublic),
+                }),
+              });
+            } catch {
+              // ignore per-device failures
+            }
+          }
+          if (process.env.NODE_ENV !== "production") {
+            console.log("[e2ee] wrapped key rows", rows.length);
+          }
+          if (rows.length) {
+            await upsertConversationKeys(conversationId, rows);
+            sharedKeysRef.current.add(conversationId);
+          }
+        }
+      } catch {
+        // best-effort
+      }
+
+      if (!backupKeyRef.current || !bundleRef.current) return key;
+      bundleRef.current.conversations[conversationId] = toBase64(raw);
+      await persistBackupBundle(activeUser.id);
+      return key;
+    },
+    [
+      conversationKeys,
+      ensureDevice,
+      persistBackupBundle,
+      reshareConversationKey,
+      supabase,
+      upsertConversationKeys,
+    ]
   );
 
   const value = useMemo(

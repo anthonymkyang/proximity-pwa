@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { E2EEProvider, useE2EE } from "@/components/providers/e2ee-context";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,11 +11,20 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 
 function PinSetupInner() {
   const router = useRouter();
-  const { enableWithPin } = useE2EE();
+  const { status, loading, enableWithPin, unlockWithPin, unlockWithRecoveryKey } =
+    useE2EE();
   const [pin, setPin] = useState("");
   const [pinConfirm, setPinConfirm] = useState("");
+  const [recoveryKey, setRecoveryKey] = useState("");
+  const [useRecovery, setUseRecovery] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!loading && status === "unlocked") {
+      router.replace("/app");
+    }
+  }, [loading, status, router]);
 
   const handleSubmit = async () => {
     setError(null);
@@ -37,6 +46,103 @@ function PinSetupInner() {
       setSaving(false);
     }
   };
+
+  const handleUnlock = async () => {
+    setError(null);
+    setSaving(true);
+    try {
+      if (useRecovery) {
+        if (!recoveryKey.trim()) {
+          setError("Enter your recovery key.");
+          return;
+        }
+        await unlockWithRecoveryKey(recoveryKey.trim(), true);
+      } else {
+        if (!/^\d{6}$/.test(pin)) {
+          setError("Enter a 6-digit PIN.");
+          return;
+        }
+        await unlockWithPin(pin, true);
+      }
+      router.replace("/app");
+    } catch (err: any) {
+      setError(err?.message || "Unable to unlock.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <Card className="w-full max-w-sm">
+        <CardHeader className="text-center">
+          <CardTitle>Loading</CardTitle>
+        </CardHeader>
+        <CardContent className="text-center text-sm text-muted-foreground">
+          Preparing your encryption keys…
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (status === "locked") {
+    return (
+      <Card className="w-full max-w-sm">
+        <CardHeader className="text-center">
+          <CardTitle>Unlock your messages</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {error ? (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : null}
+          {useRecovery ? (
+            <div className="space-y-2">
+              <Label htmlFor="recovery">Recovery key</Label>
+              <Input
+                id="recovery"
+                value={recoveryKey}
+                onChange={(e) => setRecoveryKey(e.target.value)}
+                placeholder="Enter recovery key"
+              />
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label htmlFor="pin">6-digit PIN</Label>
+              <Input
+                id="pin"
+                value={pin}
+                onChange={(e) => setPin(e.target.value)}
+                inputMode="numeric"
+                type="password"
+                placeholder="Enter PIN"
+              />
+            </div>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            className="w-full"
+            onClick={() => {
+              setError(null);
+              setUseRecovery((prev) => !prev);
+            }}
+          >
+            {useRecovery ? "Use PIN instead" : "Use recovery key instead"}
+          </Button>
+          <p className="text-xs text-muted-foreground text-center">
+            This device will be remembered after unlocking.
+          </p>
+        </CardContent>
+        <CardFooter>
+          <Button onClick={handleUnlock} disabled={saving} className="w-full">
+            {saving ? "Unlocking…" : "Unlock"}
+          </Button>
+        </CardFooter>
+      </Card>
+    );
+  }
 
   return (
     <Card className="w-full max-w-sm">
