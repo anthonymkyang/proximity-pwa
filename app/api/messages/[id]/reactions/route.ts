@@ -1,6 +1,15 @@
 // app/api/messages/[id]/reactions/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+const admin =
+  SUPABASE_URL && SERVICE_ROLE_KEY
+    ? createAdminClient(SUPABASE_URL, SERVICE_ROLE_KEY)
+    : null;
 
 function getConversationId(params: { id?: string }, pathname: string) {
   const tail = pathname.split("/").pop();
@@ -45,6 +54,7 @@ export async function POST(
   }
 
   const supabase = await createClient();
+  const db = admin ?? supabase;
   const {
     data: { user },
     error: userErr,
@@ -90,7 +100,7 @@ export async function POST(
   }
 
   if (type) {
-    const { error: upErr } = await supabase
+    const { error: upErr } = await db
       .from("message_reactions")
       .upsert(
         { message_id: messageId, user_id: user.id, type },
@@ -101,7 +111,7 @@ export async function POST(
       return NextResponse.json({ error: upErr.message }, { status: 500 });
     }
   } else {
-    const { error: delErr } = await supabase
+    const { error: delErr } = await db
       .from("message_reactions")
       .delete()
       .eq("message_id", messageId)
@@ -126,6 +136,7 @@ export async function DELETE(
   }
 
   const supabase = await createClient();
+  const db = admin ?? supabase;
   const {
     data: { user },
     error: userErr,
@@ -166,7 +177,7 @@ export async function DELETE(
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
-  const { error: delErr } = await supabase
+  const { error: delErr } = await db
     .from("message_reactions")
     .delete()
     .eq("message_id", messageId)

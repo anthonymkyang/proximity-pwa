@@ -186,6 +186,30 @@ const sortUniqueMessages = (list: Message[]) => {
   );
 };
 
+const mergeMessages = (prev: Message[], incoming: Message[]) => {
+  if (!prev.length) return sortUniqueMessages(incoming);
+  if (!incoming.length) return sortUniqueMessages(prev);
+  const prevById = new Map(prev.map((m) => [m.id, m]));
+  const incomingIds = new Set(incoming.map((m) => m.id));
+  const merged = incoming.map((msg) => {
+    const prevMsg = prevById.get(msg.id);
+    if (!prevMsg) return msg;
+    const keepBody =
+      !msg.body && Boolean(msg.ciphertext) && Boolean(prevMsg.body);
+    const keepReplyBody = !msg.reply_to_body && Boolean(prevMsg.reply_to_body);
+    return {
+      ...msg,
+      body: keepBody ? prevMsg.body : msg.body,
+      reply_to_body: keepReplyBody ? prevMsg.reply_to_body : msg.reply_to_body,
+      translation: msg.translation ?? prevMsg.translation ?? null,
+    };
+  });
+  prev.forEach((msg) => {
+    if (!incomingIds.has(msg.id)) merged.push(msg);
+  });
+  return sortUniqueMessages(merged);
+};
+
 const REACTIONS = [
   { type: "heart", emoji: "❤️", src: "/emoji/red-heart.json" },
   { type: "fire", emoji: "🔥", src: "/emoji/fire.json" },
@@ -1428,7 +1452,8 @@ export default function ConversationPage() {
                   m.conversation_id ?? conversationId ?? undefined,
               })
           );
-          setMessages(sortUniqueMessages(normalized ?? []));
+          const normalizedList = normalized ?? [];
+          setMessages((prev) => mergeMessages(prev, normalizedList));
           if (normalized?.length) {
             setVisibleMessages(new Set(normalized.map((m) => m.id)));
           }
