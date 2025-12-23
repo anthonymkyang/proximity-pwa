@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { login, signup } from "./actions";
+import { requestOtp, verifyOtp } from "./actions";
 import {
   Card,
   CardHeader,
@@ -23,24 +23,20 @@ export default function AuthPage() {
   const initialError = sp.get("error") ?? "";
   const initialInfo = sp.get("info") ?? "";
   const initialEmail = sp.get("email") ?? "";
+  const stage = sp.get("stage") ?? "request";
 
   const [error] = useState(initialError);
   const [info] = useState(initialInfo);
   const [email] = useState(initialEmail);
-
-  // clean the URL right after we read the params
-  useEffect(() => {
-    if (sp.toString()) {
-      router.replace("/auth");
-    }
-  }, [sp, router]);
 
   return (
     <main className="min-h-screen flex items-center justify-center px-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="space-y-1 text-center">
           <CardTitle className="text-xl">Sign in</CardTitle>
-          <CardDescription>Use your email and password.</CardDescription>
+          <CardDescription>
+            Use your email to get a 6-digit code.
+          </CardDescription>
         </CardHeader>
 
         <CardContent className="space-y-4">
@@ -71,29 +67,42 @@ export default function AuthPage() {
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                name="password"
-                type="password"
-                required
-                autoComplete="current-password"
-              />
-            </div>
+            {stage === "verify" ? (
+              <div className="space-y-2">
+                <Label htmlFor="token">6-digit code</Label>
+                <Input
+                  id="token"
+                  name="token"
+                  maxLength={6}
+                  pattern="\d{6}"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="Enter code"
+                  required
+                />
+              </div>
+            ) : null}
 
             <CardFooter className="flex flex-col gap-2 px-0">
-              <Button formAction={login} className="w-full">
-                Log in
-              </Button>
-              <Button
-                variant="outline"
-                type="submit"
-                formAction={signup}
-                className="w-full"
-              >
-                Create account
-              </Button>
+              {stage === "verify" ? (
+                <>
+                  <Button formAction={verifyOtp} className="w-full">
+                    Verify code
+                  </Button>
+                  <Button
+                    variant="outline"
+                    type="submit"
+                    formAction={requestOtp}
+                    className="w-full"
+                  >
+                    Send new code
+                  </Button>
+                </>
+              ) : (
+                <Button formAction={requestOtp} className="w-full">
+                  Send code
+                </Button>
+              )}
             </CardFooter>
           </form>
         </CardContent>

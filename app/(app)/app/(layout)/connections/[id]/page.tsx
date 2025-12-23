@@ -524,28 +524,17 @@ export default function ConnectionDetailPage() {
         }
       }
 
-      const { data: newConvo, error: convoError } = await supabase
-        .from("conversations")
-        .insert({ type: "direct" })
-        .select()
-        .single();
-
-      if (convoError || !newConvo) {
-        throw new Error("Failed to create conversation");
+      const res = await fetch("/api/messages/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target_user_id: otherUserId }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.conversation_id) {
+        throw new Error(data?.error || "Failed to create conversation");
       }
 
-      const { error: membersError } = await supabase
-        .from("conversation_members")
-        .insert([
-          { conversation_id: newConvo.id, user_id: currentUserId },
-          { conversation_id: newConvo.id, user_id: otherUserId },
-        ]);
-
-      if (membersError) {
-        throw new Error("Failed to add conversation members");
-      }
-
-      router.push(`/app/messages/${newConvo.id}`);
+      router.push(`/app/messages/${data.conversation_id}`);
     } catch (err) {
       console.error("Open chat error:", err);
     } finally {

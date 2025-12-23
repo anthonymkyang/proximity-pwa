@@ -57,6 +57,7 @@ type DBConversation = {
   id: string;
   name: string;
   lastMessage: string | null;
+  lastMessageEncrypted?: boolean | null;
   lastMessageId?: string | null;
   avatar?: string | null;
   updated_at?: string | null;
@@ -285,25 +286,44 @@ export default function MessagesPage() {
           data: { user },
           error: userError,
         } = await supabase.auth.getUser();
+        let activeUser = user;
+        if (!activeUser || userError) {
+          const { data: sessionData } = await supabase.auth.getSession();
+          activeUser = sessionData.session?.user ?? null;
+        }
 
-        if (!user || userError) {
+        if (!activeUser) {
           setCurrentUserId(null);
           setUserConversations([]);
           setRawRows([]);
-          setLoadError(userError ? userError.message : null);
+          setLoadError(userError ? userError.message : "Not authenticated");
           setLoading(false);
           return;
         }
 
-        setCurrentUserId(user.id);
+        setCurrentUserId(activeUser.id);
 
         // 2) my memberships (which conversations I'm in)
-        const { data: myMemberships, error: myMembershipsError } =
+        let { data: myMemberships, error: myMembershipsError } =
           await supabase
             .from("conversation_members")
             .select("conversation_id, user_id, role, joined_at")
-            .eq("user_id", user.id)
+            .eq("user_id", activeUser.id)
             .order("joined_at", { ascending: false });
+
+        if (!myMembershipsError && (!myMemberships || myMemberships.length === 0)) {
+          try {
+            const { data: fallbackMemberships, error: fallbackError } =
+              await supabase.rpc("get_my_conversation_memberships_secure");
+            if (!fallbackError && Array.isArray(fallbackMemberships)) {
+              myMemberships = fallbackMemberships;
+            } else if (fallbackError) {
+              myMembershipsError = fallbackError;
+            }
+          } catch (err: any) {
+            myMembershipsError = err;
+          }
+        }
 
         if (myMembershipsError) {
           setLoadError(myMembershipsError.message);
@@ -330,13 +350,32 @@ export default function MessagesPage() {
         convoIdsRef.current = new Set(convoIds);
 
         // --- fetch latest messages for each conversation ---
-        const { data: msgs, error: msgsError } = await supabase
-          .from("messages")
-          .select("id, body, conversation_id, sender_id, created_at")
-          .in("conversation_id", convoIds)
-          .order("created_at", { ascending: false });
-        if (msgsError) {
-          console.warn("messages fetch failed", msgsError.message);
+        let msgs: any[] | null = null;
+        try {
+          const { data: rpcMessages, error: rpcErr } = await supabase.rpc(
+            "get_latest_messages_secure",
+            { convo_ids: convoIds }
+          );
+          if (rpcErr) {
+            console.warn("messages fetch failed", rpcErr.message);
+          } else {
+            msgs = rpcMessages ?? [];
+          }
+        } catch (err: any) {
+          console.warn("messages fetch failed", err?.message ?? err);
+        }
+        if (!msgs) {
+          const { data: fallbackMsgs, error: msgsError } = await supabase
+            .from("messages")
+            .select(
+              "id, body, ciphertext, nonce, conversation_id, sender_id, created_at"
+            )
+            .in("conversation_id", convoIds)
+            .order("created_at", { ascending: false });
+          if (msgsError) {
+            console.warn("messages fetch failed", msgsError.message);
+          }
+          msgs = fallbackMsgs ?? [];
         }
         const latestByConvo: Record<string, any> = {};
         for (const m of msgs ?? []) {
@@ -349,7 +388,9 @@ export default function MessagesPage() {
         }
 
         // Compute unread counts per conversation for messages from others
-        const otherMsgs = (msgs ?? []).filter((m) => m.sender_id !== user.id);
+        const otherMsgs = (msgs ?? []).filter(
+          (m) => m.sender_id !== activeUser.id
+        );
         const otherMsgIds = otherMsgs.map((m) => m.id);
         let readByMsgId: Record<string, boolean> = {};
         if (otherMsgIds.length) {
@@ -357,7 +398,7 @@ export default function MessagesPage() {
             .from("message_receipts")
             .select("message_id, read_at")
             .in("message_id", otherMsgIds)
-            .eq("user_id", user.id)
+            .eq("user_id", activeUser.id)
             .not("read_at", "is", null);
           for (const r of readRecs ?? []) readByMsgId[r.message_id] = true;
         }
@@ -370,10 +411,30 @@ export default function MessagesPage() {
         }
 
         // 4) fetch ALL members for ALL those conversations (NO joins here!)
-        const { data: allMembers, error: allMembersError } = await supabase
+        let { data: allMembers, error: allMembersError } = await supabase
           .from("conversation_members")
           .select("conversation_id, user_id, role, joined_at")
           .in("conversation_id", convoIds);
+
+        if (
+          !allMembersError &&
+          (!allMembers || allMembers.length === 0) &&
+          convoIds.length
+        ) {
+          try {
+            const { data: fallbackMembers, error: fallbackError } =
+              await supabase.rpc("get_conversation_members_secure", {
+                convo_ids: convoIds,
+              });
+            if (!fallbackError && Array.isArray(fallbackMembers)) {
+              allMembers = fallbackMembers;
+            } else if (fallbackError) {
+              allMembersError = fallbackError;
+            }
+          } catch (err: any) {
+            allMembersError = err;
+          }
+        }
 
         if (allMembersError) {
           setLoadError(allMembersError.message);
@@ -421,20 +482,66 @@ export default function MessagesPage() {
         );
 
         // 7) fetch profiles for those users
-        // assumes public.profiles(id uuid pk, profile_title, avatar_url, ...)
-        const { data: profiles, error: profilesError } = await supabase
-          .from("profiles")
-          .select("id, profile_title, avatar_url")
-          .in("id", allUserIds);
+        // assumes public.profiles(id uuid pk, profile_title, avatar_url, name)
+        let profileById: Record<string, any> = {};
+        try {
+          const { data: profiles, error: profilesError } = await supabase
+            .from("profiles")
+            .select("id, name, profile_title, avatar_url")
+            .in("id", allUserIds);
 
-        if (profilesError) {
-          // non-fatal — we can still show conversations, just with fallbacks
-          console.warn("profiles fetch failed", profilesError.message);
+          if (profilesError) {
+            console.warn("profiles fetch failed", profilesError.message);
+          } else {
+            for (const p of profiles ?? []) {
+              profileById[p.id] = p;
+            }
+          }
+        } catch (err: any) {
+          console.warn("profiles fetch failed", err?.message ?? err);
         }
 
-        const profileById: Record<string, any> = {};
-        for (const p of profiles ?? []) {
-          profileById[p.id] = p;
+        if (Object.keys(profileById).length === 0 && allUserIds.length) {
+          try {
+            const { data: profiles, error: profilesError } = await supabase.rpc(
+              "get_profiles_secure",
+              { user_ids: allUserIds }
+            );
+            if (profilesError) {
+              console.warn("profiles fetch failed", profilesError.message);
+            } else {
+              for (const p of profiles ?? []) {
+                profileById[p.id] = p;
+              }
+            }
+          } catch (err: any) {
+            console.warn("profiles fetch failed", err?.message ?? err);
+          }
+        }
+
+        const directOtherByConvo: Record<string, any> = {};
+        if (convoIds.length && Object.keys(profileById).length === 0) {
+          try {
+            const results = await Promise.all(
+              convoIds.map(async (convoId) => {
+                const { data: otherRows, error } = await supabase.rpc(
+                  "get_direct_other",
+                  { convo_id: convoId }
+                );
+                if (error) return null;
+                const row = Array.isArray(otherRows) ? otherRows[0] : otherRows;
+                if (!row?.user_id) return null;
+                return [convoId, row] as const;
+              })
+            );
+            results.forEach((item) => {
+              if (!item) return;
+              const [cid, row] = item;
+              directOtherByConvo[cid] = row;
+            });
+          } catch (err: any) {
+            console.warn("profiles fetch failed", err?.message ?? err);
+          }
         }
 
         // 7.1) presence for all users
@@ -481,9 +588,16 @@ export default function MessagesPage() {
         for (const convoId of convoIds) {
           const latest = latestByConvo[convoId];
           const members = byConvo[convoId] ?? [];
-          const others = members.filter((m: any) => m.user_id !== user.id);
+          const others = members.filter(
+            (m: any) => m.user_id !== activeUser.id
+          );
           const isGroup = members.length > 2;
-          if (!isGroup && latest && latest.sender_id === user.id && others[0]) {
+          if (
+            !isGroup &&
+            latest &&
+            latest.sender_id === activeUser.id &&
+            others[0]
+          ) {
             candidateMsgIds.push(latest.id);
             candidateRecipientIds.add(others[0].user_id);
           }
@@ -519,7 +633,7 @@ export default function MessagesPage() {
           );
           const members = byConvo[convoId] ?? [];
           const convoRow = convoById[convoId] ?? null;
-          const others = members.filter((m) => m.user_id !== user.id);
+          const others = members.filter((m) => m.user_id !== activeUser.id);
           const convoType =
             typeof convoRow?.type === "string"
               ? convoRow.type.toLowerCase()
@@ -543,16 +657,23 @@ export default function MessagesPage() {
             // 1:1: show the other participant's profile title, NOT their user_id
             const other = others[0];
             const otherProfile = other ? profileById[other.user_id] : null;
+            const directFallback = directOtherByConvo[convoId] ?? null;
             name =
-              (otherProfile && otherProfile.profile_title) || "Unknown user";
+              (otherProfile && otherProfile.name) ||
+              directFallback?.name ||
+              "Unknown user";
             const override = connectionNames[other?.user_id ?? ""];
             if (override?.name) {
               name = override.name || name;
               secondary = override.profileTitle || null;
             } else {
-              secondary = otherProfile?.profile_title || null;
+              secondary =
+                otherProfile?.profile_title ||
+                directFallback?.profile_title ||
+                null;
             }
-            avatar = otherProfile?.avatar_url ?? null;
+            avatar =
+              otherProfile?.avatar_url ?? directFallback?.avatar_url ?? null;
             presence =
               !isGroup && other
                 ? classifyPresence(presenceByUser[other.user_id])
@@ -569,6 +690,9 @@ export default function MessagesPage() {
 
           const latest = latestByConvo[convoId] ?? null;
           const lastMessage = latest?.body ?? null;
+          const lastMessageEncrypted = Boolean(
+            !lastMessage && latest?.ciphertext
+          );
           const lastMessageAt = latest?.created_at ?? null;
           const lastMessageSenderId = latest?.sender_id ?? null;
 
@@ -579,7 +703,7 @@ export default function MessagesPage() {
             delivered_at: string | null;
             read_at: string | null;
           } | null = null;
-          if (!isGroup && latest && latest.sender_id === user.id) {
+          if (!isGroup && latest && latest.sender_id === activeUser.id) {
             lastReceipt = receiptsByMsg[latest.id] ?? {
               delivered_at: null,
               read_at: null,
@@ -591,6 +715,7 @@ export default function MessagesPage() {
             name,
             avatar,
             lastMessage,
+            lastMessageEncrypted,
             lastMessageId: latest?.id ?? null,
             updated_at: lastMessageAt ?? myRow?.joined_at ?? null,
             lastMessageAt,
@@ -657,13 +782,30 @@ export default function MessagesPage() {
         typeof convoRow?.type === "string" ? convoRow.type.toLowerCase() : null;
       const isGroup = convoType === "group" || members.length > 2;
 
-      const { data: latest } = await supabase
-        .from("messages")
-        .select("id, body, conversation_id, sender_id, created_at")
-        .eq("conversation_id", convoId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      let latest: any | null = null;
+      try {
+        const { data: rpcMessages, error: rpcErr } = await supabase.rpc(
+          "get_messages_secure",
+          { convo_id: convoId, limit_count: 1, before_time: null }
+        );
+        if (rpcErr) {
+          console.warn("messages fetch failed", rpcErr.message);
+        } else {
+          latest = Array.isArray(rpcMessages) ? rpcMessages[0] : null;
+        }
+      } catch (err: any) {
+        console.warn("messages fetch failed", err?.message ?? err);
+      }
+      if (!latest) {
+        const { data: fallbackLatest } = await supabase
+          .from("messages")
+          .select("id, body, ciphertext, conversation_id, sender_id, created_at")
+          .eq("conversation_id", convoId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        latest = fallbackLatest ?? null;
+      }
 
       if (latest?.id && latest?.conversation_id) {
         messageToConvoRef.current[latest.id] = latest.conversation_id;
@@ -681,12 +823,48 @@ export default function MessagesPage() {
         const other = members.find((m) => m.user_id !== userId);
         const otherId = other?.user_id ?? null;
         if (otherId) {
-          const { data: otherProfile } = await supabase
-            .from("profiles")
-            .select("id, profile_title, avatar_url")
-            .eq("id", otherId)
-            .maybeSingle();
-          name = otherProfile?.profile_title || "Unknown user";
+          let otherProfile: any | null = null;
+          try {
+            const { data: row, error: otherProfileError } = await supabase
+              .from("profiles")
+              .select("id, name, profile_title, avatar_url")
+              .eq("id", otherId)
+              .maybeSingle();
+            if (!otherProfileError) {
+              otherProfile = row ?? null;
+            }
+          } catch {
+            // ignore
+          }
+          if (!otherProfile) {
+            try {
+              const { data: rows } = await supabase.rpc("get_profiles_secure", {
+                user_ids: [otherId],
+              });
+              otherProfile = Array.isArray(rows) ? rows[0] : null;
+            } catch {
+              // ignore
+            }
+          }
+          if (!otherProfile) {
+            try {
+              const { data: otherRows } = await supabase.rpc("get_direct_other", {
+                convo_id: convoId,
+              });
+              const row = Array.isArray(otherRows) ? otherRows[0] : otherRows;
+              if (row?.user_id) {
+                otherProfile = {
+                  id: row.user_id,
+                  name: row.name ?? null,
+                  profile_title: row.profile_title ?? null,
+                  avatar_url: row.avatar_url ?? null,
+                };
+              }
+            } catch {
+              // ignore
+            }
+          }
+          name = otherProfile?.name || "Unknown user";
           const override = connectionNames[otherId];
           if (override?.name) {
             name = override.name || name;
@@ -764,6 +942,7 @@ export default function MessagesPage() {
         name,
         avatar,
         lastMessage: latest?.body ?? null,
+        lastMessageEncrypted: Boolean(!latest?.body && latest?.ciphertext),
         lastMessageId: latest?.id ?? null,
         updated_at: latest?.created_at ?? myMembership?.joined_at ?? null,
         lastMessageAt: latest?.created_at ?? null,
@@ -794,11 +973,40 @@ export default function MessagesPage() {
           const m = payload.new as {
             id: string;
             body: string;
+            ciphertext?: string | null;
             conversation_id: string;
             sender_id: string;
             created_at: string;
           };
-          if (!convoIdsRef.current.has(m.conversation_id)) return;
+          if (!convoIdsRef.current.has(m.conversation_id)) {
+            const uid = currentUserIdRef.current;
+            if (!uid) return;
+            (async () => {
+              try {
+                const supa = createClient();
+                const { data: memberRow } = await supa
+                  .from("conversation_members")
+                  .select("conversation_id")
+                  .eq("conversation_id", m.conversation_id)
+                  .eq("user_id", uid)
+                  .maybeSingle();
+                if (!memberRow) return;
+                convoIdsRef.current.add(m.conversation_id);
+                const summary = await fetchConversationSummary(
+                  m.conversation_id,
+                  uid
+                );
+                if (!summary) return;
+                setUserConversations((prev) => {
+                  if (prev.some((c) => c.id === m.conversation_id)) return prev;
+                  return sortConversations([...prev, summary]);
+                });
+              } catch {
+                // ignore
+              }
+            })();
+            return;
+          }
           if (m.id) {
             messageToConvoRef.current[m.id] = m.conversation_id;
             if (m.sender_id) messageSenderRef.current[m.id] = m.sender_id;
@@ -816,6 +1024,7 @@ export default function MessagesPage() {
               return {
                 ...c,
                 lastMessage: m.body,
+                lastMessageEncrypted: Boolean(!m.body && m.ciphertext),
                 lastMessageId: m.id,
                 lastMessageAt: m.created_at,
                 lastMessageSenderId: m.sender_id,
@@ -1279,7 +1488,11 @@ export default function MessagesPage() {
                 })
               : "";
 
-            const lastLine = c.lastMessage ? c.lastMessage : "No messages yet";
+            const lastLine = c.lastMessage
+              ? c.lastMessage
+              : c.lastMessageEncrypted
+                ? "Encrypted message"
+                : "No messages yet";
             const avatarUrl = c.avatar
               ? c.isGroup
                 ? c.avatar

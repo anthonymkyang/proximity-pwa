@@ -83,6 +83,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getAvatarProxyUrl } from "@/lib/profiles/getAvatarProxyUrl";
 import { toast } from "sonner";
+import { useE2EE } from "@/components/providers/e2ee-context";
+import { decryptAesGcm, encryptAesGcm } from "@/lib/crypto/e2ee";
 import {
   Drawer,
   DrawerContent,
@@ -156,6 +158,9 @@ type Message = {
       message?: string | null;
     };
   } | null;
+  ciphertext?: string | null;
+  nonce?: string | null;
+  key_version?: number | null;
 };
 
 type MessageTranslation = {
@@ -843,6 +848,10 @@ export default function ConversationPage() {
 
   const { presence, currentUserId: presenceUserId } = usePresence();
   const [messages, setMessages] = useState<Message[]>([]);
+  const decryptedIdsRef = useRef<Set<string>>(new Set());
+  const decryptingIdsRef = useRef<Set<string>>(new Set());
+  const readReceiptInFlightRef = useRef(false);
+  const readReceiptSentRef = useRef<Set<string>>(new Set());
   const [newMessage, setNewMessage] = useState("");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [otherUserId, setOtherUserId] = useState<string | null>(null);
@@ -961,10 +970,11 @@ export default function ConversationPage() {
   const pendingReceiptsRef = useRef<
     Record<string, { delivered_at: string | null; read_at: string | null }>
   >({});
+  const { status, ensureConversationKey, getConversationKey, refreshDeviceKeys } =
+    useE2EE();
   const receiptsChannelRef = useRef<ReturnType<
     ReturnType<typeof createClient>["channel"]
   > | null>(null);
-  const deliveryAttemptRef = useRef<Set<string>>(new Set());
   const typingBroadcastedRef = useRef(false);
   const typingSelfTimerRef = useRef<NodeJS.Timeout | null>(null);
   const typingTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
@@ -1315,7 +1325,13 @@ export default function ConversationPage() {
         const {
           data: { user },
         } = await supabase.current.auth.getUser();
-        setCurrentUserId(user?.id ?? null);
+        let activeUser = user ?? null;
+        if (!activeUser) {
+          const { data: sessionData } =
+            await supabase.current.auth.getSession();
+          activeUser = sessionData.session?.user ?? null;
+        }
+        setCurrentUserId(activeUser?.id ?? null);
 
         const res = await fetch(
           `/api/messages/${conversationId}?limit=${PAGE_SIZE}`
@@ -1332,6 +1348,9 @@ export default function ConversationPage() {
               })
           );
           setMessages(sortUniqueMessages(normalized ?? []));
+          if (normalized?.length) {
+            setVisibleMessages(new Set(normalized.map((m) => m.id)));
+          }
 
           // Load translations from database
           const translationsFromDb: Record<string, MessageTranslation> = {};
@@ -1346,7 +1365,7 @@ export default function ConversationPage() {
           });
           setTranslations(translationsFromDb);
           const otherMsg = (data.messages as Message[] | undefined)?.find(
-            (m) => m.sender_id && m.sender_id !== user?.id
+            (m) => m.sender_id && m.sender_id !== activeUser?.id
           );
           const fallbackTitle =
             otherMsg?.profiles?.profile_title ??
@@ -1440,6 +1459,70 @@ export default function ConversationPage() {
     };
     load();
   }, [conversationId]);
+
+  useEffect(() => {
+    if (!conversationId || status !== "unlocked") return;
+    void ensureConversationKey(conversationId);
+  }, [conversationId, ensureConversationKey, status]);
+
+  useEffect(() => {
+    if (!conversationId || status !== "unlocked") return;
+    const key = getConversationKey(conversationId);
+    if (!key) {
+      void refreshDeviceKeys();
+      return;
+    }
+    const encrypted = messages.filter(
+      (m) =>
+        m.ciphertext &&
+        m.nonce &&
+        !decryptedIdsRef.current.has(m.id) &&
+        !decryptingIdsRef.current.has(m.id)
+    );
+    if (!encrypted.length) return;
+    let cancelled = false;
+    const run = async () => {
+      for (const message of encrypted) {
+        decryptingIdsRef.current.add(message.id);
+        try {
+          const plaintext = await decryptAesGcm(
+            key,
+            message.ciphertext ?? "",
+            message.nonce ?? ""
+          );
+          const parsed = JSON.parse(plaintext) as {
+            body?: string | null;
+            message_type?: Message["message_type"];
+            metadata?: Message["metadata"];
+            reply_to_body?: string | null;
+          };
+          if (cancelled) return;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === message.id
+                ? {
+                    ...m,
+                    body: parsed.body ?? m.body,
+                    message_type: parsed.message_type ?? m.message_type,
+                    metadata: parsed.metadata ?? m.metadata,
+                    reply_to_body: parsed.reply_to_body ?? m.reply_to_body,
+                  }
+                : m
+            )
+          );
+          decryptedIdsRef.current.add(message.id);
+        } catch {
+          // ignore decryption failures
+        } finally {
+          decryptingIdsRef.current.delete(message.id);
+        }
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId, getConversationKey, messages, refreshDeviceKeys, status]);
 
   // simple realtime subscription
   useEffect(() => {
@@ -1538,67 +1621,6 @@ export default function ConversationPage() {
             )
           );
         }
-      }
-    );
-    channel.on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "message_receipts",
-      },
-      (payload: any) => {
-        const rec = (payload.new ?? payload.old) as {
-          message_id?: string;
-          delivered_at?: string | null;
-          read_at?: string | null;
-          user_id?: string | null;
-        };
-        const msgId = rec?.message_id;
-        if (!msgId) return;
-
-        const applyUpdate = () => {
-          let updated = false;
-          setMessages((prev) =>
-            prev.map((m) => {
-              if (m.id !== msgId) return m;
-              const isMine =
-                currentUserIdRef.current != null &&
-                m.sender_id === currentUserIdRef.current;
-              if (isMine && rec.user_id === currentUserIdRef.current) return m;
-              updated = true;
-              return {
-                ...m,
-                delivered_at: rec.delivered_at ?? m.delivered_at ?? null,
-                read_at: rec.read_at ?? m.read_at ?? null,
-              };
-            })
-          );
-          return updated;
-        };
-
-        // Try updating in-memory message regardless of cached id set
-        const didUpdate = applyUpdate();
-        if (didUpdate) return;
-
-        // Otherwise, fetch the message to ensure it belongs to this conversation, then cache the receipt
-        (async () => {
-          try {
-            const { data } = await supabase.current
-              .from("messages")
-              .select("id, conversation_id")
-              .eq("id", msgId)
-              .maybeSingle();
-            if (data?.conversation_id !== conversationId) return;
-            pendingReceiptsRef.current[msgId] = {
-              delivered_at: rec.delivered_at ?? null,
-              read_at: rec.read_at ?? null,
-            };
-            applyUpdate();
-          } catch {
-            // ignore
-          }
-        })();
       }
     );
     channel.on("broadcast", { event: "typing" }, (payload: any) => {
@@ -2354,13 +2376,57 @@ export default function ConversationPage() {
 
       const sendPayload = async (payload: any) => {
         console.log("Sending message with payload:", payload);
+        let encryptedRequest = payload;
+        if (status === "unlocked") {
+          const key = conversationId
+            ? await ensureConversationKey(conversationId)
+            : null;
+          if (!key) {
+            toast.error("Unable to encrypt message.");
+          } else {
+            const encryptedPayload = {
+              body: payload.body ?? "",
+              message_type: payload.message_type ?? null,
+              metadata: payload.metadata ?? null,
+              reply_to_body: payload.reply_to_body ?? null,
+            };
+            const { ciphertext, nonce } = await encryptAesGcm(
+              key,
+              JSON.stringify(encryptedPayload)
+            );
+            encryptedRequest = {
+              ...payload,
+              body: "",
+              reply_to_body: null,
+              message_type: null,
+              metadata: null,
+              ciphertext,
+              nonce,
+              key_version: 1,
+            };
+          }
+        }
         const res = await fetch(`/api/messages/${conversationId}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(encryptedRequest),
         });
         const data = await res.json();
         console.log("Message API response:", data);
+        if (res.ok && data?.message?.id) {
+          shouldAutoScrollRef.current = true;
+          setMessages((prev) =>
+            prev.some((m) => m.id === data.message.id)
+              ? prev
+              : sortUniqueMessages([
+                  ...prev,
+                  normalizeMessage({
+                    ...data.message,
+                    conversation_id: conversationId,
+                  }),
+                ])
+          );
+        }
       };
 
       const buildUrlDisplay = (rawUrl: string) => {
@@ -2780,66 +2846,38 @@ export default function ConversationPage() {
 
   useEffect(() => {
     if (!conversationId || !currentUserId) return;
-    const hasUnreadFromOthers = messages.some(
-      (m) => m.sender_id !== currentUserId && !m.read_at
-    );
-    if (!hasUnreadFromOthers) return;
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      fetch(`/api/messages/${conversationId}`, {
-        method: "PATCH",
-        signal: controller.signal,
-      }).catch(() => {
-        // ignore
-      });
-    }, 300);
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [conversationId, currentUserId, messages]);
+    const unreadIds = messages
+      .filter((m) => m.sender_id !== currentUserId && !m.read_at)
+      .map((m) => m.id)
+      .filter((id) => id && !readReceiptSentRef.current.has(id));
+    if (!unreadIds.length || readReceiptInFlightRef.current) return;
 
-  // For newly received messages, immediately upsert delivered receipts while viewing the thread
-  useEffect(() => {
-    if (!currentUserId || !messages.length) return;
-    const now = new Date().toISOString();
-    const rows = messages
-      .filter(
-        (m) =>
-          m.sender_id !== currentUserId &&
-          !m.delivered_at &&
-          !deliveryAttemptRef.current.has(m.id)
-      )
-      .map((m) => ({
-        message_id: m.id,
-        user_id: currentUserId,
-        delivered_at: now,
-      }));
-    if (!rows.length) return;
-    rows.forEach((r) => deliveryAttemptRef.current.add(r.message_id));
+    unreadIds.forEach((id) => readReceiptSentRef.current.add(id));
+    readReceiptInFlightRef.current = true;
 
-    (async () => {
-      try {
-        const { error } = await supabase.current
-          .from("message_receipts")
-          .upsert(rows, { onConflict: "message_id,user_id" });
-        if (error) return;
-        const deliveredMap = rows.reduce<Record<string, string>>((acc, r) => {
-          acc[r.message_id] = r.delivered_at ?? now;
-          return acc;
-        }, {});
+    fetch(`/api/messages/${conversationId}/receipts`, { method: "POST" })
+      .then((res) => {
+        if (!res.ok) throw new Error("receipts_failed");
+        const stamp = new Date().toISOString();
         setMessages((prev) =>
           prev.map((m) =>
-            deliveredMap[m.id]
-              ? { ...m, delivered_at: m.delivered_at ?? deliveredMap[m.id] }
+            unreadIds.includes(m.id)
+              ? {
+                  ...m,
+                  delivered_at: m.delivered_at ?? stamp,
+                  read_at: m.read_at ?? stamp,
+                }
               : m
           )
         );
-      } catch {
-        // ignore
-      }
-    })();
-  }, [currentUserId, messages]);
+      })
+      .catch(() => {
+        unreadIds.forEach((id) => readReceiptSentRef.current.delete(id));
+      })
+      .finally(() => {
+        readReceiptInFlightRef.current = false;
+      });
+  }, [conversationId, currentUserId, messages]);
 
   const emitTyping = (started: boolean) => {
     if (!conversationId) return;
@@ -3710,6 +3748,12 @@ export default function ConversationPage() {
           {reactionError}
         </div>
       ) : null}
+      {status !== "unlocked" ? (
+        <div className="mx-4 mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+          End-to-end encryption isn’t available right now. Messages will be sent
+          without encryption until it’s unlocked.
+        </div>
+      ) : null}
       <div
         ref={listRef}
         className={`relative flex-1 px-4 pt-4 space-y-3 ${
@@ -4122,9 +4166,13 @@ export default function ConversationPage() {
                           </p>
                         )}
                       </div>
-                    ) : (
+                  ) : (
                       <p className="text-sm leading-relaxed wrap-break-word">
-                        {m.body}
+                        {m.body && m.body.length > 0
+                          ? m.body
+                          : m.ciphertext
+                            ? "Encrypted message"
+                            : ""}
                       </p>
                     )}
 

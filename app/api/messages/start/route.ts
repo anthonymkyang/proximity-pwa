@@ -53,8 +53,8 @@ export async function POST(req: Request) {
   // Deterministic pair ID so the same two users always land in the same convo
   const conversationId = stablePairUUID(user.id, target_user_id);
 
-  // Idempotent upsert of conversation
-  const { error: convErr } = await supabase.from("conversations").upsert(
+  // Idempotent insert of conversation without triggering UPDATE RLS
+  const { error: convErr } = await supabase.from("conversations").insert(
     [
       {
         id: conversationId,
@@ -63,36 +63,21 @@ export async function POST(req: Request) {
         updated_at: new Date().toISOString(),
       },
     ],
-    { onConflict: "id" }
+    { onConflict: "id", ignoreDuplicates: true }
   );
 
-  if (convErr) {
+  if (convErr && convErr.code !== "23505") {
     return NextResponse.json(
       { error: "upsert_conversation_failed", details: convErr.message },
       { status: 400 }
     );
   }
 
-  // Idempotent upsert of both members
-  const { error: memberErr } = await supabase
-    .from("conversation_members")
-    .upsert(
-      [
-        {
-          conversation_id: conversationId,
-          user_id: user.id,
-          role: "member",
-          joined_at: new Date().toISOString(),
-        },
-        {
-          conversation_id: conversationId,
-          user_id: target_user_id,
-          role: "member",
-          joined_at: new Date().toISOString(),
-        },
-      ],
-      { onConflict: "conversation_id,user_id" }
-    );
+  // Insert both members via security definer RPC to avoid RLS on the second row
+  const { error: memberErr } = await supabase.rpc("add_direct_members", {
+    convo_id: conversationId,
+    other_user_id: target_user_id,
+  });
 
   if (memberErr) {
     return NextResponse.json(

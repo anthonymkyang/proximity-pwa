@@ -8,6 +8,7 @@ import MapCanvas from "@/components/map/MapCanvas";
 import AppBar from "@/components/nav/AppBar";
 import { Button } from "@/components/ui/button";
 import { PresenceProvider } from "@/components/providers/presence-context";
+import { E2EEProvider } from "@/components/providers/e2ee-context";
 
 /**
  * Presence strategy:
@@ -357,37 +358,39 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const appBarHeight = hideAppBar ? 0 : 72;
   return (
     <PresenceProvider>
-      <div className="relative h-svh">
-        <div className="fixed inset-0 z-0">
-          <MapCanvas />
-        </div>
-        <div
-          className={`pointer-events-none fixed inset-x-0 top-0 z-10 h-24 bg-linear-to-b from-background/90 to-transparent transition-opacity duration-300 ${
-            isScrolled ? "opacity-100" : "opacity-0"
-          }`}
-        />
-
-        <main
-          className={`relative flex h-full flex-col overflow-hidden ${
-            isMapPage ? "bg-transparent pointer-events-none" : "bg-background"
-          }`}
-          style={{
-            paddingTop: "0px",
-            paddingBottom: "0px",
-          }}
-        >
-          <div
-            className={`flex-1 min-h-0 overflow-auto ${
-              isMapPage ? "pointer-events-none" : ""
-            }`}
-            ref={scrollRef}
-          >
-            {children}
+      <E2EEProvider>
+        <div className="relative h-svh">
+          <div className="fixed inset-0 z-0">
+            <MapCanvas />
           </div>
-        </main>
+          <div
+            className={`pointer-events-none fixed inset-x-0 top-0 z-10 h-24 bg-linear-to-b from-background/90 to-transparent transition-opacity duration-300 ${
+              isScrolled ? "opacity-100" : "opacity-0"
+            }`}
+          />
 
-        {!hideAppBar && <AppBar />}
-      </div>
+          <main
+            className={`relative flex h-full flex-col overflow-hidden ${
+              isMapPage ? "bg-transparent pointer-events-none" : "bg-background"
+            }`}
+            style={{
+              paddingTop: "0px",
+              paddingBottom: "0px",
+            }}
+          >
+            <div
+              className={`flex-1 min-h-0 overflow-auto ${
+                isMapPage ? "pointer-events-none" : ""
+              }`}
+              ref={scrollRef}
+            >
+              {children}
+            </div>
+          </main>
+
+          {!hideAppBar && <AppBar />}
+        </div>
+      </E2EEProvider>
     </PresenceProvider>
   );
 }

@@ -1,14 +1,8 @@
-// app/(app)/app/layout.tsx
 import { redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
+import PinSetupClient from "./PinSetupClient";
 
-import AppShell from "./AppShell";
-
-export default async function AppLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default async function PinSetupPage() {
   const supabase = await createClient();
   const {
     data: { user },
@@ -17,14 +11,20 @@ export default async function AppLayout({
   if (!user) {
     redirect("/auth");
   }
+
   const { data: backupRow } = await supabase
     .from("user_key_backups")
     .select("user_id")
     .eq("user_id", user.id)
     .maybeSingle();
-  if (!backupRow) {
-    redirect("/auth/pin");
+
+  if (backupRow) {
+    redirect("/app");
   }
 
-  return <AppShell>{children}</AppShell>;
+  return (
+    <main className="min-h-screen flex items-center justify-center px-4">
+      <PinSetupClient />
+    </main>
+  );
 }

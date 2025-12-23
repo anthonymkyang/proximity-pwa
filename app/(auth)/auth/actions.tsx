@@ -5,15 +5,19 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
 
-export async function login(formData: FormData) {
+export async function requestOtp(formData: FormData) {
   const supabase = await createClient();
 
   const email = (formData.get("email") as string)?.trim();
-  const password = (formData.get("password") as string) ?? "";
+  if (!email) {
+    redirect(`/auth?error=${encodeURIComponent("Email is required.")}`);
+  }
 
-  const { error } = await supabase.auth.signInWithPassword({
+  const { error } = await supabase.auth.signInWithOtp({
     email,
-    password,
+    options: {
+      shouldCreateUser: true,
+    },
   });
 
   if (error) {
@@ -24,27 +28,48 @@ export async function login(formData: FormData) {
     );
   }
 
-  // so /app re-renders with the user
-  revalidatePath("/app", "layout");
-  redirect("/app");
+  redirect(`/auth?stage=verify&info=${encodeURIComponent("Code sent.")}&email=${encodeURIComponent(email)}`);
 }
 
-export async function signup(formData: FormData) {
+export async function verifyOtp(formData: FormData) {
   const supabase = await createClient();
 
   const email = (formData.get("email") as string)?.trim();
-  const password = (formData.get("password") as string) ?? "";
+  const token = (formData.get("token") as string)?.trim();
 
-  const { error } = await supabase.auth.signUp({
+  if (!email || !token) {
+    redirect(
+      `/auth?stage=verify&error=${encodeURIComponent(
+        "Enter the 6-digit code."
+      )}&email=${encodeURIComponent(email ?? "")}`
+    );
+  }
+
+  const { error } = await supabase.auth.verifyOtp({
     email,
-    password,
+    token,
+    type: "email",
   });
 
   if (error) {
     redirect(
-      `/auth?error=${encodeURIComponent(
+      `/auth?stage=verify&error=${encodeURIComponent(
         error.message
       )}&email=${encodeURIComponent(email)}`
+    );
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (user?.id && email) {
+    const fallbackName = email.split("@")[0] || "User";
+    await supabase.from("profiles").insert(
+      {
+        id: user.id,
+        name: fallbackName,
+      },
+      { onConflict: "id", ignoreDuplicates: true }
     );
   }
 

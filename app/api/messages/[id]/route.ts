@@ -1,6 +1,15 @@
 // app/api/messages/[id]/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+const admin =
+  SUPABASE_URL && SERVICE_ROLE_KEY
+    ? createAdminClient(SUPABASE_URL, SERVICE_ROLE_KEY)
+    : null;
 
 function calcAge(dobStr?: string | null): number | null {
   if (!dobStr) return null;
@@ -58,6 +67,17 @@ export async function GET(
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
 
+  const db = admin ?? supabase;
+  const { data: membership, error: membershipErr } = await db
+    .from("conversation_members")
+    .select("conversation_id")
+    .eq("conversation_id", conversationId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (membershipErr || !membership) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+
   const url = new URL(req.url);
   const limitParam = parseInt(url.searchParams.get("limit") ?? "", 10);
   const limit =
@@ -71,36 +91,62 @@ export async function GET(
       : null;
 
   // 1) Fetch messages + sender profiles (paginated, newest first then reversed)
-  let baseQuery = supabase
-    .from("messages")
-    .select(
-      `
-      id,
-      body,
-      created_at,
-      sender_id,
-      reply_to_id,
-      reply_to_body,
-      reply_to_sender_id,
-      deleted_at,
-      translation,
-      message_type,
-      metadata,
-      profiles:profiles!messages_sender_id_profiles_fkey(profile_title, avatar_url, date_of_birth)
-    `
-    )
-    .eq("conversation_id", conversationId);
-
-  if (beforeIso) {
-    baseQuery = baseQuery.lt("created_at", beforeIso);
+  let messages: any[] | null = null;
+  let msgErr: { message?: string } | null = null;
+  try {
+    const { data: rpcMessages, error: rpcErr } = await supabase.rpc(
+      "get_messages_secure",
+      {
+        convo_id: conversationId,
+        limit_count: limit + 1,
+        before_time: beforeIso,
+      }
+    );
+    if (rpcErr) {
+      msgErr = rpcErr;
+    } else {
+      messages = rpcMessages ?? [];
+    }
+  } catch (err: any) {
+    msgErr = err;
   }
 
-  const { data: messages, error: msgErr } = await baseQuery
-    .order("created_at", { ascending: false })
-    .limit(limit + 1);
+  if (!messages) {
+    let baseQuery = supabase
+      .from("messages")
+      .select(
+        `
+        id,
+        conversation_id,
+        body,
+        ciphertext,
+        nonce,
+        key_version,
+        created_at,
+        sender_id,
+        reply_to_id,
+        reply_to_body,
+        reply_to_sender_id,
+        deleted_at,
+        translation,
+        message_type,
+        metadata,
+        profiles:profiles!left(profile_title, avatar_url, date_of_birth)
+      `
+      )
+      .eq("conversation_id", conversationId);
 
-  if (msgErr) {
-    return NextResponse.json({ error: msgErr.message }, { status: 500 });
+    if (beforeIso) {
+      baseQuery = baseQuery.lt("created_at", beforeIso);
+    }
+
+    const { data: baseMessages, error: baseErr } = await baseQuery
+      .order("created_at", { ascending: false })
+      .limit(limit + 1);
+    if (baseErr) {
+      return NextResponse.json({ error: baseErr.message }, { status: 500 });
+    }
+    messages = baseMessages ?? [];
   }
 
   const hasMore = (messages ?? []).length > limit;
@@ -116,23 +162,14 @@ export async function GET(
     return m;
   });
 
-  // Determine 1:1 other participant (if any)
-  const { data: members } = await supabase
-    .from("conversation_members")
-    .select("user_id")
-    .eq("conversation_id", conversationId);
-
-  const { data: convoRow } = await supabase
+  const { data: convoRow } = await db
     .from("conversations")
     .select("id, name, type")
     .eq("id", conversationId)
     .maybeSingle();
 
-  const memberIds = (members ?? []).map((m) => m.user_id);
-  const others = memberIds.filter((id) => id !== user.id);
-  const otherUserId = others.length === 1 ? others[0] : null;
-
   // Fetch the other participant (with labels) and compute age + nickname
+  let otherUserId: string | null = null;
   let otherMeta: {
     profile_title: string | null;
     display_name?: string | null;
@@ -144,43 +181,78 @@ export async function GET(
     user_id?: string | null;
   } | null = null;
 
-  if (otherUserId) {
-    const { data: other } = await supabase
-      .from("profiles")
-      .select(
-        `
-        profile_title,
-        avatar_url,
-        date_of_birth,
-        nickname,
-        sexuality:sexualities!profiles_sexuality_id_fkey(label),
-        position:positions!profiles_position_id_fkey(label)
-      `
-      )
-      .eq("id", otherUserId)
+  const { data: otherRows } = await supabase.rpc("get_direct_other", {
+    convo_id: conversationId,
+  });
+  const otherRow = Array.isArray(otherRows) ? otherRows[0] : otherRows;
+  if (otherRow?.user_id) {
+    otherUserId = otherRow.user_id;
+    const age = calcAge(otherRow.date_of_birth ?? null);
+    const { data: presenceRow } = await db
+      .from("user_presence")
+      .select("status")
+      .eq("user_id", otherUserId)
       .maybeSingle();
-
-    if (other) {
-      const age = calcAge((other as any).date_of_birth ?? null);
-      const { data: presenceRow } = await supabase
+    otherMeta = {
+      profile_title: otherRow.profile_title ?? null,
+      display_name: otherRow.name ?? null,
+      avatar_url: otherRow.avatar_url ?? null,
+      age: age ?? null,
+      sexuality: otherRow.sexuality_label
+        ? { label: otherRow.sexuality_label }
+        : null,
+      position: otherRow.position_label
+        ? { label: otherRow.position_label }
+        : null,
+      presence: presenceRow?.status ?? null,
+      user_id: otherUserId,
+    };
+  } else {
+    const { data: members } = await db
+      .from("conversation_members")
+      .select("user_id")
+      .eq("conversation_id", conversationId);
+    const memberIds = (members ?? []).map((m) => m.user_id);
+    const others = memberIds.filter((id) => id !== user.id);
+    otherUserId = others.length === 1 ? others[0] : null;
+    if (otherUserId) {
+      const { data: other } = await db
+        .from("profiles")
+        .select(
+          `
+          id,
+          name,
+          profile_title,
+          avatar_url,
+          date_of_birth,
+          sexuality:sexualities!profiles_sexuality_id_fkey(label),
+          position:positions!profiles_position_id_fkey(label)
+        `
+        )
+        .eq("id", otherUserId)
+        .maybeSingle();
+      if (other) {
+        const age = calcAge((other as any).date_of_birth ?? null);
+      const { data: presenceRow } = await db
         .from("user_presence")
         .select("status")
         .eq("user_id", otherUserId)
         .maybeSingle();
-      otherMeta = {
-        profile_title: (other as any).profile_title ?? null,
-        display_name: (other as any).nickname ?? null,
-        avatar_url: (other as any).avatar_url ?? null,
-        age: age ?? null,
-        sexuality: (other as any).sexuality?.label
-          ? { label: (other as any).sexuality.label }
-          : null,
-        position: (other as any).position?.label
-          ? { label: (other as any).position.label }
-          : null,
-        presence: presenceRow?.status ?? null,
-        user_id: otherUserId,
-      };
+        otherMeta = {
+          profile_title: (other as any).profile_title ?? null,
+          display_name: (other as any).name ?? null,
+          avatar_url: (other as any).avatar_url ?? null,
+          age: age ?? null,
+          sexuality: (other as any).sexuality?.label
+            ? { label: (other as any).sexuality.label }
+            : null,
+          position: (other as any).position?.label
+            ? { label: (other as any).position.label }
+            : null,
+          presence: presenceRow?.status ?? null,
+          user_id: otherUserId,
+        };
+      }
     }
   }
 
@@ -213,7 +285,7 @@ export async function GET(
         delivered_at: new Date().toISOString(),
       }));
     if (toDeliver.length) {
-      const { error: deliverErr } = await supabase
+      const { error: deliverErr } = await db
         .from("message_receipts")
         .upsert(toDeliver, { onConflict: "message_id,user_id" });
       if (deliverErr) {
@@ -350,7 +422,16 @@ export async function POST(
 
   const payload = await req.json();
   const body = payload?.body;
-  if (!body || typeof body !== "string" || !body.trim()) {
+  const ciphertext = payload?.ciphertext ?? null;
+  const nonce = payload?.nonce ?? null;
+  const key_version = payload?.key_version ?? null;
+  const normalisedBody =
+    typeof body === "string"
+      ? body.replace(/[\s\u200B-\u200D\uFEFF]+/g, " ").trim()
+      : "";
+  const hasBody = Boolean(normalisedBody);
+  const hasCiphertext = Boolean(ciphertext && nonce);
+  if (!hasBody && !hasCiphertext) {
     return NextResponse.json({ error: "body required" }, { status: 400 });
   }
 
@@ -361,42 +442,53 @@ export async function POST(
   const metadata = payload?.metadata ?? null;
 
   console.log("Received message payload:", {
-    body: body.trim(),
+    body: normalisedBody,
     reply_to_id,
     reply_to_body,
     reply_to_sender_id,
     message_type,
     metadata,
+    has_ciphertext: Boolean(ciphertext && nonce),
   });
 
-  const { data: inserted, error: insErr } = await supabase
-    .from("messages")
-    .insert({
-      conversation_id: conversationId,
+  const { data: insertedRows, error: insErr } = await supabase.rpc(
+    "insert_message_secure",
+    {
+      convo_id: conversationId,
       sender_id: user.id,
-      body: body.trim(),
+      body: hasBody ? normalisedBody : "",
+      ciphertext: hasCiphertext ? ciphertext : null,
+      nonce: hasCiphertext ? nonce : null,
+      key_version,
       reply_to_id,
       reply_to_body,
       reply_to_sender_id,
       message_type,
       metadata,
-    })
-    .select(
-      `
-        id,
-        body,
-        created_at,
-        sender_id,
-        reply_to_id,
-        reply_to_body,
-        reply_to_sender_id,
-        translation,
-        message_type,
-        metadata,
-        profiles:profiles!messages_sender_id_profiles_fkey(profile_title, avatar_url, date_of_birth)
-      `
-    )
-    .single();
+    }
+  );
+  const rawInserted = Array.isArray(insertedRows)
+    ? insertedRows[0]
+    : insertedRows;
+  const inserted = rawInserted
+    ? {
+        id: rawInserted.out_id ?? rawInserted.id ?? null,
+        body: rawInserted.out_body ?? rawInserted.body ?? "",
+        created_at: rawInserted.out_created_at ?? rawInserted.created_at ?? null,
+        sender_id: rawInserted.out_sender_id ?? rawInserted.sender_id ?? null,
+        reply_to_id: rawInserted.out_reply_to_id ?? rawInserted.reply_to_id ?? null,
+        reply_to_body:
+          rawInserted.out_reply_to_body ?? rawInserted.reply_to_body ?? null,
+        reply_to_sender_id:
+          rawInserted.out_reply_to_sender_id ??
+          rawInserted.reply_to_sender_id ??
+          null,
+        translation: rawInserted.out_translation ?? rawInserted.translation ?? null,
+        message_type:
+          rawInserted.out_message_type ?? rawInserted.message_type ?? null,
+        metadata: rawInserted.out_metadata ?? rawInserted.metadata ?? null,
+      }
+    : null;
 
   if (insErr || !inserted) {
     console.error("Insert error:", insErr);
@@ -461,10 +553,39 @@ export async function POST(
   // Bump conversation metadata (best-effort)
   await supabase
     .from("conversations")
-    .update({ updated_at: nowIso, last_message: body.trim() })
+    .update({
+      updated_at: nowIso,
+      last_message: hasBody ? normalisedBody : "Encrypted message",
+    })
     .eq("id", conversationId);
 
   const message = { ...insertedWithAge, delivered_at: null, read_at: null };
+  try {
+    const { data: fresh } = await supabase
+      .from("messages")
+      .select(
+        "id, conversation_id, body, ciphertext, nonce, key_version, created_at, sender_id, reply_to_id, reply_to_body, reply_to_sender_id, message_type, metadata"
+      )
+      .eq("id", inserted.id)
+      .maybeSingle();
+    if (fresh?.id) {
+      return NextResponse.json(
+        {
+          message: {
+            ...message,
+            ciphertext: fresh.ciphertext ?? null,
+            nonce: fresh.nonce ?? null,
+            key_version: fresh.key_version ?? null,
+            message_type: fresh.message_type ?? message.message_type ?? null,
+            metadata: fresh.metadata ?? message.metadata ?? null,
+          },
+        },
+        { status: 201 }
+      );
+    }
+  } catch {
+    // fall through to default response
+  }
   return NextResponse.json({ message }, { status: 201 });
 }
 
@@ -507,12 +628,16 @@ export async function PATCH(
     return NextResponse.json({ updated: 0 }, { status: 200 });
   }
 
+  const nowIso = new Date().toISOString();
+  const rows = otherIds.map((message_id) => ({
+    message_id,
+    user_id: user.id,
+    delivered_at: nowIso,
+    read_at: nowIso,
+  }));
   const { error: updErr } = await supabase
     .from("message_receipts")
-    .update({ read_at: new Date().toISOString() })
-    .in("message_id", otherIds)
-    .eq("user_id", user.id)
-    .is("read_at", null);
+    .upsert(rows, { onConflict: "message_id,user_id" });
 
   if (updErr) {
     return NextResponse.json({ error: updErr.message }, { status: 500 });
