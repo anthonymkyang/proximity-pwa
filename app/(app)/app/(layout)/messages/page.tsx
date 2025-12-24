@@ -46,6 +46,8 @@ import {
   usePresence,
   toUiPresence,
 } from "@/components/providers/presence-context";
+import { useE2EE } from "@/components/providers/e2ee-context";
+import { decryptAesGcm } from "@/lib/crypto/e2ee";
 
 // -----------------------------------------------------------------------------
 // LOCAL MOCK
@@ -59,6 +61,8 @@ type DBConversation = {
   lastMessage: string | null;
   lastMessageEncrypted?: boolean | null;
   lastMessageId?: string | null;
+  lastMessageCiphertext?: string | null;
+  lastMessageNonce?: string | null;
   avatar?: string | null;
   updated_at?: string | null;
   lastMessageAt?: string | null;
@@ -88,6 +92,77 @@ function resolveCoverUrl(path?: string | null): string | null {
   return `/api/groups/storage?path=${encodeURIComponent(s.replace(/^\/+/, ""))}`;
 }
 
+const formatListTime = (raw?: string | null) => {
+  if (!raw) return "";
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return "";
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffMins < 60) {
+    const mins = Math.max(1, diffMins);
+    return `${mins} mins`;
+  }
+  if (diffHours < 24) {
+    return diffHours === 1 ? "1 hour" : `${diffHours} hours`;
+  }
+  if (diffDays < 7) {
+    const weekday = new Intl.DateTimeFormat("en-GB", {
+      weekday: "long",
+    }).format(date);
+    return `On ${weekday}`;
+  }
+  if (diffDays < 365) {
+    return new Intl.DateTimeFormat("en-GB", {
+      day: "2-digit",
+      month: "short",
+    }).format(date);
+  }
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(date);
+};
+
+const previewFromPayload = (payload: {
+  body?: string | null;
+  message_type?: string | null;
+  metadata?: Record<string, any> | null;
+}) => {
+  const type = payload.message_type ?? null;
+  if (type === "location") {
+    return payload.metadata?.location?.address || "Location";
+  }
+  if (type === "link") {
+    return (
+      payload.metadata?.link?.title ||
+      payload.metadata?.link?.url ||
+      payload.body ||
+      "Link"
+    );
+  }
+  if (type === "group") {
+    return (
+      payload.metadata?.group?.title ||
+      payload.metadata?.group?.name ||
+      "Group"
+    );
+  }
+  return payload.body || "";
+};
+
+const decodeHtmlEntities = (value?: string | null) => {
+  if (!value) return value ?? "";
+  if (typeof window === "undefined") return value;
+  const textarea = document.createElement("textarea");
+  textarea.innerHTML = value;
+  return textarea.value;
+};
+
 // -----------------------------------------------------------------------------
 // REUSABLE ROW LAYOUT
 // -----------------------------------------------------------------------------
@@ -103,7 +178,7 @@ function ListItemRow({
   return (
     <div className={`relative flex items-center gap-3 -mr-4 ${className}`}>
       <div className="relative h-12 w-12 grid place-items-center">{left}</div>
-      <div className="min-w-0 flex-1 border-b border-b-muted py-3 pr-4">
+      <div className="min-w-0 flex-1 border-b border-b-muted pt-3 pb-4 pr-4">
         {right}
       </div>
     </div>
@@ -244,6 +319,10 @@ export default function MessagesPage() {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const selectedCount = Object.values(selected).filter(Boolean).length;
+  const [previewOverrides, setPreviewOverrides] = useState<
+    Record<string, string>
+  >({});
+  const previewDecryptingRef = useRef<Set<string>>(new Set());
 
   // actual conversations from Supabase
   const [loading, setLoading] = useState(true);
@@ -272,6 +351,8 @@ export default function MessagesPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const currentUserIdRef = useRef<string | null>(null);
   const { presence: presenceCtx } = usePresence();
+  const { status, ensureConversationKey, getConversationKey, refreshDeviceKeys } =
+    useE2EE();
   useEffect(() => {
     currentUserIdRef.current = currentUserId;
   }, [currentUserId]);
@@ -717,6 +798,8 @@ export default function MessagesPage() {
             lastMessage,
             lastMessageEncrypted,
             lastMessageId: latest?.id ?? null,
+            lastMessageCiphertext: latest?.ciphertext ?? null,
+            lastMessageNonce: latest?.nonce ?? null,
             updated_at: lastMessageAt ?? myRow?.joined_at ?? null,
             lastMessageAt,
             lastMessageSenderId,
@@ -751,6 +834,65 @@ export default function MessagesPage() {
 
     load();
   }, []);
+
+  useEffect(() => {
+    if (status !== "unlocked") return;
+    const pending = userConversations.filter(
+      (c) =>
+        c.lastMessageEncrypted &&
+        c.lastMessageId &&
+        c.lastMessageCiphertext &&
+        c.lastMessageNonce &&
+        !previewOverrides[c.lastMessageId] &&
+        !previewDecryptingRef.current.has(c.lastMessageId)
+    );
+    if (!pending.length) return;
+    let cancelled = false;
+    const run = async () => {
+      for (const convo of pending) {
+        const msgId = convo.lastMessageId as string;
+        previewDecryptingRef.current.add(msgId);
+        try {
+          await ensureConversationKey(convo.id);
+          let key = getConversationKey(convo.id);
+          if (!key) {
+            await refreshDeviceKeys();
+            key = getConversationKey(convo.id);
+          }
+          if (!key) continue;
+          const plaintext = await decryptAesGcm(
+            key,
+            convo.lastMessageCiphertext ?? "",
+            convo.lastMessageNonce ?? ""
+          );
+          const parsed = JSON.parse(plaintext) as {
+            body?: string | null;
+            message_type?: string | null;
+            metadata?: Record<string, any> | null;
+          };
+          const preview = decodeHtmlEntities(previewFromPayload(parsed));
+          if (!cancelled && preview) {
+            setPreviewOverrides((prev) => ({ ...prev, [msgId]: preview }));
+          }
+        } catch {
+          // ignore preview failures
+        } finally {
+          previewDecryptingRef.current.delete(msgId);
+        }
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    status,
+    userConversations,
+    previewOverrides,
+    ensureConversationKey,
+    getConversationKey,
+    refreshDeviceKeys,
+  ]);
 
   const realtimeChannelRef = useRef<ReturnType<
     ReturnType<typeof createClient>["channel"]
@@ -944,6 +1086,8 @@ export default function MessagesPage() {
         lastMessage: latest?.body ?? null,
         lastMessageEncrypted: Boolean(!latest?.body && latest?.ciphertext),
         lastMessageId: latest?.id ?? null,
+        lastMessageCiphertext: latest?.ciphertext ?? null,
+        lastMessageNonce: latest?.nonce ?? null,
         updated_at: latest?.created_at ?? myMembership?.joined_at ?? null,
         lastMessageAt: latest?.created_at ?? null,
         lastMessageSenderId: latest?.sender_id ?? null,
@@ -974,6 +1118,7 @@ export default function MessagesPage() {
             id: string;
             body: string;
             ciphertext?: string | null;
+            nonce?: string | null;
             conversation_id: string;
             sender_id: string;
             created_at: string;
@@ -1026,6 +1171,8 @@ export default function MessagesPage() {
                 lastMessage: m.body,
                 lastMessageEncrypted: Boolean(!m.body && m.ciphertext),
                 lastMessageId: m.id,
+                lastMessageCiphertext: m.ciphertext ?? null,
+                lastMessageNonce: m.nonce ?? null,
                 lastMessageAt: m.created_at,
                 lastMessageSenderId: m.sender_id,
                 updated_at: m.created_at,
@@ -1433,8 +1580,9 @@ export default function MessagesPage() {
                 left={<Skeleton className="h-12 w-12 rounded-full" />}
                 right={
                   <div className="min-w-0 grid grid-cols-[minmax(0,1fr)_auto] gap-x-3">
-                    <div className="col-start-1">
-                      <Skeleton className="h-4 w-40" />
+                    <div className="col-start-1 flex items-center gap-2">
+                      <Skeleton className="h-4 w-36" />
+                      <Skeleton className="h-3 w-16" />
                     </div>
                     <div className="col-start-2 row-start-1 flex justify-end">
                       <Skeleton className="h-3 w-10" />
@@ -1443,7 +1591,7 @@ export default function MessagesPage() {
                       <Skeleton className="h-3 w-52" />
                     </div>
                     <div className="col-start-2 row-start-2 mt-1 flex justify-end">
-                      <Skeleton className="h-3 w-6" />
+                      <Skeleton className="h-3 w-5 rounded-full" />
                     </div>
                   </div>
                 }
@@ -1481,18 +1629,17 @@ export default function MessagesPage() {
 
           {visibleConversations.map((c) => {
             const ts = c.lastMessageAt || c.updated_at;
-            const displayTime = ts
-              ? new Date(ts).toLocaleTimeString(undefined, {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })
-              : "";
+            const displayTime = formatListTime(ts);
 
+            const previewOverride =
+              c.lastMessageId ? previewOverrides[c.lastMessageId] : null;
             const lastLine = c.lastMessage
-              ? c.lastMessage
-              : c.lastMessageEncrypted
-                ? "Encrypted message"
-                : "No messages yet";
+              ? decodeHtmlEntities(c.lastMessage)
+              : previewOverride
+                ? decodeHtmlEntities(previewOverride)
+                : c.lastMessageEncrypted
+                  ? "Message"
+                  : "No messages yet";
             const avatarUrl = c.avatar
               ? c.isGroup
                 ? c.avatar
@@ -1577,7 +1724,7 @@ export default function MessagesPage() {
                             ) : null}
                           </p>
                           <div className="col-start-2 row-start-1 text-right">
-                            <div className="text-xs text-muted-foreground leading-none mt-0.5">
+                            <div className="text-xs text-muted-foreground leading-none mt-1">
                               {displayTime}
                             </div>
                           </div>
@@ -1595,17 +1742,17 @@ export default function MessagesPage() {
                               c.lastMessageSenderId === currentUserId ? (
                               c.lastReceipt?.read_at ? (
                                 <CheckCheck
-                                  className="h-3.5 w-3.5 text-accent opacity-90"
+                                  className="h-3.5 w-3.5 text-foreground"
                                   aria-label="Read"
                                 />
                               ) : c.lastReceipt?.delivered_at ? (
                                 <CheckCheck
-                                  className="h-3.5 w-3.5 text-accent opacity-70"
+                                  className="h-3.5 w-3.5 text-muted-foreground"
                                   aria-label="Delivered"
                                 />
                               ) : c.lastMessageAt ? (
                                 <Check
-                                  className="h-3.5 w-3.5 text-accent opacity-70"
+                                  className="h-3.5 w-3.5 text-muted-foreground"
                                   aria-label="Sent"
                                 />
                               ) : null

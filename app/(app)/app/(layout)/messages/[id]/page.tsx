@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  Fragment,
 } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -197,10 +198,19 @@ const mergeMessages = (prev: Message[], incoming: Message[]) => {
     const keepBody =
       !msg.body && Boolean(msg.ciphertext) && Boolean(prevMsg.body);
     const keepReplyBody = !msg.reply_to_body && Boolean(prevMsg.reply_to_body);
+    const keepMessageType =
+      !msg.message_type && Boolean(prevMsg.message_type);
+    const keepMetadata =
+      (msg.metadata == null ||
+        (typeof msg.metadata === "object" &&
+          Object.keys(msg.metadata).length === 0)) &&
+      Boolean(prevMsg.metadata);
     return {
       ...msg,
       body: keepBody ? prevMsg.body : msg.body,
       reply_to_body: keepReplyBody ? prevMsg.reply_to_body : msg.reply_to_body,
+      message_type: keepMessageType ? prevMsg.message_type : msg.message_type,
+      metadata: keepMetadata ? prevMsg.metadata : msg.metadata,
       translation: msg.translation ?? prevMsg.translation ?? null,
     };
   });
@@ -367,7 +377,48 @@ const formatRelativeDate = (dateStr: string) => {
   return `${dateStr2}, ${time}`;
 };
 
+const formatMessageDateLabel = (dateStr: string) => {
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return "";
+  const now = new Date();
+  const diffDays = Math.floor(
+    (now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24)
+  );
+
+  const isToday = date.toDateString() === now.toDateString();
+  if (isToday) return "Today";
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+
+  if (diffDays < 7) {
+    const weekday = new Intl.DateTimeFormat("en-GB", {
+      weekday: "long",
+    }).format(date);
+    return `On ${weekday}`;
+  }
+  if (diffDays < 365) {
+    return new Intl.DateTimeFormat("en-GB", {
+      day: "2-digit",
+      month: "short",
+    }).format(date);
+  }
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(date);
+};
+
 // Link preview component for message bubbles
+const decodeHtmlEntities = (value?: string | null) => {
+  if (!value) return value ?? "";
+  if (typeof window === "undefined") return value;
+  const textarea = document.createElement("textarea");
+  textarea.innerHTML = value;
+  return textarea.value;
+};
+
 function LinkPreview({
   link,
   onClick,
@@ -384,13 +435,16 @@ function LinkPreview({
   onClick: () => void;
   isMe?: boolean;
 }) {
+  const siteName = decodeHtmlEntities(link.siteName);
+  const title = decodeHtmlEntities(link.title);
+  const description = decodeHtmlEntities(link.description);
   return (
     <div className="w-full cursor-pointer transition-colors" onClick={onClick}>
       {link.image && (
         <div className="w-full aspect-[1.91/1] bg-muted relative rounded overflow-hidden shadow-md">
           <img
             src={link.image}
-            alt={link.title || "Link preview"}
+            alt={title || "Link preview"}
             className="w-full h-full object-cover"
             onError={(e) => {
               // Hide image on error
@@ -400,31 +454,31 @@ function LinkPreview({
         </div>
       )}
       <div className="py-3 space-y-1">
-        {link.siteName && (
+        {siteName && (
           <p
             className={`text-[10px] uppercase tracking-wide ${
               isMe ? "text-white/70" : "text-muted-foreground"
             }`}
           >
-            {link.siteName}
+            {siteName}
           </p>
         )}
-        {link.title && (
+        {title && (
           <p
             className={`font-semibold text-sm line-clamp-2 ${
               isMe ? "text-white" : ""
             }`}
           >
-            {link.title}
+            {title}
           </p>
         )}
-        {link.description && (
+        {description && (
           <p
             className={`text-xs line-clamp-2 ${
               isMe ? "text-white/80" : "text-muted-foreground"
             }`}
           >
-            {link.description}
+            {description}
           </p>
         )}
         <div className="flex items-center gap-1.5">
@@ -998,6 +1052,7 @@ export default function ConversationPage() {
   const locationMapRef = useRef<HTMLDivElement | null>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const justSelectedAddressRef = useRef(false);
+  const dateChipRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const pinElementRef = useRef<HTMLDivElement | null>(null);
   const isDraggingMapRef = useRef(false);
   const messageIdsRef = useRef<Set<string>>(new Set());
@@ -1414,6 +1469,42 @@ export default function ConversationPage() {
 
     return () => observer.disconnect();
   }, [messages, visibleMessages]);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const chips = Array.from(dateChipRefs.current.values()).filter(Boolean);
+      if (chips.length === 0) return;
+      chips.sort((a, b) => a.offsetTop - b.offsetTop);
+      chips.forEach((chip, idx) => {
+        let opacity = 1;
+        if (idx < chips.length - 1) {
+          const next = chips[idx + 1];
+          const distance =
+            next.getBoundingClientRect().top - chip.getBoundingClientRect().top;
+          if (distance < 50) {
+            opacity = Math.max(0, Math.min(1, distance / 50));
+          }
+        }
+        chip.style.opacity = String(opacity);
+      });
+    };
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(update);
+    };
+    onScroll();
+    el.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      el.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [messages.length]);
 
   // load initial messages + current user (paged)
   useEffect(() => {
@@ -2365,15 +2456,16 @@ export default function ConversationPage() {
     shouldAutoScrollRef.current = false;
   }, [messages]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (initialLoading) return;
     if (initialScrollDoneRef.current) return;
     if (!messages.length) return;
-    if (!endRef.current) return;
-    endRef.current.scrollIntoView({ block: "start", behavior: "auto" });
+    const el = listRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
     shouldAutoScrollRef.current = false;
     initialScrollDoneRef.current = true;
-  }, [initialLoading, messages]);
+  }, [initialLoading, messages.length]);
 
   useEffect(() => {
     if (typingUsers.size === 0) return;
@@ -3915,15 +4007,9 @@ export default function ConversationPage() {
           {reactionError}
         </div>
       ) : null}
-      {status !== "unlocked" ? (
-        <div className="mx-4 mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-          End-to-end encryption isn’t available right now. Messages will be sent
-          without encryption until it’s unlocked.
-        </div>
-      ) : null}
       <div
         ref={listRef}
-        className={`relative flex-1 px-4 pt-4 space-y-3 ${
+        className={`relative flex-1 px-4 pt-2 space-y-3 ${
           focusedMessageId ? "overflow-hidden touch-none" : "overflow-y-auto"
         } select-none ${
           typingUsers.size > 0 ? "pb-10" : "pb-2"
@@ -3943,6 +4029,13 @@ export default function ConversationPage() {
           }
         }}
       >
+        {!initialLoading && status !== "unlocked" ? (
+          <div className="sticky top-3 z-20 flex justify-center">
+            <div className="rounded-full bg-amber-500/15 px-4 py-1.5 text-xs text-amber-100/90 backdrop-blur-sm">
+              End-to-end encryption currently unavailable.
+            </div>
+          </div>
+        ) : null}
         {copiedMessageId ? (
           <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center">
             <div className="rounded-xl bg-card px-4 py-2 text-sm text-foreground shadow-lg border">
@@ -3972,7 +4065,7 @@ export default function ConversationPage() {
               );
             })
           : null}
-        {messages.map((m) => {
+        {messages.map((m, index) => {
           const isMe =
             currentUserId != null ? m.sender_id === currentUserId : false;
           const isVisible = visibleMessages.has(m.id);
@@ -3986,6 +4079,14 @@ export default function ConversationPage() {
           const showPicker = reactionTargetId === m.id;
           const isFocused = focusedMessageId === m.id;
           const myReaction = m.my_reaction ?? null;
+          const dateLabel = m.created_at
+            ? formatMessageDateLabel(m.created_at)
+            : "";
+          const prevCreatedAt = messages[index - 1]?.created_at ?? null;
+          const prevLabel = prevCreatedAt
+            ? formatMessageDateLabel(prevCreatedAt)
+            : "";
+          const showDateLabel = dateLabel && dateLabel !== prevLabel;
 
           // Calculate centered position when focused
           const messageStyle: React.CSSProperties = {};
@@ -4035,21 +4136,34 @@ export default function ConversationPage() {
             </div>
           ) : null;
           return (
-            <div
-              key={m.id}
-              ref={(el) => {
-                messageElsRef.current[m.id] = el;
-              }}
-              className={`relative flex ${
-                isMe ? "justify-end" : "justify-start"
-              } ${!isFocused ? "transition-all duration-300 ease-out" : ""} ${
-                isVisible
-                  ? "opacity-100 translate-y-0"
-                  : "opacity-0 translate-y-1"
-              }`}
-              style={isFocused ? messageStyle : undefined}
-              data-message-id={m.id}
-            >
+            <Fragment key={m.id}>
+              {showDateLabel ? (
+                <div
+                  ref={(el) => {
+                    if (el) dateChipRefs.current.set(m.id, el);
+                    else dateChipRefs.current.delete(m.id);
+                  }}
+                  className="sticky top-[10px] z-30 w-full flex justify-center pointer-events-none transition-opacity duration-200"
+                >
+                  <div className="rounded-full bg-background/70 px-3 py-1 text-xs text-muted-foreground backdrop-blur-sm">
+                    {dateLabel}
+                  </div>
+                </div>
+              ) : null}
+              <div
+                ref={(el) => {
+                  messageElsRef.current[m.id] = el;
+                }}
+                className={`relative flex ${
+                  isMe ? "justify-end" : "justify-start"
+                } ${!isFocused ? "transition-all duration-300 ease-out" : ""} ${
+                  isVisible
+                    ? "opacity-100 translate-y-0"
+                    : "opacity-0 translate-y-1"
+                }`}
+                style={isFocused ? messageStyle : undefined}
+                data-message-id={m.id}
+              >
               {showPicker && (
                 <>
                   <div
@@ -4546,7 +4660,8 @@ export default function ConversationPage() {
 
                 return bubble;
               })()}
-            </div>
+              </div>
+            </Fragment>
           );
         })}
         {typingUsers.size > 0 ? (
@@ -5052,9 +5167,9 @@ export default function ConversationPage() {
 
             {/* Overlaid send button */}
             <div className="absolute bottom-4 left-4 right-4 z-20 pointer-events-auto">
-              <Button
-                onClick={async () => {
-                  if (!selectedLocation || !conversationId) return;
+                <Button
+                  onClick={async () => {
+                    if (!selectedLocation || !conversationId) return;
 
                   const payload = {
                     body:
@@ -5073,10 +5188,30 @@ export default function ConversationPage() {
                   };
 
                   try {
+                    let requestPayload: Record<string, any> = payload;
+                    if (status === "unlocked") {
+                      await ensureConversationKey(conversationId);
+                      const key = getConversationKey(conversationId);
+                      if (key) {
+                        const { ciphertext, nonce } = await encryptAesGcm(
+                          key,
+                          JSON.stringify(payload)
+                        );
+                        requestPayload = {
+                          ...payload,
+                          body: "",
+                          message_type: null,
+                          metadata: null,
+                          ciphertext,
+                          nonce,
+                          key_version: 1,
+                        };
+                      }
+                    }
                     const res = await fetch(`/api/messages/${conversationId}`, {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify(payload),
+                      body: JSON.stringify(requestPayload),
                     });
 
                     if (!res.ok) {
