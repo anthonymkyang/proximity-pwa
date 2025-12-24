@@ -7,7 +7,6 @@ import {
   Plus,
   Archive,
   Trash2,
-  User,
   Inbox,
   AlertTriangle,
   Check,
@@ -53,6 +52,7 @@ import { decryptAesGcm } from "@/lib/crypto/e2ee";
 // LOCAL MOCK
 // -----------------------------------------------------------------------------
 const filters = ["All", "Unread", "Favourites", "Groups", "+ Add"] as const;
+type MessageFilter = (typeof filters)[number] | "Archived";
 
 // shape coming back from Supabase (normalised)
 type DBConversation = {
@@ -72,6 +72,7 @@ type DBConversation = {
   presence?: "online" | "away" | "recent" | null;
   secondary?: string | null;
   isGroup?: boolean;
+  archivedAt?: string | null;
 };
 
 function getConversationTime(convo: DBConversation) {
@@ -103,8 +104,8 @@ const formatListTime = (raw?: string | null) => {
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
   if (diffMins < 60) {
-    const mins = Math.max(1, diffMins);
-    return `${mins} mins`;
+    if (diffMins < 1) return "Just now";
+    return diffMins === 1 ? "1 min" : `${diffMins} mins`;
   }
   if (diffHours < 24) {
     return diffHours === 1 ? "1 hour" : `${diffHours} hours`;
@@ -170,15 +171,19 @@ function ListItemRow({
   left,
   right,
   className = "",
+  rightClassName = "",
 }: {
   left: React.ReactNode;
   right: React.ReactNode;
   className?: string;
+  rightClassName?: string;
 }) {
   return (
     <div className={`relative flex items-center gap-3 -mr-4 ${className}`}>
       <div className="relative h-12 w-12 grid place-items-center">{left}</div>
-      <div className="min-w-0 flex-1 border-b border-b-muted pt-3 pb-4 pr-4">
+      <div
+        className={`min-w-0 flex-1 border-b border-b-muted pt-3 pb-4 pr-4 ${rightClassName}`}
+      >
         {right}
       </div>
     </div>
@@ -192,21 +197,36 @@ function SwipeableRow({
   children,
   onArchive,
   onDelete,
-  onContact,
   disabled,
+  forceSide,
+  archiveMode = "archive",
 }: {
   children: React.ReactNode;
   onArchive?: () => void;
   onDelete?: () => void;
-  onContact?: () => void;
   disabled?: boolean;
+  forceSide?: "right" | null;
+  archiveMode?: "archive" | "unarchive";
 }) {
   const [offset, setOffset] = useState(0);
   const [startX, setStartX] = useState<number | null>(null);
   const [openSide, setOpenSide] = useState<"left" | "right" | null>(null);
   const MAX_LEFT = 128;
-  const MAX_RIGHT = 88;
   const THRESHOLD = 56;
+
+  useEffect(() => {
+    if (!forceSide) {
+      if (openSide && !startX) {
+        setOpenSide(null);
+        setOffset(0);
+      }
+      return;
+    }
+    if (forceSide === "right") {
+      setOpenSide("right");
+      setOffset(-MAX_LEFT);
+    }
+  }, [forceSide, MAX_LEFT, openSide, startX]);
 
   function handlePointerDown(e: React.PointerEvent) {
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -216,21 +236,18 @@ function SwipeableRow({
   function handlePointerMove(e: React.PointerEvent) {
     if (startX == null) return;
     const dx = e.clientX - startX;
-    const base =
-      openSide === "left" ? MAX_RIGHT : openSide === "right" ? -MAX_LEFT : 0;
-    const next = Math.max(-MAX_LEFT, Math.min(MAX_RIGHT, base + dx));
+    const base = openSide === "right" ? -MAX_LEFT : 0;
+    const next = Math.min(0, Math.max(-MAX_LEFT, base + dx));
     setOffset(next);
   }
 
   function handlePointerUp() {
     if (startX == null) return;
-    let side: "left" | "right" | null = null;
-    if (offset >= THRESHOLD) side = "left";
+    let side: "right" | null = null;
     if (offset <= -THRESHOLD) side = "right";
 
     setOpenSide(side);
-    if (side === "left") setOffset(MAX_RIGHT);
-    else if (side === "right") setOffset(-MAX_LEFT);
+    if (side === "right") setOffset(-MAX_LEFT);
     else setOffset(0);
     setStartX(null);
   }
@@ -244,23 +261,6 @@ function SwipeableRow({
 
   return (
     <div className="relative touch-pan-y select-none">
-      {/* Left action (Contact) */}
-      <div className="absolute inset-y-0 left-0 flex items-center pl-3 pr-2">
-        <Button
-          variant="outline"
-          size="icon"
-          className="rounded-full"
-          onClick={(e) => {
-            e.preventDefault();
-            onContact?.();
-            closeIfOpen();
-          }}
-          aria-label="Open contact"
-        >
-          <User className="h-4 w-4" />
-        </Button>
-      </div>
-
       {/* Right actions */}
       <div className="absolute inset-y-0 right-0 flex items-center gap-2 pr-2 pl-4">
         <Button
@@ -272,9 +272,13 @@ function SwipeableRow({
             onArchive?.();
             closeIfOpen();
           }}
-          aria-label="Archive"
+          aria-label={archiveMode === "unarchive" ? "Unarchive" : "Archive"}
         >
-          <Archive className="h-4 w-4" />
+          {archiveMode === "unarchive" ? (
+            <Inbox className="h-4 w-4" />
+          ) : (
+            <Archive className="h-4 w-4" />
+          )}
         </Button>
         <Button
           variant="destructive"
@@ -314,8 +318,7 @@ function SwipeableRow({
 // PAGE COMPONENT
 // -----------------------------------------------------------------------------
 export default function MessagesPage() {
-  const [activeFilter, setActiveFilter] =
-    useState<(typeof filters)[number]>("All");
+  const [activeFilter, setActiveFilter] = useState<MessageFilter>("All");
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const selectedCount = Object.values(selected).filter(Boolean).length;
@@ -338,6 +341,12 @@ export default function MessagesPage() {
   const [rawRows, setRawRows] = useState<any[] | null>(null);
   const convoIdsRef = useRef<Set<string>>(new Set());
   const [showDebug, setShowDebug] = useState(false);
+  const [swipeActionsOpen, setSwipeActionsOpen] = useState(false);
+  const [archivingId, setArchivingId] = useState<string | null>(null);
+  const [incomingArchivedId, setIncomingArchivedId] = useState<string | null>(
+    null
+  );
+  const [incomingArchivedReady, setIncomingArchivedReady] = useState(false);
   const listItemRefs = useRef<Map<string, HTMLLIElement>>(new Map());
   const listPositionsRef = useRef<Map<string, DOMRect>>(new Map());
   const listReadyRef = useRef(false);
@@ -353,6 +362,63 @@ export default function MessagesPage() {
   const { presence: presenceCtx } = usePresence();
   const { status, ensureConversationKey, getConversationKey, refreshDeviceKeys } =
     useE2EE();
+
+  const toggleArchive = async (
+    convoId: string,
+    archivedAt: string | null | undefined
+  ) => {
+    const supabase = createClient();
+    const nextArchivedAt = archivedAt ? null : new Date().toISOString();
+    const userId = currentUserIdRef.current;
+    if (!userId) return;
+    if (!archivedAt) {
+      setArchivingId(convoId);
+    }
+    const { error } = await supabase
+      .from("conversation_members")
+      .update({ archived_at: nextArchivedAt })
+      .eq("conversation_id", convoId)
+      .eq("user_id", userId);
+    if (error) {
+      console.warn("archive update failed", error.message);
+      setArchivingId(null);
+      return;
+    }
+    if (!archivedAt) {
+      window.setTimeout(() => {
+        setUserConversations((prev) =>
+          prev.map((c) =>
+            c.id === convoId ? { ...c, archivedAt: nextArchivedAt } : c
+          )
+        );
+        setArchivingId(null);
+        setSwipeActionsOpen(false);
+        setActiveFilter("Archived");
+        setIncomingArchivedId(convoId);
+        setIncomingArchivedReady(false);
+        requestAnimationFrame(() => setIncomingArchivedReady(true));
+        window.setTimeout(() => {
+          setIncomingArchivedId((prev) => (prev === convoId ? null : prev));
+        }, 400);
+      }, 220);
+      return;
+    }
+    setUserConversations((prev) =>
+      prev.map((c) =>
+        c.id === convoId ? { ...c, archivedAt: nextArchivedAt } : c
+      )
+    );
+  };
+
+  useEffect(() => {
+    const handler = () => {
+      setSwipeActionsOpen((prev) => !prev);
+    };
+    window.addEventListener("messages:toggle-actions", handler);
+    return () => {
+      window.removeEventListener("messages:toggle-actions", handler);
+    };
+  }, []);
   useEffect(() => {
     currentUserIdRef.current = currentUserId;
   }, [currentUserId]);
@@ -385,10 +451,9 @@ export default function MessagesPage() {
         setCurrentUserId(activeUser.id);
 
         // 2) my memberships (which conversations I'm in)
-        let { data: myMemberships, error: myMembershipsError } =
-          await supabase
-            .from("conversation_members")
-            .select("conversation_id, user_id, role, joined_at")
+        let { data: myMemberships, error: myMembershipsError } = await supabase
+          .from("conversation_members")
+          .select("conversation_id, user_id, role, joined_at, archived_at")
             .eq("user_id", activeUser.id)
             .order("joined_at", { ascending: false });
 
@@ -494,7 +559,7 @@ export default function MessagesPage() {
         // 4) fetch ALL members for ALL those conversations (NO joins here!)
         let { data: allMembers, error: allMembersError } = await supabase
           .from("conversation_members")
-          .select("conversation_id, user_id, role, joined_at")
+          .select("conversation_id, user_id, role, joined_at, archived_at")
           .in("conversation_id", convoIds);
 
         if (
@@ -808,6 +873,7 @@ export default function MessagesPage() {
             presence: effectivePresence,
             secondary,
             isGroup,
+            archivedAt: myRow?.archived_at ?? null,
           } as DBConversation;
         });
 
@@ -913,7 +979,7 @@ export default function MessagesPage() {
             .maybeSingle(),
           supabase
             .from("conversation_members")
-            .select("conversation_id, user_id, role, joined_at")
+            .select("conversation_id, user_id, role, joined_at, archived_at")
             .eq("conversation_id", convoId),
         ]);
 
@@ -1096,6 +1162,7 @@ export default function MessagesPage() {
         presence,
         secondary,
         isGroup,
+        archivedAt: myMembership?.archived_at ?? null,
       };
     } catch {
       return null;
@@ -1213,6 +1280,28 @@ export default function MessagesPage() {
             if (prev.some((c) => c.id === convoId)) return prev;
             return sortConversations([...prev, summary]);
           });
+        }
+      );
+
+      // Archive/unarchive updates
+      channel.on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "conversation_members" },
+        (payload: any) => {
+          const row = payload.new as {
+            conversation_id?: string;
+            user_id?: string;
+            archived_at?: string | null;
+          };
+          if (!row?.conversation_id || !row?.user_id) return;
+          if (row.user_id !== currentUserIdRef.current) return;
+          setUserConversations((prev) =>
+            prev.map((c) =>
+              c.id === row.conversation_id
+                ? { ...c, archivedAt: row.archived_at ?? null }
+                : c
+            )
+          );
         }
       );
 
@@ -1424,17 +1513,29 @@ export default function MessagesPage() {
     );
   }, [presenceCtx]);
 
+  useEffect(() => {
+    setSwipeActionsOpen(false);
+  }, [activeFilter]);
+
   const listReady = !loading && connectionsLoaded;
-  const hasNoConvos =
-    listReady && userConversations.length === 0 && !loadError && !!currentUserId;
+  const archivedConversations = userConversations.filter((c) => c.archivedAt);
+  const baseConversations = userConversations.filter((c) => !c.archivedAt);
   const visibleConversations =
-    activeFilter === "Unread"
-      ? userConversations.filter((c) => (c.unreadCount ?? 0) > 0)
+    activeFilter === "Archived"
+      ? archivedConversations
+      : activeFilter === "Unread"
+      ? baseConversations.filter((c) => (c.unreadCount ?? 0) > 0)
       : activeFilter === "Groups"
-      ? userConversations.filter((c) => c.isGroup)
+      ? baseConversations.filter((c) => c.isGroup)
       : activeFilter === "Favourites"
       ? []
-      : userConversations;
+      : baseConversations;
+  const hasNoConvos =
+    listReady &&
+    visibleConversations.length === 0 &&
+    !loadError &&
+    !!currentUserId &&
+    !(activeFilter === "All" && archivedConversations.length > 0);
   const hasUnreadEmpty =
     activeFilter === "Unread" &&
     listReady &&
@@ -1445,10 +1546,16 @@ export default function MessagesPage() {
     listReady &&
     !loadError &&
     visibleConversations.length === 0;
+  const hasArchivedEmpty =
+    activeFilter === "Archived" &&
+    listReady &&
+    !loadError &&
+    visibleConversations.length === 0;
   const unreadTotal = userConversations.reduce(
     (acc, c) => acc + (c.unreadCount ?? 0),
     0
   );
+  const archivedTotal = archivedConversations.length;
 
   const toStatus = (
     presence: DBConversation["presence"]
@@ -1533,22 +1640,42 @@ export default function MessagesPage() {
         <div className="pr-2.5"></div>
       </div>
 
+      {activeFilter === "Archived" ? (
+        <div className="px-4 pb-2">
+          <div className="text-xl font-semibold text-foreground">Archived</div>
+        </div>
+      ) : null}
+
       {/* Archived row */}
       {activeFilter === "All" ? (
         <div className="px-4">
-          <ListItemRow
-            left={<Archive className="h-5 w-5 text-muted-foreground" />}
-            right={
-              <span className="truncate text-base font-semibold text-muted-foreground">
-                Archived
-              </span>
-            }
-          />
+          <button
+            type="button"
+            className="w-full text-left"
+            onClick={() => setActiveFilter("Archived")}
+          >
+            <ListItemRow
+              left={<Archive className="h-4 w-4 text-muted-foreground" />}
+              rightClassName="pt-0 pb-2"
+              right={
+                <span className="flex items-center justify-between gap-3">
+                  <span className="truncate text-sm font-medium text-muted-foreground">
+                    Archived
+                  </span>
+                  {archivedTotal > 0 ? (
+                    <span className="text-xs text-muted-foreground">
+                      {archivedTotal}
+                    </span>
+                  ) : null}
+                </span>
+              }
+            />
+          </button>
         </div>
       ) : null}
 
       {/* EMPTY STATE */}
-      {hasNoConvos || hasUnreadEmpty || hasFavouritesEmpty ? (
+      {hasNoConvos || hasUnreadEmpty || hasFavouritesEmpty || hasArchivedEmpty ? (
         <div className="pt-8 px-4">
           <Empty>
             <EmptyHeader>
@@ -1560,6 +1687,8 @@ export default function MessagesPage() {
                   ? "No unread messages"
                   : hasFavouritesEmpty
                   ? "No favourites yet"
+                  : hasArchivedEmpty
+                  ? "No archived messages"
                   : "No messages yet"}
               </EmptyTitle>
               <EmptyDescription>
@@ -1567,6 +1696,8 @@ export default function MessagesPage() {
                   ? "You're all caught up."
                   : hasFavouritesEmpty
                   ? "Star a conversation to keep it here."
+                  : hasArchivedEmpty
+                  ? "Archive chats to hide them from your list."
                   : "When you start chatting, your conversations will appear here."}
               </EmptyDescription>
             </EmptyHeader>
@@ -1668,12 +1799,25 @@ export default function MessagesPage() {
                     listItemRefs.current.delete(c.id);
                   }
                 }}
+                className={`transition-all duration-300 ${
+                  archivingId === c.id
+                    ? "opacity-0 -translate-x-2 pointer-events-none"
+                    : incomingArchivedId === c.id && !incomingArchivedReady
+                    ? "opacity-0 translate-x-2"
+                    : "opacity-100 translate-x-0"
+                }`}
               >
                 <SwipeableRow
-                  onArchive={() => console.log("archive", c.id)}
+                  onArchive={() => toggleArchive(c.id, c.archivedAt)}
                   onDelete={() => console.log("delete", c.id)}
-                  onContact={() => console.log("contact", c.id)}
                   disabled={selectMode}
+                  forceSide={
+                    swipeActionsOpen &&
+                    (activeFilter === "All" || activeFilter === "Archived")
+                      ? "right"
+                      : null
+                  }
+                  archiveMode={activeFilter === "Archived" ? "unarchive" : "archive"}
                 >
                   <Link
                     href={`/app/messages/${c.id}`}

@@ -9,19 +9,37 @@ import { Compass, Zap, Users, MessageCircle, User } from "lucide-react";
 export default function AppBar() {
   const pathname = usePathname();
   const supabaseRef = useRef(createClient());
+  const currentUserIdRef = useRef<string | null>(null);
   const [hasUnread, setHasUnread] = useState(false);
   const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
 
   useEffect(() => {
     let active = true;
 
+    const getActiveUserId = async () => {
+      if (currentUserIdRef.current) return currentUserIdRef.current;
+      const supabase = supabaseRef.current;
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user?.id) {
+        currentUserIdRef.current = user.id;
+        return user.id;
+      }
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionUser = sessionData.session?.user ?? null;
+      if (sessionUser?.id) {
+        currentUserIdRef.current = sessionUser.id;
+        return sessionUser.id;
+      }
+      return null;
+    };
+
     const refreshUnread = async () => {
       try {
         const supabase = supabaseRef.current;
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (!user) {
+        const userId = await getActiveUserId();
+        if (!userId) {
           if (active) setHasUnread(false);
           return;
         }
@@ -29,7 +47,7 @@ export default function AppBar() {
         const { data: memberships } = await supabase
           .from("conversation_members")
           .select("conversation_id")
-          .eq("user_id", user.id);
+          .eq("user_id", userId);
         const convoIds = (memberships ?? [])
           .map((m) => m.conversation_id)
           .filter(Boolean);
@@ -42,7 +60,7 @@ export default function AppBar() {
           .from("messages")
           .select("id")
           .in("conversation_id", convoIds)
-          .neq("sender_id", user.id)
+          .neq("sender_id", userId)
           .order("created_at", { ascending: false })
           .limit(200);
 
@@ -56,7 +74,7 @@ export default function AppBar() {
           .from("message_receipts")
           .select("message_id")
           .in("message_id", msgIds)
-          .eq("user_id", user.id)
+          .eq("user_id", userId)
           .not("read_at", "is", null);
 
         const readSet = new Set((readRecs ?? []).map((r) => r.message_id));
@@ -70,17 +88,15 @@ export default function AppBar() {
     const refreshNotificationsUnread = async () => {
       try {
         const supabase = supabaseRef.current;
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (!user) {
+        const userId = await getActiveUserId();
+        if (!userId) {
           if (active) setHasUnreadNotifications(false);
           return;
         }
         const { count } = await supabase
           .from("notifications")
           .select("id", { count: "exact", head: true })
-          .eq("recipient_id", user.id)
+          .eq("recipient_id", userId)
           .is("read_at", null);
         if (active) setHasUnreadNotifications((count ?? 0) > 0);
       } catch {
@@ -99,20 +115,8 @@ export default function AppBar() {
       { event: "INSERT", schema: "public", table: "messages" },
       async (payload: any) => {
         const senderId = payload?.new?.sender_id as string | undefined;
-        const convoId = payload?.new?.conversation_id as string | undefined;
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (!user || !senderId || senderId === user.id) return;
-        if (convoId) {
-          const { data: memberRow } = await supabase
-            .from("conversation_members")
-            .select("conversation_id")
-            .eq("conversation_id", convoId)
-            .eq("user_id", user.id)
-            .maybeSingle();
-          if (!memberRow) return;
-        }
+        const userId = await getActiveUserId();
+        if (!userId || !senderId || senderId === userId) return;
         setHasUnread(true);
       }
     );
@@ -125,10 +129,8 @@ export default function AppBar() {
           user_id?: string;
           conversation_id?: string;
         };
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (!user || row?.user_id !== user.id) return;
+        const userId = await getActiveUserId();
+        if (!userId || row?.user_id !== userId) return;
         refreshUnread();
       }
     );
@@ -141,10 +143,8 @@ export default function AppBar() {
           user_id?: string;
           read_at?: string | null;
         };
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (!user || row?.user_id !== user.id || !row.read_at) return;
+        const userId = await getActiveUserId();
+        if (!userId || row?.user_id !== userId || !row.read_at) return;
         refreshUnread();
       }
     );
@@ -153,19 +153,17 @@ export default function AppBar() {
 
     let notifChannel: ReturnType<typeof supabase.channel> | null = null;
     const subscribeNotifications = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user || !active) return;
+      const userId = await getActiveUserId();
+      if (!userId || !active) return;
       notifChannel = supabase
-        .channel(`appbar:notifications:${user.id}`)
+        .channel(`appbar:notifications:${userId}`)
         .on(
           "postgres_changes",
           {
             event: "*",
             schema: "public",
             table: "notifications",
-            filter: `recipient_id=eq.${user.id}`,
+            filter: `recipient_id=eq.${userId}`,
           },
           () => {
             refreshNotificationsUnread();
@@ -176,9 +174,16 @@ export default function AppBar() {
 
     void subscribeNotifications();
 
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        currentUserIdRef.current = session?.user?.id ?? null;
+      }
+    );
+
     return () => {
       active = false;
       supabase.removeChannel(channel);
+      authListener?.subscription?.unsubscribe();
       if (notifChannel) {
         supabase.removeChannel(notifChannel);
       }

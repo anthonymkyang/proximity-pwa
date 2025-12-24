@@ -8,6 +8,8 @@ import {
   Check,
   Loader2,
   X,
+  XCircle,
+  LogOut,
   UserPlus,
   Users,
   Zap,
@@ -19,7 +21,6 @@ import {
   Minus,
   Plus,
   Infinity,
-  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -64,30 +65,22 @@ import { useRouter, useSearchParams } from "next/navigation";
 import TextareaAutosize from "react-textarea-autosize";
 import ImageEditor from "@/components/images/ImageEditor";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Skeleton } from "@/components/ui/skeleton";
+import getAvatarProxyUrl from "@/lib/profiles/getAvatarProxyUrl";
 
 export const dynamic = "force-dynamic";
 
 const STORAGE_KEY = "create-group-progress";
 
-const CATEGORY_ICONS: Record<string, React.ReactNode> = {
-  social: <Users className="h-4 w-4" />,
-  sports: <Zap className="h-4 w-4" />,
-  food: <Utensils className="h-4 w-4" />,
-  arts: <Palette className="h-4 w-4" />,
-  gaming: <Gamepad2 className="h-4 w-4" />,
-  learning: <BookOpen className="h-4 w-4" />,
-};
-
-const getIconForCategory = (categoryName: string): React.ReactNode => {
-  const key = categoryName.toLowerCase().replace(/\s+/g, "");
-  return CATEGORY_ICONS[key] || <Users className="h-4 w-4" />;
-};
-
-const resolveAvatarUrl = (raw?: string | null): string | null => {
-  if (!raw) return null;
-  if (/^https?:\/\//i.test(raw)) return raw;
-  return `/api/storage/public/${encodeURIComponent(raw)}`;
-};
+const CATEGORY_ORDER = [
+  "Pump n dump",
+  "Orgie",
+  "Group sex",
+  "Bukkake",
+  "Circle jerk",
+  "Gloryhole",
+  "Outdoors",
+];
 
 const resolveCoverUrl = (raw?: string | null): string | null => {
   if (!raw) return null;
@@ -138,10 +131,13 @@ type GroupFormData = {
   location_lat: number | null;
   location_lng: number | null;
   postcode: string;
+  additional_details: string;
+  display_details_on_day: boolean;
   max_attendees: string;
   house_rules: string[];
   provided_items: string[];
   is_public: boolean;
+  show_on_map: boolean;
   cover_image_url: string | null;
   cohost_ids: string[];
 };
@@ -188,13 +184,17 @@ export default function CreateGroupPage() {
     location_lat: null,
     location_lng: null,
     postcode: "",
+    additional_details: "",
+    display_details_on_day: false,
     max_attendees: "",
     house_rules: [""],
     provided_items: [""],
     is_public: true,
+    show_on_map: true,
     cover_image_url: null,
     cohost_ids: [],
   });
+  const [publishedStatus, setPublishedStatus] = React.useState(true);
   const selectedCohosts = React.useMemo(
     () =>
       (formData.cohost_ids || [])
@@ -202,10 +202,18 @@ export default function CreateGroupPage() {
         .filter(Boolean) as Person[],
     [formData.cohost_ids, cohostProfiles]
   );
+  const filteredCohostSuggestions = React.useMemo(
+    () =>
+      cohostSuggestions
+        .filter((person) => !(formData.cohost_ids || []).includes(person.id))
+        .slice(0, 14),
+    [cohostSuggestions, formData.cohost_ids]
+  );
   const [startDate, setStartDate] = React.useState<Date | undefined>(undefined);
   const [endDate, setEndDate] = React.useState<Date | undefined>(undefined);
   const [startTime, setStartTime] = React.useState("09:00");
   const [endTime, setEndTime] = React.useState("18:00");
+  const [locationArea, setLocationArea] = React.useState<string | null>(null);
   const [openStartDate, setOpenStartDate] = React.useState(false);
   const [openEndDate, setOpenEndDate] = React.useState(false);
   const [noEndTime, setNoEndTime] = React.useState(false);
@@ -281,6 +289,66 @@ export default function CreateGroupPage() {
     return undefined;
   };
 
+  const areaFromNominatim = (data: any) => {
+    const address = data?.address ?? {};
+    return (
+      address.suburb ||
+      address.neighbourhood ||
+      address.city_district ||
+      address.town ||
+      address.city ||
+      address.village ||
+      address.hamlet ||
+      address.county ||
+      address.state ||
+      null
+    );
+  };
+
+  const geocodeAbortRef = React.useRef<AbortController | null>(null);
+  const geocodeTimerRef = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    const lat = formData.location_lat;
+    const lng = formData.location_lng;
+    if (lat == null || lng == null) {
+      setLocationArea(null);
+      return;
+    }
+    if (geocodeTimerRef.current) {
+      window.clearTimeout(geocodeTimerRef.current);
+    }
+    geocodeTimerRef.current = window.setTimeout(async () => {
+      try {
+        geocodeAbortRef.current?.abort();
+        const controller = new AbortController();
+        geocodeAbortRef.current = controller;
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`,
+          {
+            headers: { Accept: "application/json" },
+            signal: controller.signal,
+          }
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        const area =
+          areaFromNominatim(data) ||
+          (typeof data?.display_name === "string"
+            ? data.display_name.split(",")[0]?.trim()
+            : null);
+        setLocationArea(area || null);
+      } catch {
+        // ignore reverse geocode failures
+      }
+    }, 400);
+    return () => {
+      if (geocodeTimerRef.current) {
+        window.clearTimeout(geocodeTimerRef.current);
+      }
+    };
+  }, [formData.location_lat, formData.location_lng]);
+
   const toLocalDateTimeString = (date?: Date, time?: string) => {
     if (!date) return "";
     const [hh = "00", mm = "00"] = (time || "00:00").split(":");
@@ -288,6 +356,14 @@ export default function CreateGroupPage() {
     const month = pad(date.getMonth() + 1);
     const day = pad(date.getDate());
     return `${year}-${month}-${day}T${pad(Number(hh))}:${pad(Number(mm))}`;
+  };
+
+  const toLocalDateTime = (date?: Date, time?: string) => {
+    if (!date) return undefined;
+    const [hh = "00", mm = "00"] = (time || "00:00").split(":");
+    const next = new Date(date);
+    next.setHours(parseInt(hh, 10), parseInt(mm, 10), 0, 0);
+    return next;
   };
 
   const parseDateTimeString = (
@@ -439,6 +515,7 @@ export default function CreateGroupPage() {
         const { data } = await supabase
           .from("group_categories")
           .select("id, name")
+          .order("sort_order", { ascending: true })
           .order("name", { ascending: true });
         setCategories(data || []);
       } catch (error) {
@@ -453,36 +530,114 @@ export default function CreateGroupPage() {
   const loadCohostSuggestions = React.useCallback(async () => {
     try {
       setCohostLoading(true);
+      console.log("[Groups Debug] load start");
       const { data: auth } = await supabase.auth.getUser();
       const me = auth?.user?.id;
+      console.log("[Groups Debug] auth user", me);
       if (!me) {
+        console.log("[Groups Debug] no auth user");
         setCohostSuggestions([]);
         return;
       }
 
-      const { data: myConvos } = await supabase
+      let { data: myMemberships, error: membershipError } = await supabase
         .from("conversation_members")
         .select("conversation_id")
         .eq("user_id", me);
 
-      const convIds = Array.from(
-        new Set((myConvos || []).map((c: any) => c.conversation_id))
-      );
-      if (!convIds.length) {
-        setCohostSuggestions([]);
-        return;
+      console.log("[Groups Debug] membership raw", myMemberships);
+
+      // Fallback to RPC if direct query returns empty (RLS issue)
+      if (!membershipError && (!myMemberships || myMemberships.length === 0)) {
+        try {
+          const { data: fallbackMemberships, error: fallbackError } =
+            await supabase.rpc("get_my_conversation_memberships_secure");
+          if (!fallbackError && Array.isArray(fallbackMemberships)) {
+            myMemberships = fallbackMemberships;
+            console.log("[Groups Debug] used fallback RPC, got", myMemberships?.length);
+          } else if (fallbackError) {
+            membershipError = fallbackError;
+          }
+        } catch (err: any) {
+          membershipError = err;
+        }
       }
 
-      const { data: others } = await supabase
+      if (membershipError) throw membershipError;
+
+      const convIds = Array.from(
+        new Set(
+          (myMemberships || []).map((c: any) => c.conversation_id).filter(Boolean)
+        )
+      );
+
+      let { data: others } = await supabase
         .from("conversation_members")
         .select("user_id")
         .in("conversation_id", convIds)
         .neq("user_id", me);
 
+      // Fallback to RPC if direct query fails (RLS issue)
+      if (convIds.length && (!others || others.length === 0)) {
+        try {
+          const { data: fallbackMembers, error: fallbackError } =
+            await supabase.rpc("get_conversation_members_secure", {
+              convo_ids: convIds,
+            });
+          if (!fallbackError && Array.isArray(fallbackMembers)) {
+            others = fallbackMembers.filter((m: any) => m.user_id !== me);
+            console.log("[Groups Debug] used fallback RPC for members, got", others?.length);
+          }
+        } catch (err: any) {
+          console.warn("[Groups Debug] fallback RPC failed", err);
+        }
+      }
+
       const otherIds = Array.from(
         new Set((others || []).map((m: any) => m.user_id))
       ).filter((id) => id && id !== me);
-      if (!otherIds.length) {
+      const suggestions = new Set<string>(
+        otherIds.filter((id) => id && id !== me)
+      );
+
+      const { data: ownedConnections } = await supabase
+        .from("connections")
+        .select("id")
+        .eq("owner_id", me)
+        .in("type", ["contact", "pin"]);
+
+      const connectionIds = (ownedConnections || []).map((conn: any) => conn.id);
+
+      if (connectionIds.length) {
+        const { data: contactRows } = await supabase
+          .from("connection_contacts")
+          .select("profile_id")
+          .in("connection_id", connectionIds)
+          .not("profile_id", "is", null);
+        for (const row of contactRows || []) {
+          if (row?.profile_id) suggestions.add(row.profile_id);
+        }
+
+        const { data: pinRows } = await supabase
+          .from("connection_pins")
+          .select("pinned_profile_id")
+          .in("connection_id", connectionIds)
+          .not("pinned_profile_id", "is", null);
+        for (const row of pinRows || []) {
+          if (row?.pinned_profile_id) suggestions.add(row.pinned_profile_id);
+        }
+      }
+
+      const suggestionIds = Array.from(suggestions)
+        .filter((id) => id && id !== me)
+        .slice(0, 60);
+      console.log("[Groups Debug] conversation IDs", convIds);
+      console.log("[Groups Debug] connection/contact IDs", suggestionIds);
+
+      console.log("[Groups Debug] conversation IDs", convIds);
+      console.log("[Groups Debug] connection/contact IDs", suggestionIds);
+
+      if (!suggestionIds.length) {
         setCohostSuggestions([]);
         return;
       }
@@ -490,8 +645,7 @@ export default function CreateGroupPage() {
       const { data: profiles } = await supabase
         .from("profiles")
         .select("id, username, profile_title, avatar_url")
-        .in("id", otherIds)
-        .limit(60);
+        .in("id", suggestionIds);
 
       const people: Person[] = (profiles || []).map((p: any) => ({
         id: p.id,
@@ -500,6 +654,7 @@ export default function CreateGroupPage() {
         avatar_url: p.avatar_url || null,
       }));
 
+      console.log("[Groups Debug] filtered suggestions", people.map((p) => p.id));
       setCohostSuggestions(people);
       setCohostProfiles((prev) => {
         const next = { ...prev };
@@ -509,6 +664,7 @@ export default function CreateGroupPage() {
         return next;
       });
     } catch (error) {
+      console.error("[Groups Debug] error fetching suggestions", error);
       console.warn("Failed to load co-host suggestions", error);
       setCohostSuggestions([]);
     } finally {
@@ -517,6 +673,7 @@ export default function CreateGroupPage() {
   }, [supabase]);
 
   React.useEffect(() => {
+    console.log("[Groups Debug] effect run");
     loadCohostSuggestions();
   }, [loadCohostSuggestions]);
 
@@ -606,13 +763,14 @@ export default function CreateGroupPage() {
         const { data, error } = await supabase
           .from("groups")
           .select(
-            "id, title, description, category_id, start_time, end_time, location_text, location_lat, location_lng, postcode, max_attendees, house_rules, provided_items, is_public, cover_image_url, cohost_ids"
+            "id, title, description, category_id, start_time, end_time, location_text, location_lat, location_lng, postcode, additional_details, display_details_on_day, max_attendees, house_rules, provided_items, is_public, cover_image_url, cohost_ids, status"
           )
           .eq("id", groupId)
           .single();
 
         if (error || !data) return;
 
+        const row: Record<string, any> = data;
         setFormData((prev) => ({
           ...prev,
           title: data.title || "",
@@ -630,6 +788,10 @@ export default function CreateGroupPage() {
               ? (data as any).location_lng
               : null,
           postcode: data.postcode || "",
+          additional_details: data.additional_details || "",
+          display_details_on_day: (data.additional_details || "").trim()
+            ? data.display_details_on_day ?? true
+            : false,
           max_attendees: data.max_attendees ? String(data.max_attendees) : "",
           house_rules: data.house_rules?.length ? data.house_rules : [""],
           provided_items: data.provided_items?.length
@@ -638,7 +800,9 @@ export default function CreateGroupPage() {
           is_public: data.is_public ?? true,
           cover_image_url: data.cover_image_url || null,
           cohost_ids: Array.isArray(data.cohost_ids) ? data.cohost_ids : [],
+          show_on_map: row.show_on_map ?? true,
         }));
+        setPublishedStatus(data.status === "published");
 
         const coverUrl = resolveCoverUrl(data.cover_image_url);
         if (coverUrl) setCoverImagePreview(coverUrl);
@@ -749,18 +913,18 @@ export default function CreateGroupPage() {
 
         if (canceled || !mapContainerRef.current) return;
 
-        const map = new maplibregl.Map({
-          container: mapContainerRef.current,
-          style,
-          center: [-0.1276, 51.5072],
-          zoom: 15,
-          pitch: 35,
-          // @ts-expect-error antialias is supported
-          antialias: true,
-          attributionControl: false,
-          minZoom: 15,
-          maxZoom: 15,
-        });
+          const map = new maplibregl.Map({
+            container: mapContainerRef.current,
+            style,
+            center: [-0.1276, 51.5072],
+            zoom: 15,
+            pitch: 35,
+            // @ts-expect-error antialias is supported
+            antialias: true,
+            attributionControl: false,
+            minZoom: 15,
+            maxZoom: 15,
+          });
 
         map.on("load", () => {
           if (canceled) return;
@@ -899,14 +1063,30 @@ export default function CreateGroupPage() {
           setMapReady(true);
 
           // Set initial location
-          const center = map.getCenter();
-          const lat = Number(center.lat.toFixed(6));
-          const lng = Number(center.lng.toFixed(6));
-          updateField("location_lat", lat);
-          updateField("location_lng", lng);
+          const initialCenter = map.getCenter();
+          updateField("location_lat", Number(initialCenter.lat.toFixed(6)));
+          updateField("location_lng", Number(initialCenter.lng.toFixed(6)));
         });
 
         mapRef.current = map;
+
+        // Default to current user location if available
+        if (navigator?.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => {
+              if (!mapRef.current) return;
+              const lat = pos.coords.latitude;
+              const lng = pos.coords.longitude;
+              mapRef.current.setCenter([lng, lat]);
+              updateField("location_lat", Number(lat.toFixed(6)));
+              updateField("location_lng", Number(lng.toFixed(6)));
+            },
+            () => {
+              // keep default center
+            },
+            { enableHighAccuracy: true, timeout: 8000 }
+          );
+        }
       } catch (error) {
         console.error("Failed to initialize map:", error);
       }
@@ -974,9 +1154,24 @@ export default function CreateGroupPage() {
     setPendingNavigation(null);
   };
 
+  const handleNextStep = async (nextStep: number) => {
+    await saveDraft();
+    setStep(nextStep);
+    const idParam = searchParams.get("id") || groupId;
+    if (idParam) {
+      router.replace(`/app/activity/groups/create?id=${idParam}&step=${nextStep}`);
+    }
+  };
+
   const updateField = (field: keyof GroupFormData, value: any) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
+
+  React.useEffect(() => {
+    if (!formData.additional_details.trim() && formData.display_details_on_day) {
+      setFormData((prev) => ({ ...prev, display_details_on_day: false }));
+    }
+  }, [formData.additional_details, formData.display_details_on_day]);
 
   const updateArrayField = (
     field: "house_rules" | "provided_items",
@@ -1034,7 +1229,7 @@ export default function CreateGroupPage() {
         throw new Error("You must be logged in");
       }
 
-      const draftData = {
+        const draftData = {
         host_id: user.id,
         title: formData.title,
         description: formData.description || null,
@@ -1045,10 +1240,13 @@ export default function CreateGroupPage() {
         start_time: formData.start_time || null,
         end_time: formData.end_time || null,
         postcode: formData.postcode || null,
+        additional_details: formData.additional_details || null,
+        display_details_on_day: formData.display_details_on_day,
         max_attendees: formData.max_attendees ? parseInt(formData.max_attendees) : null,
         house_rules: formData.house_rules.filter((r) => r.trim().length > 0),
         provided_items: formData.provided_items.filter((p) => p.trim().length > 0),
         is_public: formData.is_public,
+        show_on_map: formData.show_on_map,
         status: "draft",
         cohost_ids: formData.cohost_ids || [],
       };
@@ -1081,7 +1279,7 @@ export default function CreateGroupPage() {
     }
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (publish = publishedStatus) => {
     // Prevent duplicate submissions
     if (loading) return;
 
@@ -1096,6 +1294,7 @@ export default function CreateGroupPage() {
         throw new Error("You must be logged in");
       }
 
+      const targetStatus = publish ? "published" : "draft";
       const groupData = {
         host_id: user.id,
         title: formData.title,
@@ -1110,6 +1309,8 @@ export default function CreateGroupPage() {
         location_lat: formData.location_lat,
         location_lng: formData.location_lng,
         postcode: formData.postcode || null,
+        additional_details: formData.additional_details || null,
+        display_details_on_day: formData.display_details_on_day,
         max_attendees: formData.max_attendees
           ? parseInt(formData.max_attendees)
           : null,
@@ -1118,8 +1319,9 @@ export default function CreateGroupPage() {
           (p) => p.trim().length > 0
         ),
         is_public: formData.is_public,
+        show_on_map: formData.show_on_map,
         cover_image_url: formData.cover_image_url || null,
-        status: "draft",
+        status: targetStatus,
         cohost_ids: Array.isArray(formData.cohost_ids)
           ? formData.cohost_ids.slice(0, 3)
           : [],
@@ -1150,7 +1352,8 @@ export default function CreateGroupPage() {
       // Clear localStorage after successful creation
       localStorage.removeItem(STORAGE_KEY);
 
-      router.push(`/app/activity/groups/manage?tab=Drafts`);
+      const destinationTab = publish ? "Published" : "Drafts";
+      router.push(`/app/activity/groups/manage?tab=${destinationTab}`);
     } catch (error) {
       console.error("Failed to create group", error);
       alert(
@@ -1168,11 +1371,26 @@ export default function CreateGroupPage() {
 
     // Check if start time is in the past (when date is today)
     const now = new Date();
+    const isEditing = Boolean(groupId || searchParams.get("id"));
+    const startAt = toLocalDateTime(startDate, startTime);
+    const endLimit = noEndTime
+      ? (() => {
+          if (!startDate) return undefined;
+          const midnight = new Date(startDate);
+          midnight.setHours(24, 0, 0, 0);
+          return midnight;
+        })()
+      : toLocalDateTime(endDate, endTime);
+    const isInProgress =
+      !!startAt && !!endLimit && now >= startAt && now < endLimit;
     if (isSameLocalDay(startDate, now)) {
       const currentTime = `${String(now.getHours()).padStart(2, "0")}:${String(
         now.getMinutes()
       ).padStart(2, "0")}`;
       if (startTime < currentTime) {
+        if (isEditing && isInProgress) {
+          return { valid: true };
+        }
         return {
           valid: false,
           startTimeError: "Event start cannot be in the past",
@@ -1245,7 +1463,7 @@ export default function CreateGroupPage() {
     <div className="flex flex-col gap-6 px-4 pb-[calc(72px+env(safe-area-inset-bottom))] overflow-hidden">
       <div className="flex items-center justify-between">
         <h1 className="text-4xl font-extrabold tracking-tight">
-          {groupId || searchParams.get("id") ? "Edit Group" : "Create Group"}
+          {groupId || searchParams.get("id") ? "Edit group" : "Create group"}
         </h1>
       </div>
 
@@ -1267,28 +1485,11 @@ export default function CreateGroupPage() {
         {step === 1 && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold">Group Basics</h2>
+              <h2 className="text-2xl font-bold">Group basics</h2>
               <div className="flex items-center gap-2">
                 <Button
-                  variant="outline"
-                  size="icon"
-                  className="rounded-full w-9 h-9"
-                  onClick={() => handleNavigation(() => router.back())}
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                </Button>
-                <Button
                   size="sm"
-                  onClick={async () => {
-                    await saveDraft();
-                    const nextStep = step + 1;
-                    setStep(nextStep);
-                    // Update URL with new step to prevent flicker
-                    const idParam = searchParams.get("id") || groupId;
-                    if (idParam) {
-                      router.replace(`/app/activity/groups/create?id=${idParam}&step=${nextStep}`);
-                    }
-                  }}
+                  onClick={() => handleNextStep(step + 1)}
                   disabled={!canProceed()}
                   className="rounded-full"
                 >
@@ -1315,7 +1516,7 @@ export default function CreateGroupPage() {
               </div>
 
               <div className="rounded-lg bg-secondary/30 p-4 space-y-2">
-                <Label>Category</Label>
+                <Label>Type of group</Label>
                 <Select
                   value={formData.category_id}
                   onValueChange={(value) => updateField("category_id", value)}
@@ -1329,13 +1530,10 @@ export default function CreateGroupPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectGroup>
-                      <SelectLabel>Categories</SelectLabel>
+                      <SelectLabel>Group type</SelectLabel>
                       {categories.map((cat) => (
                         <SelectItem key={cat.id} value={cat.id}>
-                          <div className="flex items-center gap-2">
-                            {getIconForCategory(cat.name)}
-                            {cat.name}
-                          </div>
+                          {cat.name}
                         </SelectItem>
                       ))}
                     </SelectGroup>
@@ -1371,7 +1569,7 @@ export default function CreateGroupPage() {
               />
 
               <div className="rounded-lg bg-secondary/30 p-4 space-y-2">
-                <Label>Cover Image</Label>
+                <Label>Cover image</Label>
                 <div className="flex flex-col gap-3">
                   {coverImagePreview && (
                     <div
@@ -1427,6 +1625,27 @@ export default function CreateGroupPage() {
                 />
               )}
             </div>
+            <div className="flex flex-col gap-2">
+              <Button
+                className="w-full rounded-lg"
+                onClick={() => handleNextStep(step + 1)}
+                disabled={!canProceed()}
+              >
+                Save and continue
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+              <Button
+                variant="secondary"
+                className="w-full rounded-lg"
+                onClick={async () => {
+                  await saveDraft();
+                  router.push("/app/activity/groups/manage?tab=Drafts");
+                }}
+              >
+                Save and exit
+                <LogOut className="ml-2 h-4 w-4" />
+              </Button>
+            </div>
           </div>
         )}
 
@@ -1434,7 +1653,7 @@ export default function CreateGroupPage() {
         {step === 2 && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold">When & Where</h2>
+              <h2 className="text-2xl font-bold">When & where</h2>
               <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
@@ -1454,15 +1673,7 @@ export default function CreateGroupPage() {
                 </Button>
                 <Button
                   size="sm"
-                  onClick={async () => {
-                    await saveDraft();
-                    const nextStep = step + 1;
-                    setStep(nextStep);
-                    const idParam = searchParams.get("id") || groupId;
-                    if (idParam) {
-                      router.replace(`/app/activity/groups/create?id=${idParam}&step=${nextStep}`);
-                    }
-                  }}
+                  onClick={() => handleNextStep(step + 1)}
                   disabled={!canProceed()}
                   className="rounded-full"
                 >
@@ -1531,6 +1742,23 @@ export default function CreateGroupPage() {
 
               <div className="rounded-lg bg-secondary/30 p-4 space-y-3">
                 <Label className="px-1">End</Label>
+                <div className="flex items-center justify-between pt-1">
+                  <Label htmlFor="no-end-time" className="cursor-pointer">
+                    No fixed end time
+                  </Label>
+                  <Switch
+                    id="no-end-time"
+                    checked={noEndTime}
+                    onCheckedChange={(checked) => {
+                      setNoEndTime(checked);
+                      if (checked) {
+                        setEndDate(undefined);
+                        setEndTime("18:00");
+                        updateField("end_time", "");
+                      }
+                    }}
+                  />
+                </div>
                 <div className="flex flex-row items-center gap-4">
                   <div className="flex flex-1">
                     <Popover open={openEndDate} onOpenChange={setOpenEndDate}>
@@ -1594,23 +1822,6 @@ export default function CreateGroupPage() {
                     {endTimeError}
                   </p>
                 )}
-                <div className="flex items-center gap-2 pt-1">
-                  <Switch
-                    id="no-end-time"
-                    checked={noEndTime}
-                    onCheckedChange={(checked) => {
-                      setNoEndTime(checked);
-                      if (checked) {
-                        setEndDate(undefined);
-                        setEndTime("18:00");
-                        updateField("end_time", "");
-                      }
-                    }}
-                  />
-                  <Label htmlFor="no-end-time" className="cursor-pointer">
-                    No fixed end time
-                  </Label>
-                </div>
               </div>
 
               <div className="rounded-lg bg-secondary/30 p-4 space-y-3">
@@ -1622,7 +1833,7 @@ export default function CreateGroupPage() {
                 </div>
                 <div
                   ref={mapContainerRef}
-                  className="h-64 w-full overflow-hidden rounded-md border bg-muted touch-none transition-opacity duration-500"
+                  className="h-64 w-full overflow-hidden rounded-md bg-muted touch-none transition-opacity duration-500"
                   style={{
                     opacity: mapReady ? 1 : 0,
                   }}
@@ -1630,21 +1841,102 @@ export default function CreateGroupPage() {
                 <p className="text-xs text-muted-foreground">
                   {formData.location_lat != null &&
                   formData.location_lng != null
-                    ? `Pinned: ${formData.location_lat.toFixed(
-                        6
-                      )}, ${formData.location_lng.toFixed(6)}`
+                    ? `Pinned: ${
+                        locationArea ||
+                        `${formData.location_lat.toFixed(
+                          6
+                        )}, ${formData.location_lng.toFixed(6)}`
+                      }`
                     : "Drag the map to position the pin where you're meeting."}
                 </p>
               </div>
 
               <div className="rounded-lg bg-secondary/30 p-4 space-y-2">
-                <Label>Postcode (Optional)</Label>
+                <Label>
+                  Description{" "}
+                  <span className="text-muted-foreground">(Optional)</span>
+                </Label>
+                <Input
+                  placeholder="e.g. St Giles Hotel"
+                  value={formData.location_text}
+                  onChange={(e) => updateField("location_text", e.target.value)}
+                />
+              </div>
+
+              <div className="rounded-lg bg-secondary/30 p-4 space-y-2">
+                <Label>
+                  Postcode{" "}
+                  <span className="text-muted-foreground">(Optional)</span>
+                </Label>
                 <Input
                   placeholder="e.g., SW1A 1AA"
                   value={formData.postcode}
                   onChange={(e) => updateField("postcode", e.target.value)}
                 />
               </div>
+
+              <div className="rounded-lg bg-secondary/30 p-4 space-y-3">
+                <Label>
+                  Additional details{" "}
+                  <span className="text-muted-foreground">(Optional)</span>
+                </Label>
+                <InputGroup>
+                  <InputGroupTextarea
+                    placeholder="e.g. Door open, flat 34b"
+                    value={formData.additional_details}
+                    onChange={(e) => {
+                      const nextValue = e.target.value;
+                      updateField("additional_details", nextValue);
+                      if (!nextValue.trim()) {
+                        updateField("display_details_on_day", false);
+                      }
+                    }}
+                    maxLength={1000}
+                    className="min-h-[120px]"
+                  />
+                  <InputGroupAddon align="block-end">
+                    <InputGroupText className="text-[10px]">
+                      Hidden from the listing
+                    </InputGroupText>
+                  </InputGroupAddon>
+                </InputGroup>
+                <div className="flex items-center gap-2 pt-1">
+                  <Switch
+                    id="display-details-on-day"
+                    checked={formData.display_details_on_day}
+                    onCheckedChange={(checked) =>
+                      updateField("display_details_on_day", checked)
+                    }
+                  />
+                  <Label
+                    htmlFor="display-details-on-day"
+                    className="cursor-pointer"
+                  >
+                    Display to attendees on the day
+                  </Label>
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Button
+                className="w-full rounded-lg"
+                onClick={() => handleNextStep(step + 1)}
+                disabled={!canProceed()}
+              >
+                Save and continue
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+              <Button
+                variant="secondary"
+                className="w-full rounded-lg"
+                onClick={async () => {
+                  await saveDraft();
+                  router.push("/app/activity/groups/manage?tab=Drafts");
+                }}
+              >
+                Save and exit
+                <LogOut className="ml-2 h-4 w-4" />
+              </Button>
             </div>
           </div>
         )}
@@ -1653,7 +1945,7 @@ export default function CreateGroupPage() {
         {step === 3 && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold">Details</h2>
+              <h2 className="text-2xl font-bold">The event</h2>
               <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
@@ -1673,15 +1965,7 @@ export default function CreateGroupPage() {
                 </Button>
                 <Button
                   size="sm"
-                  onClick={async () => {
-                    await saveDraft();
-                    const nextStep = step + 1;
-                    setStep(nextStep);
-                    const idParam = searchParams.get("id") || groupId;
-                    if (idParam) {
-                      router.replace(`/app/activity/groups/create?id=${idParam}&step=${nextStep}`);
-                    }
-                  }}
+                  onClick={() => handleNextStep(step + 1)}
                   className="rounded-full"
                 >
                   Next
@@ -1691,37 +1975,19 @@ export default function CreateGroupPage() {
             </div>
             <div className="space-y-4">
               <div className="rounded-lg bg-secondary/30 p-4 space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="space-y-1">
-                    <Label>Cohosts</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Invite up to 3 co-hosts to help manage the group.
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={loadCohostSuggestions}
-                    disabled={cohostLoading}
-                    className="h-8 rounded-full text-xs"
-                  >
-                    {cohostLoading ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <UserPlus className="h-4 w-4" />
-                    )}
-                    <span className="ml-2">Refresh</span>
-                  </Button>
+                <div className="space-y-1">
+                  <Label>Co-hosts</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Invite up to 3 co-hosts to help manage the group.
+                  </p>
                 </div>
 
                 <div className="flex flex-wrap gap-2">
                   {selectedCohosts.length ? (
                     selectedCohosts.map((person) => {
-                      const avatar = resolveAvatarUrl(person.avatar_url);
-                      const rawName =
-                        person.profile_title?.trim() || person.username;
-                      const displayName = truncatedLabel(rawName);
+                      const avatarUrl = getAvatarProxyUrl(person.avatar_url) ?? undefined;
+                      const displayName = person.profile_title?.trim() || person.username || "Unknown";
+                      const truncatedName = truncatedLabel(displayName, 16);
                       return (
                         <button
                           key={person.id}
@@ -1730,14 +1996,14 @@ export default function CreateGroupPage() {
                           className="group inline-flex items-center gap-2 rounded-full border border-input bg-background px-3 py-1.5 text-sm shadow-sm transition hover:border-destructive/60 hover:text-destructive"
                         >
                           <Avatar className="h-7 w-7">
-                            {avatar ? (
-                              <AvatarImage src={avatar} alt={rawName} />
+                            {avatarUrl ? (
+                              <AvatarImage src={avatarUrl} alt={displayName} />
                             ) : null}
                             <AvatarFallback className="text-[10px]">
-                              {initialsFrom(rawName)}
+                              {initialsFrom(displayName)}
                             </AvatarFallback>
                           </Avatar>
-                          <span className="font-medium">{displayName}</span>
+                          <span className="font-medium">{truncatedName}</span>
                           <X className="h-3 w-3 text-muted-foreground transition group-hover:text-destructive" />
                         </button>
                       );
@@ -1759,12 +2025,23 @@ export default function CreateGroupPage() {
                     </span>
                   </div>
                   <div className="flex gap-2 overflow-x-auto px-4 pb-2 -mx-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-                    {cohostSuggestions.length ? (
-                      cohostSuggestions.slice(0, 14).map((person) => {
-                        const avatar = resolveAvatarUrl(person.avatar_url);
-                        const rawName =
-                          person.profile_title?.trim() || person.username;
-                        const displayName = truncatedLabel(rawName);
+                    {cohostLoading ? (
+                      <>
+                        {Array.from({ length: 3 }).map((_, i) => (
+                          <div
+                            key={`skeleton-${i}`}
+                            className="shrink-0 inline-flex items-center gap-2 rounded-full border border-input bg-background px-3 py-1.5"
+                          >
+                            <Skeleton className="h-7 w-7 rounded-full" />
+                            <Skeleton className="h-4 w-20" />
+                          </div>
+                        ))}
+                      </>
+                    ) : filteredCohostSuggestions.length ? (
+                      filteredCohostSuggestions.map((person) => {
+                        const avatarUrl = getAvatarProxyUrl(person.avatar_url) ?? undefined;
+                        const displayName = person.profile_title?.trim() || person.username || "Unknown";
+                        const truncatedName = truncatedLabel(displayName, 16);
                         const disabled =
                           (formData.cohost_ids || []).includes(person.id) ||
                           (formData.cohost_ids || []).length >= 3;
@@ -1781,14 +2058,14 @@ export default function CreateGroupPage() {
                             }`}
                           >
                             <Avatar className="h-7 w-7">
-                              {avatar ? (
-                                <AvatarImage src={avatar} alt={rawName} />
+                              {avatarUrl ? (
+                                <AvatarImage src={avatarUrl} alt={displayName} />
                               ) : null}
                               <AvatarFallback className="text-[10px]">
-                                {initialsFrom(rawName)}
+                                {initialsFrom(displayName)}
                               </AvatarFallback>
                             </Avatar>
-                            <span className="font-medium">{displayName}</span>
+                            <span className="font-medium">{truncatedName}</span>
                           </button>
                         );
                       })
@@ -1804,7 +2081,7 @@ export default function CreateGroupPage() {
 
               <div className="rounded-lg bg-secondary/30 p-4 space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label>Max Attendees</Label>
+                  <Label>Max attendees</Label>
                   <div className="flex items-center">
                     <Button
                       type="button"
@@ -1861,7 +2138,7 @@ export default function CreateGroupPage() {
               </div>
 
               <div className="rounded-lg bg-secondary/30 p-4 space-y-3">
-                <Label>Provided Items</Label>
+                <Label>Available items</Label>
                 <div className="space-y-2">
                   {formData.provided_items.map((item, idx) => (
                     <div key={idx} className="relative">
@@ -1877,7 +2154,7 @@ export default function CreateGroupPage() {
                         }
                         className="pr-9"
                       />
-                      {formData.provided_items.length > 1 && item && (
+                      {item && (
                         <Button
                           type="button"
                           variant="ghost"
@@ -1887,7 +2164,7 @@ export default function CreateGroupPage() {
                           }
                           className="text-destructive hover:text-destructive focus-visible:ring-ring/50 absolute inset-y-0 right-0 rounded-l-none hover:bg-transparent"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <XCircle className="h-4 w-4" />
                           <span className="sr-only">Remove item</span>
                         </Button>
                       )}
@@ -1914,37 +2191,66 @@ export default function CreateGroupPage() {
                       "Beers",
                       "Playroom",
                       "Toys",
-                    ].map((suggestion) => (
-                      <button
-                        key={suggestion}
-                        type="button"
-                        onClick={() => {
-                          // Find first empty slot or add new one
-                          const emptyIndex = formData.provided_items.findIndex(
-                            (item) => !item.trim()
-                          );
-                          if (emptyIndex !== -1) {
-                            updateArrayField(
-                              "provided_items",
-                              emptyIndex,
-                              suggestion
+                    ]
+                      .filter(
+                        (suggestion) =>
+                          !formData.provided_items.some(
+                            (item) =>
+                              item.trim().toLowerCase() ===
+                              suggestion.toLowerCase()
+                          )
+                      )
+                      .map((suggestion) => (
+                        <button
+                          key={suggestion}
+                          type="button"
+                          onClick={() => {
+                            // Find first empty slot or add new one
+                            const emptyIndex = formData.provided_items.findIndex(
+                              (item) => !item.trim()
                             );
-                          } else {
-                            updateField("provided_items", [
-                              ...formData.provided_items,
-                              suggestion,
-                            ]);
-                          }
-                        }}
-                        className="shrink-0 px-3 py-1.5 text-xs font-medium rounded-full border border-input bg-background hover:bg-muted transition-colors"
-                      >
-                        {suggestion}
-                      </button>
-                    ))}
+                            if (emptyIndex !== -1) {
+                              updateArrayField(
+                                "provided_items",
+                                emptyIndex,
+                                suggestion
+                              );
+                            } else {
+                              updateField("provided_items", [
+                                ...formData.provided_items,
+                                suggestion,
+                              ]);
+                            }
+                          }}
+                          className="shrink-0 px-3 py-1.5 text-xs font-medium rounded-full border border-input bg-background hover:bg-muted transition-colors"
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
                     <div className="w-0 shrink-0" />
                   </div>
                 </div>
               </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Button
+                className="w-full rounded-lg"
+                onClick={() => handleNextStep(step + 1)}
+              >
+                Save and continue
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+              <Button
+                variant="secondary"
+                className="w-full rounded-lg"
+                onClick={async () => {
+                  await saveDraft();
+                  router.push("/app/activity/groups/manage?tab=Drafts");
+                }}
+              >
+                Save and exit
+                <LogOut className="ml-2 h-4 w-4" />
+              </Button>
             </div>
           </div>
         )}
@@ -1953,7 +2259,7 @@ export default function CreateGroupPage() {
         {step === 4 && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold">House Rules</h2>
+              <h2 className="text-2xl font-bold">House rules</h2>
               <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
@@ -1973,15 +2279,7 @@ export default function CreateGroupPage() {
                 </Button>
                 <Button
                   size="sm"
-                  onClick={async () => {
-                    await saveDraft();
-                    const nextStep = step + 1;
-                    setStep(nextStep);
-                    const idParam = searchParams.get("id") || groupId;
-                    if (idParam) {
-                      router.replace(`/app/activity/groups/create?id=${idParam}&step=${nextStep}`);
-                    }
-                  }}
+                  onClick={() => handleNextStep(step + 1)}
                   className="rounded-full"
                 >
                   Next
@@ -1991,7 +2289,7 @@ export default function CreateGroupPage() {
             </div>
             <div className="space-y-4">
               <div className="rounded-lg bg-secondary/30 p-4 space-y-3">
-                <Label>House Rules</Label>
+                <Label>House rules</Label>
                 <div className="space-y-2">
                   {formData.house_rules.map((rule, idx) => (
                     <div key={idx} className="relative">
@@ -2003,7 +2301,7 @@ export default function CreateGroupPage() {
                         }
                         className="pr-9"
                       />
-                      {formData.house_rules.length > 1 && rule && (
+                      {rule && (
                         <Button
                           type="button"
                           variant="ghost"
@@ -2011,7 +2309,7 @@ export default function CreateGroupPage() {
                           onClick={() => removeArrayField("house_rules", idx)}
                           className="text-destructive hover:text-destructive focus-visible:ring-ring/50 absolute inset-y-0 right-0 rounded-l-none hover:bg-transparent"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <XCircle className="h-4 w-4" />
                           <span className="sr-only">Remove rule</span>
                         </Button>
                       )}
@@ -2038,37 +2336,66 @@ export default function CreateGroupPage() {
                       "No photos",
                       "Safe words required",
                       "Consent is key",
-                    ].map((suggestion) => (
-                      <button
-                        key={suggestion}
-                        type="button"
-                        onClick={() => {
-                          // Find first empty slot or add new one
-                          const emptyIndex = formData.house_rules.findIndex(
-                            (item) => !item.trim()
-                          );
-                          if (emptyIndex !== -1) {
-                            updateArrayField(
-                              "house_rules",
-                              emptyIndex,
-                              suggestion
+                    ]
+                      .filter(
+                        (suggestion) =>
+                          !formData.house_rules.some(
+                            (item) =>
+                              item.trim().toLowerCase() ===
+                              suggestion.toLowerCase()
+                          )
+                      )
+                      .map((suggestion) => (
+                        <button
+                          key={suggestion}
+                          type="button"
+                          onClick={() => {
+                            // Find first empty slot or add new one
+                            const emptyIndex = formData.house_rules.findIndex(
+                              (item) => !item.trim()
                             );
-                          } else {
-                            updateField("house_rules", [
-                              ...formData.house_rules,
-                              suggestion,
-                            ]);
-                          }
-                        }}
-                        className="shrink-0 px-3 py-1.5 text-xs font-medium rounded-full border border-input bg-background hover:bg-muted transition-colors"
-                      >
-                        {suggestion}
-                      </button>
-                    ))}
+                            if (emptyIndex !== -1) {
+                              updateArrayField(
+                                "house_rules",
+                                emptyIndex,
+                                suggestion
+                              );
+                            } else {
+                              updateField("house_rules", [
+                                ...formData.house_rules,
+                                suggestion,
+                              ]);
+                            }
+                          }}
+                          className="shrink-0 px-3 py-1.5 text-xs font-medium rounded-full border border-input bg-background hover:bg-muted transition-colors"
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
                     <div className="w-0 shrink-0" />
                   </div>
                 </div>
               </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Button
+                className="w-full rounded-lg"
+                onClick={() => handleNextStep(step + 1)}
+              >
+                Save and continue
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+              <Button
+                variant="secondary"
+                className="w-full rounded-lg"
+                onClick={async () => {
+                  await saveDraft();
+                  router.push("/app/activity/groups/manage?tab=Drafts");
+                }}
+              >
+                Save and exit
+                <LogOut className="ml-2 h-4 w-4" />
+              </Button>
             </div>
           </div>
         )}
@@ -2096,7 +2423,7 @@ export default function CreateGroupPage() {
                 </Button>
                 <Button
                   size="sm"
-                  onClick={handleSubmit}
+                  onClick={() => handleSubmit(publishedStatus)}
                   disabled={loading}
                   className="rounded-full"
                 >
@@ -2104,29 +2431,82 @@ export default function CreateGroupPage() {
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     <>
-                      Create
+                      {groupId ? "Save" : "Create"}
                       <Check className="h-4 w-4 ml-2" />
                     </>
                   )}
                 </Button>
               </div>
             </div>
-            <div className="flex items-center justify-between p-3 rounded-lg border">
-              <div>
-                <p className="font-medium">Make Public</p>
-                <p className="text-sm text-muted-foreground">
-                  Allow others to discover this group
-                </p>
+            <div className="rounded-lg bg-secondary/30 p-4 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-medium">Make public</p>
+                  <p className="text-sm text-muted-foreground">
+                    Allow others to discover this group
+                  </p>
+                </div>
+                <Switch
+                  checked={formData.is_public}
+                  onCheckedChange={(checked) =>
+                    updateField("is_public", checked)
+                  }
+                />
               </div>
-              <Switch
-                checked={formData.is_public}
-                onCheckedChange={(checked) => updateField("is_public", checked)}
-              />
             </div>
 
-            <div className="text-sm text-muted-foreground p-3 bg-muted rounded-lg">
-              Your group will be saved as a draft. You can edit details and
-              publish when ready.
+            <div className="rounded-lg bg-secondary/30 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-medium">Show on map</p>
+                  <p className="text-xs text-muted-foreground">
+                    Display pin on the main map
+                  </p>
+                </div>
+                <Switch
+                  checked={formData.show_on_map}
+                  onCheckedChange={(checked) =>
+                    updateField("show_on_map", checked)
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-secondary/30 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium">Published status</p>
+                  <p className="text-sm text-muted-foreground">
+                    Publish this group right after saving
+                  </p>
+                </div>
+                <Switch
+                  checked={publishedStatus}
+                  onCheckedChange={(checked) => setPublishedStatus(checked)}
+                />
+              </div>
+              {!publishedStatus && (
+                <p className="text-xs text-muted-foreground">
+                  Your group will be saved as a draft. You can edit details and
+                  publish when ready.
+                </p>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Button
+                className="w-full rounded-lg"
+                onClick={() => handleSubmit(publishedStatus)}
+                disabled={loading}
+              >
+                {groupId
+                  ? publishedStatus
+                    ? "Edit and publish right away"
+                    : "Edit and save draft"
+                  : publishedStatus
+                  ? "Create and publish"
+                  : "Create and save as draft"}
+              </Button>
             </div>
           </div>
         )}

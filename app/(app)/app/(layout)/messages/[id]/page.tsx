@@ -198,8 +198,7 @@ const mergeMessages = (prev: Message[], incoming: Message[]) => {
     const keepBody =
       !msg.body && Boolean(msg.ciphertext) && Boolean(prevMsg.body);
     const keepReplyBody = !msg.reply_to_body && Boolean(prevMsg.reply_to_body);
-    const keepMessageType =
-      !msg.message_type && Boolean(prevMsg.message_type);
+    const keepMessageType = !msg.message_type && Boolean(prevMsg.message_type);
     const keepMetadata =
       (msg.metadata == null ||
         (typeof msg.metadata === "object" &&
@@ -1060,8 +1059,12 @@ export default function ConversationPage() {
   const pendingReceiptsRef = useRef<
     Record<string, { delivered_at: string | null; read_at: string | null }>
   >({});
-  const { status, ensureConversationKey, getConversationKey, refreshDeviceKeys } =
-    useE2EE();
+  const {
+    status,
+    ensureConversationKey,
+    getConversationKey,
+    refreshDeviceKeys,
+  } = useE2EE();
   const receiptsChannelRef = useRef<ReturnType<
     ReturnType<typeof createClient>["channel"]
   > | null>(null);
@@ -1738,7 +1741,8 @@ export default function ConversationPage() {
                           body: parsed.body ?? m.body,
                           message_type: parsed.message_type ?? m.message_type,
                           metadata: parsed.metadata ?? m.metadata,
-                          reply_to_body: parsed.reply_to_body ?? m.reply_to_body,
+                          reply_to_body:
+                            parsed.reply_to_body ?? m.reply_to_body,
                         }
                       : m
                   )
@@ -1757,7 +1761,8 @@ export default function ConversationPage() {
               }
             }
           } else if (showE2EEDebug) {
-            const messageText = err instanceof Error ? err.message : String(err);
+            const messageText =
+              err instanceof Error ? err.message : String(err);
             setLastDecryptError(`${message.id}: ${messageText}`);
           }
           // ignore decryption failures after retry
@@ -4143,7 +4148,7 @@ export default function ConversationPage() {
                     if (el) dateChipRefs.current.set(m.id, el);
                     else dateChipRefs.current.delete(m.id);
                   }}
-                  className="sticky top-[10px] z-30 w-full flex justify-center pointer-events-none transition-opacity duration-200"
+                  className="sticky top-2.5 z-30 w-full flex justify-center pointer-events-none transition-opacity duration-200"
                 >
                   <div className="rounded-full bg-background/70 px-3 py-1 text-xs text-muted-foreground backdrop-blur-sm">
                     {dateLabel}
@@ -4164,502 +4169,512 @@ export default function ConversationPage() {
                 style={isFocused ? messageStyle : undefined}
                 data-message-id={m.id}
               >
-              {showPicker && (
-                <>
-                  <div
-                    className={`absolute top-0 z-50 ${
-                      isMe ? "right-0" : "left-0"
-                    }`}
-                    ref={reactionMenuRef}
-                    onClick={(e) => e.stopPropagation()}
-                    style={{ transform: "translateY(calc(-100% - 8px))" }}
-                  >
-                    <div className="flex items-center gap-1 rounded-full border bg-background/95 px-2 py-1 shadow-lg backdrop-blur pointer-events-auto">
-                      {REACTIONS.map((r, idx) => {
-                        const isActive = myReaction === r.type;
-                        return (
-                          <div
-                            key={r.type}
-                            role="button"
-                            tabIndex={0}
-                            className={`p-2 text-xl leading-none rounded-full transition pointer-events-auto ${
-                              isActive ? "bg-muted" : "hover:bg-muted"
-                            }`}
-                            data-reaction={r.type}
-                            onPointerDown={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              void handleReactionToggle(m, r.type);
-                            }}
-                            onMouseDown={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              void handleReactionToggle(m, r.type);
-                            }}
-                            onTouchStart={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              void handleReactionToggle(m, r.type);
-                            }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void handleReactionToggle(m, r.type);
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === " ") {
+                {showPicker && (
+                  <>
+                    <div
+                      className={`absolute top-0 z-50 ${
+                        isMe ? "right-0" : "left-0"
+                      }`}
+                      ref={reactionMenuRef}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ transform: "translateY(calc(-100% - 8px))" }}
+                    >
+                      <div className="flex items-center gap-1 rounded-full border bg-background/95 px-2 py-1 shadow-lg backdrop-blur pointer-events-auto">
+                        {REACTIONS.map((r, idx) => {
+                          const isActive = myReaction === r.type;
+                          return (
+                            <div
+                              key={r.type}
+                              role="button"
+                              tabIndex={0}
+                              className={`p-2 text-xl leading-none rounded-full transition pointer-events-auto ${
+                                isActive ? "bg-muted" : "hover:bg-muted"
+                              }`}
+                              data-reaction={r.type}
+                              onPointerDown={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
                                 void handleReactionToggle(m, r.type);
-                              }
-                            }}
-                          >
-                            <AnimatedEmoji
-                              src={r.src}
-                              fallback={r.emoji}
-                              size={20}
-                              delayMs={idx * 80}
-                              playOnce
-                              restAtEnd
-                              restFrameFraction={r.restFrameFraction}
-                            />
-                          </div>
-                        );
-                      })}
+                              }}
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                void handleReactionToggle(m, r.type);
+                              }}
+                              onTouchStart={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                void handleReactionToggle(m, r.type);
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleReactionToggle(m, r.type);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  void handleReactionToggle(m, r.type);
+                                }
+                              }}
+                            >
+                              <AnimatedEmoji
+                                src={r.src}
+                                fallback={r.emoji}
+                                size={20}
+                                delayMs={idx * 80}
+                                playOnce
+                                restAtEnd
+                                restFrameFraction={r.restFrameFraction}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                  <div
-                    className={`absolute bottom-0 z-50 ${
-                      isMe ? "right-0" : "left-0"
-                    }`}
-                    ref={actionMenuRef}
-                    style={{ transform: "translateY(calc(100% + 8px))" }}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div className="rounded-lg border bg-background/95 shadow-lg backdrop-blur min-w-[180px]">
-                      <div className="py-1">
-                        <button
-                          className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            console.log(
-                              "Reply button clicked for message:",
-                              m.id
-                            );
-                            handleMessageAction("reply", m);
-                            setReactionTargetId(null);
-                          }}
-                        >
-                          <Reply className="h-4 w-4" />
-                          Reply
-                        </button>
-                        <button
-                          className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleMessageAction("copy", m);
-                            setReactionTargetId(null);
-                          }}
-                        >
-                          <Copy className="h-4 w-4" />
-                          Copy message
-                        </button>
-                        <button
-                          className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleMessageAction("translate", m);
-                            setReactionTargetId(null);
-                          }}
-                        >
-                          <Languages className="h-4 w-4" />
-                          Translate
-                        </button>
-                        {isMe && (
+                    <div
+                      className={`absolute bottom-0 z-50 ${
+                        isMe ? "right-0" : "left-0"
+                      }`}
+                      ref={actionMenuRef}
+                      style={{ transform: "translateY(calc(100% + 8px))" }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="rounded-lg border bg-background/95 shadow-lg backdrop-blur min-w-[180px]">
+                        <div className="py-1">
                           <button
                             className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleMessageAction("info", m);
+                              console.log(
+                                "Reply button clicked for message:",
+                                m.id
+                              );
+                              handleMessageAction("reply", m);
                               setReactionTargetId(null);
                             }}
                           >
-                            <Info className="h-4 w-4" />
-                            Info
+                            <Reply className="h-4 w-4" />
+                            Reply
                           </button>
-                        )}
-                        {isMe && (
-                          <div className="my-1 border-t border-border" />
-                        )}
-                        {isMe && (
                           <button
-                            className="flex w-full items-center gap-2 px-3 py-2 text-sm text-destructive hover:bg-destructive/10 transition-colors"
+                            className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleMessageAction("delete", m);
+                              handleMessageAction("copy", m);
                               setReactionTargetId(null);
                             }}
                           >
-                            <Trash2 className="h-4 w-4" />
-                            Delete
+                            <Copy className="h-4 w-4" />
+                            Copy message
                           </button>
-                        )}
+                          <button
+                            className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleMessageAction("translate", m);
+                              setReactionTargetId(null);
+                            }}
+                          >
+                            <Languages className="h-4 w-4" />
+                            Translate
+                          </button>
+                          {isMe && (
+                            <button
+                              className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMessageAction("info", m);
+                                setReactionTargetId(null);
+                              }}
+                            >
+                              <Info className="h-4 w-4" />
+                              Info
+                            </button>
+                          )}
+                          {isMe && (
+                            <div className="my-1 border-t border-border" />
+                          )}
+                          {isMe && (
+                            <button
+                              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-destructive hover:bg-destructive/10 transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMessageAction("delete", m);
+                                setReactionTargetId(null);
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Delete
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </>
-              )}
-              {floatingReactions
-                .filter((fr) => fr.messageId === m.id)
-                .map((fr) => {
-                  const meta = reactionMeta[fr.type];
-                  const fallback = meta?.emoji ?? "★";
-                  return (
-                    <div
-                      key={fr.id}
-                      className="absolute pointer-events-none z-30"
-                      style={{
-                        left: isMe ? "auto" : "50%",
-                        right: isMe ? "50%" : "auto",
-                        bottom: "20%",
-                        animation: "floatUp 1.5s ease-out forwards",
-                      }}
-                    >
+                  </>
+                )}
+                {floatingReactions
+                  .filter((fr) => fr.messageId === m.id)
+                  .map((fr) => {
+                    const meta = reactionMeta[fr.type];
+                    const fallback = meta?.emoji ?? "★";
+                    return (
                       <div
+                        key={fr.id}
+                        className="absolute pointer-events-none z-30"
                         style={{
-                          animation: "fadeOut 1.5s ease-out forwards",
-                          transform: "scale(1.5)",
+                          left: isMe ? "auto" : "50%",
+                          right: isMe ? "50%" : "auto",
+                          bottom: "20%",
+                          animation: "floatUp 1.5s ease-out forwards",
                         }}
                       >
-                        <AnimatedEmoji
-                          src={meta?.src ?? ""}
-                          fallback={fallback}
-                          size={48}
-                          playOnce
-                          restAtEnd
-                          restFrameFraction={meta?.restFrameFraction}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              {(() => {
-                const bubble = (
-                  <div
-                    className={`relative rounded-lg ${
-                      m.message_type === "location" ||
-                      m.message_type === "link" ||
-                      m.message_type === "group"
-                        ? "p-2 w-[75%] sm:w-[65%] lg:w-[55%]"
-                        : "px-3 py-2 max-w-[75%] sm:max-w-[65%] lg:max-w-[55%]"
-                    } ${
-                      isMe
-                        ? "bg-primary text-white rounded-br-none"
-                        : "bg-muted text-foreground rounded-bl-none"
-                    } transition-all duration-300 ease-out overflow-hidden pointer-events-auto`}
-                    onMouseDown={(e) => {
-                      if (e.button !== 0) return;
-                      startLongPress(m.id);
-                    }}
-                    onMouseUp={cancelLongPress}
-                    onMouseLeave={cancelLongPress}
-                    onTouchStart={() => startLongPress(m.id)}
-                    onTouchEnd={cancelLongPress}
-                    onTouchCancel={cancelLongPress}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      setReactionTargetId(m.id);
-                    }}
-                    onDoubleClick={(e) => {
-                      e.stopPropagation();
-                      void handleReactionToggle(m, "heart");
-                    }}
-                  >
-                    {m.reply_to_id && m.reply_to_body ? (
-                      <div
-                        className={`mb-2 rounded px-2 py-1.5 border-l-2 ${
-                          isMe
-                            ? "bg-white/20 border-white/40"
-                            : "bg-black/10 border-black/30"
-                        }`}
-                      >
                         <div
-                          className={`text-[10px] font-semibold mb-0.5 ${
-                            isMe ? "text-white/90" : "text-foreground/80"
-                          }`}
+                          style={{
+                            animation: "fadeOut 1.5s ease-out forwards",
+                            transform: "scale(1.5)",
+                          }}
                         >
-                          {m.reply_to_sender_id === currentUserId
-                            ? "You"
-                            : participantName || "Them"}
-                        </div>
-                        <div
-                          className={`text-xs line-clamp-2 ${
-                            isMe ? "text-white/80" : "text-foreground/70"
-                          }`}
-                        >
-                          {m.reply_to_body}
+                          <AnimatedEmoji
+                            src={meta?.src ?? ""}
+                            fallback={fallback}
+                            size={48}
+                            playOnce
+                            restAtEnd
+                            restFrameFraction={meta?.restFrameFraction}
+                          />
                         </div>
                       </div>
-                    ) : null}
+                    );
+                  })}
+                {(() => {
+                  const bubble = (
+                    <div
+                      className={`relative rounded-lg ${
+                        m.message_type === "location" ||
+                        m.message_type === "link" ||
+                        m.message_type === "group"
+                          ? "p-2 w-[75%] sm:w-[65%] lg:w-[55%]"
+                          : "px-3 py-2 max-w-[75%] sm:max-w-[65%] lg:max-w-[55%]"
+                      } ${
+                        isMe
+                          ? "bg-primary text-white rounded-br-none"
+                          : "bg-muted text-foreground rounded-bl-none"
+                      } transition-all duration-300 ease-out overflow-hidden pointer-events-auto`}
+                      onMouseDown={(e) => {
+                        if (e.button !== 0) return;
+                        startLongPress(m.id);
+                      }}
+                      onMouseUp={cancelLongPress}
+                      onMouseLeave={cancelLongPress}
+                      onTouchStart={() => startLongPress(m.id)}
+                      onTouchEnd={cancelLongPress}
+                      onTouchCancel={cancelLongPress}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setReactionTargetId(m.id);
+                      }}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        void handleReactionToggle(m, "heart");
+                      }}
+                    >
+                      {m.reply_to_id && m.reply_to_body ? (
+                        <div
+                          className={`mb-2 rounded px-2 py-1.5 border-l-2 ${
+                            isMe
+                              ? "bg-white/20 border-white/40"
+                              : "bg-black/10 border-black/30"
+                          }`}
+                        >
+                          <div
+                            className={`text-[10px] font-semibold mb-0.5 ${
+                              isMe ? "text-white/90" : "text-foreground/80"
+                            }`}
+                          >
+                            {m.reply_to_sender_id === currentUserId
+                              ? "You"
+                              : participantName || "Them"}
+                          </div>
+                          <div
+                            className={`text-xs line-clamp-2 ${
+                              isMe ? "text-white/80" : "text-foreground/70"
+                            }`}
+                          >
+                            {m.reply_to_body}
+                          </div>
+                        </div>
+                      ) : null}
 
-                    {/* Group message content */}
-                    {m.message_type === "group" && m.metadata?.group ? (
-                      <div className="w-full">
-                        <GroupMessageCard group={m.metadata.group} isMe={isMe} />
-                      </div>
-                    ) : /* Link message content */
-                    m.message_type === "link" && m.metadata?.link ? (
-                      <div className="w-full">
-                        <LinkPreview
-                          link={m.metadata.link}
-                          onClick={() => {
-                            if (m.metadata?.link?.url) {
-                              setViewingLinkUrl(m.metadata.link.url);
-                              setLinkViewerDrawerOpen(true);
-                            }
-                          }}
-                          isMe={isMe}
-                        />
-                      </div>
-                    ) : /* Location message content */
-                    m.message_type === "location" && m.metadata?.location ? (
-                      <div className="space-y-2 w-full">
-                        {/* Static map preview */}
-                        <StaticMapPreview
-                          location={{
-                            lat: m.metadata.location.lat,
-                            lng: m.metadata.location.lng,
-                          }}
-                          onClick={() => {
-                            if (m.metadata?.location) {
-                              setViewingLocation({
-                                lat: m.metadata.location.lat,
-                                lng: m.metadata.location.lng,
-                                address: m.metadata.location.address,
-                              });
-                              setViewLocationModalOpen(true);
-                            }
-                          }}
-                        />
-                        {/* Address text */}
-                        {m.metadata.location.address && (
-                          <p className="text-xs text-muted-foreground truncate">
-                            {m.metadata.location.address}
-                          </p>
-                        )}
-                      </div>
-                  ) : (
-                      <p className="text-sm leading-relaxed wrap-break-word">
-                        {m.body && m.body.length > 0
-                          ? m.body
-                          : m.ciphertext
+                      {/* Group message content */}
+                      {m.message_type === "group" && m.metadata?.group ? (
+                        <div className="w-full">
+                          <GroupMessageCard
+                            group={m.metadata.group}
+                            isMe={isMe}
+                          />
+                        </div>
+                      ) : /* Link message content */
+                      m.message_type === "link" && m.metadata?.link ? (
+                        <div className="w-full">
+                          <LinkPreview
+                            link={m.metadata.link}
+                            onClick={() => {
+                              if (m.metadata?.link?.url) {
+                                setViewingLinkUrl(m.metadata.link.url);
+                                setLinkViewerDrawerOpen(true);
+                              }
+                            }}
+                            isMe={isMe}
+                          />
+                        </div>
+                      ) : /* Location message content */
+                      m.message_type === "location" && m.metadata?.location ? (
+                        <div className="space-y-2 w-full">
+                          {/* Static map preview */}
+                          <StaticMapPreview
+                            location={{
+                              lat: m.metadata.location.lat,
+                              lng: m.metadata.location.lng,
+                            }}
+                            onClick={() => {
+                              if (m.metadata?.location) {
+                                setViewingLocation({
+                                  lat: m.metadata.location.lat,
+                                  lng: m.metadata.location.lng,
+                                  address: m.metadata.location.address,
+                                });
+                                setViewLocationModalOpen(true);
+                              }
+                            }}
+                          />
+                          {/* Address text */}
+                          {m.metadata.location.address && (
+                            <p className="text-xs text-muted-foreground truncate">
+                              {m.metadata.location.address}
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-sm leading-relaxed wrap-break-word">
+                          {m.body && m.body.length > 0
+                            ? m.body
+                            : m.ciphertext
                             ? "Encrypted message"
                             : ""}
-                      </p>
-                    )}
+                        </p>
+                      )}
 
-                    {translations[m.id] && (
-                      <div
-                        className={`mt-2 pt-2 border-t ${
-                          isMe ? "border-white/20" : "border-black/20"
-                        }`}
-                      >
-                        {translations[m.id].isLoading ? (
-                          <div
-                            className={`text-xs ${
-                              isMe ? "text-white/70" : "text-foreground/60"
-                            }`}
-                          >
-                            {modelState === "loading" && loadingProgress.text ? (
-                              <div className="flex items-center gap-2">
-                                <span className="italic">
-                                  {loadingProgress.text}
-                                </span>
-                                {loadingProgress.progress > 0 && (
-                                  <span className="font-semibold">
-                                    {loadingProgress.progress}%
-                                  </span>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="italic">
-                                {translations[m.id].loadingMessage ||
-                                  "Translating..."}
-                              </span>
-                            )}
-                          </div>
-                        ) : translations[m.id].error ? (
-                          <div
-                            className={`text-xs italic ${
-                              isMe ? "text-red-200" : "text-red-600"
-                            }`}
-                          >
-                            {translations[m.id].error}
-                          </div>
-                        ) : (
-                          <>
-                            <div className="flex items-center justify-between gap-2 mb-1">
-                              <div
-                                className={`text-[10px] font-semibold ${
-                                  isMe ? "text-white/70" : "text-foreground/60"
-                                }`}
-                              >
-                                {translations[m.id].detectedLanguage
-                                  ? `Translated from ${
-                                      translations[m.id].detectedLanguage
-                                    }`
-                                  : "Translation"}
-                              </div>
-                              {translations[m.id].detectedLanguage &&
-                                (() => {
-                                  const normalizedLang = normalizeLanguage(
-                                    translations[m.id].detectedLanguage!
-                                  );
-                                  return (
-                                    autoTranslateLanguages.has(normalizedLang) &&
-                                    latestTranslatedMessageByLanguage[
-                                      translations[m.id].detectedLanguage!
-                                    ] === m.id
-                                  );
-                                })() && (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      const rawLang =
-                                        translations[m.id].detectedLanguage;
-                                      if (rawLang) {
-                                        const normalizedLang =
-                                          normalizeLanguage(rawLang);
-                                        setStoppedAutoTranslateLanguages(
-                                          (prev) => {
-                                            const next = new Set(prev);
-                                            next.add(normalizedLang);
-                                            return next;
-                                          }
-                                        );
-                                        setAutoTranslateLanguages((prev) => {
-                                          const next = new Set(prev);
-                                          next.delete(normalizedLang);
-                                          return next;
-                                        });
-                                        toast.success(
-                                          `Stopped auto-translating ${rawLang}`
-                                        );
-                                      }
-                                    }}
-                                    className={`text-[9px] px-1.5 py-0.5 rounded transition-colors ${
-                                      isMe
-                                        ? "bg-white/20 hover:bg-white/30 text-white"
-                                        : "bg-black/10 hover:bg-black/20 text-foreground/70"
-                                    }`}
-                                  >
-                                    Stop auto-translate
-                                  </button>
-                                )}
-                            </div>
-                            <p
-                              className={`text-sm leading-relaxed wrap-break-word ${
-                                isMe ? "text-white/90" : "text-foreground/90"
+                      {translations[m.id] && (
+                        <div
+                          className={`mt-2 pt-2 border-t ${
+                            isMe ? "border-white/20" : "border-black/20"
+                          }`}
+                        >
+                          {translations[m.id].isLoading ? (
+                            <div
+                              className={`text-xs ${
+                                isMe ? "text-white/70" : "text-foreground/60"
                               }`}
                             >
-                              {translations[m.id].translatedText}
-                            </p>
+                              {modelState === "loading" &&
+                              loadingProgress.text ? (
+                                <div className="flex items-center gap-2">
+                                  <span className="italic">
+                                    {loadingProgress.text}
+                                  </span>
+                                  {loadingProgress.progress > 0 && (
+                                    <span className="font-semibold">
+                                      {loadingProgress.progress}%
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="italic">
+                                  {translations[m.id].loadingMessage ||
+                                    "Translating..."}
+                                </span>
+                              )}
+                            </div>
+                          ) : translations[m.id].error ? (
+                            <div
+                              className={`text-xs italic ${
+                                isMe ? "text-red-200" : "text-red-600"
+                              }`}
+                            >
+                              {translations[m.id].error}
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex items-center justify-between gap-2 mb-1">
+                                <div
+                                  className={`text-[10px] font-semibold ${
+                                    isMe
+                                      ? "text-white/70"
+                                      : "text-foreground/60"
+                                  }`}
+                                >
+                                  {translations[m.id].detectedLanguage
+                                    ? `Translated from ${
+                                        translations[m.id].detectedLanguage
+                                      }`
+                                    : "Translation"}
+                                </div>
+                                {translations[m.id].detectedLanguage &&
+                                  (() => {
+                                    const normalizedLang = normalizeLanguage(
+                                      translations[m.id].detectedLanguage!
+                                    );
+                                    return (
+                                      autoTranslateLanguages.has(
+                                        normalizedLang
+                                      ) &&
+                                      latestTranslatedMessageByLanguage[
+                                        translations[m.id].detectedLanguage!
+                                      ] === m.id
+                                    );
+                                  })() && (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const rawLang =
+                                          translations[m.id].detectedLanguage;
+                                        if (rawLang) {
+                                          const normalizedLang =
+                                            normalizeLanguage(rawLang);
+                                          setStoppedAutoTranslateLanguages(
+                                            (prev) => {
+                                              const next = new Set(prev);
+                                              next.add(normalizedLang);
+                                              return next;
+                                            }
+                                          );
+                                          setAutoTranslateLanguages((prev) => {
+                                            const next = new Set(prev);
+                                            next.delete(normalizedLang);
+                                            return next;
+                                          });
+                                          toast.success(
+                                            `Stopped auto-translating ${rawLang}`
+                                          );
+                                        }
+                                      }}
+                                      className={`text-[9px] px-1.5 py-0.5 rounded transition-colors ${
+                                        isMe
+                                          ? "bg-white/20 hover:bg-white/30 text-white"
+                                          : "bg-black/10 hover:bg-black/20 text-foreground/70"
+                                      }`}
+                                    >
+                                      Stop auto-translate
+                                    </button>
+                                  )}
+                              </div>
+                              <p
+                                className={`text-sm leading-relaxed wrap-break-word ${
+                                  isMe ? "text-white/90" : "text-foreground/90"
+                                }`}
+                              >
+                                {translations[m.id].translatedText}
+                              </p>
+                            </>
+                          )}
+                        </div>
+                      )}
+                      <div
+                        className={`mt-1 text-xs flex items-center gap-2 ${
+                          isMe ? "text-blue-100" : "text-muted-foreground"
+                        }`}
+                        style={{
+                          justifyContent: isMe
+                            ? "space-between"
+                            : "space-between",
+                        }}
+                      >
+                        {isMe ? (
+                          <>
+                            <div className="flex-1 flex items-center gap-1">
+                              {reactionChip}
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <span>
+                                {new Date(m.created_at).toLocaleTimeString(
+                                  undefined,
+                                  {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                    hour12: false,
+                                  }
+                                )}
+                              </span>
+                              {m.read_at ? (
+                                <CheckCheck className="h-3.5 w-3.5 text-white" />
+                              ) : m.delivered_at ? (
+                                <div className="flex gap-0.5">
+                                  <Check className="h-3.5 w-3.5 text-white/70" />
+                                  <Check className="h-3.5 w-3.5 text-white/70" />
+                                </div>
+                              ) : (
+                                <Check className="h-3.5 w-3.5 text-white/70" />
+                              )}
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="flex items-center gap-1">
+                              <span>
+                                {new Date(m.created_at).toLocaleTimeString(
+                                  undefined,
+                                  {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                    hour12: false,
+                                  }
+                                )}
+                              </span>
+                            </div>
+                            {reactionChip}
                           </>
                         )}
                       </div>
-                    )}
-                    <div
-                      className={`mt-1 text-xs flex items-center gap-2 ${
-                        isMe ? "text-blue-100" : "text-muted-foreground"
-                      }`}
-                      style={{
-                        justifyContent: isMe ? "space-between" : "space-between",
-                      }}
-                    >
-                      {isMe ? (
-                        <>
-                          <div className="flex-1 flex items-center gap-1">
-                            {reactionChip}
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <span>
-                              {new Date(m.created_at).toLocaleTimeString(
-                                undefined,
-                                {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                  hour12: false,
-                                }
-                              )}
-                            </span>
-                            {m.read_at ? (
-                              <CheckCheck className="h-3.5 w-3.5 text-white" />
-                            ) : m.delivered_at ? (
-                              <div className="flex gap-0.5">
-                                <Check className="h-3.5 w-3.5 text-white/70" />
-                                <Check className="h-3.5 w-3.5 text-white/70" />
-                              </div>
-                            ) : (
-                              <Check className="h-3.5 w-3.5 text-white/70" />
-                            )}
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="flex items-center gap-1">
-                            <span>
-                              {new Date(m.created_at).toLocaleTimeString(
-                                undefined,
-                                {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                  hour12: false,
-                                }
-                              )}
-                            </span>
-                          </div>
-                          {reactionChip}
-                        </>
-                      )}
-                    </div>
-                  </div>
-                );
-
-                if (m.deleted_at) {
-                  return (
-                    <div
-                      className={`text-sm italic text-muted-foreground px-3 py-2 ${
-                        isMe ? "text-right" : "text-left"
-                      }`}
-                    >
-                      Message deleted
                     </div>
                   );
-                }
 
-                if (isGroupConversation && !isMe) {
-                  return (
-                    <div className="flex items-end gap-2">
-                      <Avatar className="h-7 w-7 shrink-0">
-                        {m.profiles?.avatar_url ? (
-                          <AvatarImage
-                            src={
-                              getAvatarProxyUrl(m.profiles.avatar_url) ??
-                              undefined
-                            }
-                            alt={m.profiles?.profile_title || "User"}
-                          />
-                        ) : null}
-                        <AvatarFallback className="text-[10px]">
-                          {initialsFrom(m.profiles?.profile_title || "U")}
-                        </AvatarFallback>
-                      </Avatar>
-                      {bubble}
-                    </div>
-                  );
-                }
+                  if (m.deleted_at) {
+                    return (
+                      <div
+                        className={`text-sm italic text-muted-foreground px-3 py-2 ${
+                          isMe ? "text-right" : "text-left"
+                        }`}
+                      >
+                        Message deleted
+                      </div>
+                    );
+                  }
 
-                return bubble;
-              })()}
+                  if (isGroupConversation && !isMe) {
+                    return (
+                      <div className="flex items-end gap-2">
+                        <Avatar className="h-7 w-7 shrink-0">
+                          {m.profiles?.avatar_url ? (
+                            <AvatarImage
+                              src={
+                                getAvatarProxyUrl(m.profiles.avatar_url) ??
+                                undefined
+                              }
+                              alt={m.profiles?.profile_title || "User"}
+                            />
+                          ) : null}
+                          <AvatarFallback className="text-[10px]">
+                            {initialsFrom(m.profiles?.profile_title || "U")}
+                          </AvatarFallback>
+                        </Avatar>
+                        {bubble}
+                      </div>
+                    );
+                  }
+
+                  return bubble;
+                })()}
               </div>
             </Fragment>
           );
@@ -5167,9 +5182,9 @@ export default function ConversationPage() {
 
             {/* Overlaid send button */}
             <div className="absolute bottom-4 left-4 right-4 z-20 pointer-events-auto">
-                <Button
-                  onClick={async () => {
-                    if (!selectedLocation || !conversationId) return;
+              <Button
+                onClick={async () => {
+                  if (!selectedLocation || !conversationId) return;
 
                   const payload = {
                     body:
